@@ -32,6 +32,13 @@ const organizationRoutes = require("./routes/organizationRoutes");
 const salaryStructureRoutes = require("./routes/salaryStructureRoutes");
 const salaryComponentRoutes = require("./routes/salaryComponentRoutes");
 const userRoutes = require("./routes/userRoutes");
+const emailRoutes = require("./routes/emailRoutes");
+const smsRoutes = require("./routes/smsRoutes");
+const biometricRoutes = require("./routes/biometricRoutes");
+const branchRoutes = require('./routes/branchRoutes');
+const orgChartRoutes = require('./routes/orgChartRoutes');
+const holidayRoutes = require("./routes/holidayRoutes");
+
 const app = express();
 connectDB();
 
@@ -47,6 +54,13 @@ app.use(express.urlencoded({ extended: true }));
 app.get("/api/health", (req, res) => res.json({ status: "OK" }));
 
 
+
+app.use("/api/holiday", holidayRoutes);
+app.use('/api/organization/chart', orgChartRoutes);
+app.use('/api/organization/branches', branchRoutes);
+app.use('/api/biometric', biometricRoutes)
+app.use("/api/sms", smsRoutes);
+app.use("/api/emails", emailRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/payroll/employee-salaries", employeeSalaryRoutes);
 app.use("/api/payroll/components", salaryComponentRoutes);

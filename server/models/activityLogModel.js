@@ -4,7 +4,7 @@ const activityLogSchema = new mongoose.Schema(
     {
         user: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "Employee",
+            ref: "Employee", // ya "User", aapke auth system ke hisab se
             default: null
         },
         action: {
@@ -19,5 +19,5 @@ const activityLogSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// ✅ YEHI HAI MAIN FIX (Safe Check)
+// ✅ Safe check to prevent OverwriteModelError
 module.exports = mongoose.models.ActivityLog || mongoose.model("ActivityLog", activityLogSchema);

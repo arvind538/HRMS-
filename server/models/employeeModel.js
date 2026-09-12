@@ -28,5 +28,4 @@ const employeeSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// ✅ SAFE CHECK (Yeh error dobara nahi aane dega)
-module.exports = mongoose.models.Employee || mongoose.model("Employee", employeeSchema);
+module.exports = mongoose.model("Employee", employeeSchema);

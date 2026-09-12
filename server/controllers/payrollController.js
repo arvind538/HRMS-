@@ -76,8 +76,6 @@ const computeTax = (annualGross, regime, deductions80C = 0, deductions80D = 0, h
     let tax = 0;
 
     if (regime === "NEW") {
-        // Slabs: 0-4L: Nil, 4-8L: 5%, 8-12L: 10%, 12-16L: 15%, 16-20L: 20%, 20-24L: 25%, >24L: 30%
-        // Full rebate under 87A if taxable income <= 12,000,000 (New regime threshold)
         if (taxableIncome > 2400000) tax += (taxableIncome - 2400000) * 0.3;
         if (taxableIncome > 2000000) tax += Math.min(taxableIncome - 2000000, 400000) * 0.25;
         if (taxableIncome > 1600000) tax += Math.min(taxableIncome - 1600000, 400000) * 0.2;
@@ -85,10 +83,8 @@ const computeTax = (annualGross, regime, deductions80C = 0, deductions80D = 0, h
         if (taxableIncome > 800000) tax += Math.min(taxableIncome - 800000, 400000) * 0.1;
         if (taxableIncome > 400000) tax += Math.min(taxableIncome - 400000, 400000) * 0.05;
 
-        // Rebate check
         if (taxableIncome <= 1200000) tax = 0;
     } else {
-        // Old Regime: 0-2.5L: Nil, 2.5-5L: 5%, 5-10L: 20%, >10L: 30%
         if (taxableIncome > 1000000) tax += (taxableIncome - 1000000) * 0.3;
         if (taxableIncome > 500000) tax += Math.min(taxableIncome - 500000, 500000) * 0.2;
         if (taxableIncome > 250000) tax += Math.min(taxableIncome - 250000, 250000) * 0.05;
@@ -96,7 +92,6 @@ const computeTax = (annualGross, regime, deductions80C = 0, deductions80D = 0, h
         if (taxableIncome <= 500000) tax = 0;
     }
 
-    // 4% Health & Education Cess
     const cess = Math.round(tax * 0.04);
     const annualTax = Math.round(tax + cess);
     const monthlyTDS = Math.round(annualTax / 12);
@@ -234,7 +229,7 @@ exports.createReimbursement = async (req, res, next) => {
 // @route PUT /api/payroll/reimbursements/:id/status
 exports.updateReimbursementStatus = async (req, res, next) => {
     try {
-        const { status } = req.body; // "APPROVED" | "REJECTED" | "PAID"
+        const { status } = req.body;
         const item = await Reimbursement.findByIdAndUpdate(
             req.params.id,
             { status },
@@ -263,6 +258,7 @@ exports.deleteReimbursement = async (req, res, next) => {
         next(err);
     }
 };
+
 // @route GET /api/payroll/loans?status=&employee=
 exports.getLoans = async (req, res, next) => {
     try {
@@ -313,6 +309,36 @@ exports.createLoan = async (req, res, next) => {
         );
 
         return res.status(201).json(populated);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route PUT /api/payroll/loans/:id
+exports.updateLoan = async (req, res, next) => {
+    try {
+        const loan = await Loan.findById(req.params.id);
+        if (!loan) {
+            return res.status(404).json({ message: "Loan record nahi mila." });
+        }
+
+        const updateData = { ...req.body };
+        if (updateData.amount || updateData.emiMonths) {
+            const principal = Number(updateData.amount) || loan.principal;
+            const months = Number(updateData.emiMonths) || loan.emiMonths;
+            updateData.principal = principal;
+            updateData.emiMonths = months;
+            updateData.monthlyEmi = Math.round(principal / months);
+            updateData.remainingBalance = principal;
+        }
+
+        const updatedLoan = await Loan.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { new: true, runValidators: true }
+        ).populate("employee", "name employeeId department designation email");
+
+        return res.status(200).json(updatedLoan);
     } catch (err) {
         next(err);
     }
@@ -479,7 +505,145 @@ exports.deleteBonus = async (req, res, next) => {
     }
 };
 
-// Helper: Safely cast to valid numbers
+// ==========================================
+// EMPLOYEE SALARIES CONTROLLER FUNCTIONS (ADDED)
+// ==========================================
+
+// @route GET /api/payroll/employee-salaries
+exports.getEmployeeSalaries = async (req, res, next) => {
+    try {
+        const salaries = await EmployeeSalary.find({})
+            .populate("employee", "name employeeId department designation email")
+            .sort({ createdAt: -1 });
+
+        return res.status(200).json(salaries);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route POST /api/payroll/employee-salaries
+exports.createEmployeeSalary = async (req, res, next) => {
+    try {
+        const { employeeId, basicMonthly, grossMonthly, annualCTC, allowances, deductions } = req.body;
+
+        if (!employeeId) {
+            return res.status(400).json({ message: "Employee ID dena zaroori hai." });
+        }
+
+        const existing = await EmployeeSalary.findOne({ employee: employeeId });
+        if (existing) {
+            return res.status(400).json({ message: "Is employee ki salary mapping pehle se bani hui hai." });
+        }
+
+        const salary = await EmployeeSalary.create({
+            employee: employeeId,
+            basicMonthly: Number(basicMonthly) || 0,
+            grossMonthly: Number(grossMonthly) || 0,
+            annualCTC: Number(annualCTC) || 0,
+            allowances: allowances || {},
+            deductions: deductions || {},
+            status: "Active",
+        });
+
+        const populated = await EmployeeSalary.findById(salary._id).populate(
+            "employee",
+            "name employeeId department designation email"
+        );
+
+        return res.status(201).json(populated);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route DELETE /api/payroll/employee-salaries/:id
+exports.deleteEmployeeSalary = async (req, res, next) => {
+    try {
+        const salary = await EmployeeSalary.findByIdAndDelete(req.params.id);
+        if (!salary) {
+            return res.status(404).json({ message: "Salary mapping record nahi mila." });
+        }
+        return res.status(200).json({ message: "Salary mapping deleted successfully." });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// ==========================================
+// EXISTING UPDATE HANDLERS
+// ==========================================
+
+// @route PUT /api/payroll/deductions/:id
+exports.updateDeduction = async (req, res, next) => {
+    try {
+        const deduction = await Deduction.findById(req.params.id);
+        if (!deduction) {
+            return res.status(404).json({ message: "Deduction record nahi mila." });
+        }
+
+        const updateData = { ...req.body };
+        if (updateData.amount) {
+            updateData.amount = Number(updateData.amount);
+        }
+
+        const updatedDeduction = await Deduction.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { new: true, runValidators: true }
+        ).populate("employee", "name employeeId department designation email");
+
+        return res.status(200).json(updatedDeduction);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route PUT /api/payroll/bonuses/:id
+exports.updateBonus = async (req, res, next) => {
+    try {
+        const bonus = await Bonus.findById(req.params.id);
+        if (!bonus) {
+            return res.status(404).json({ message: "Bonus record nahi mila." });
+        }
+
+        const updateData = { ...req.body };
+        if (updateData.amount) {
+            updateData.amount = Number(updateData.amount);
+        }
+
+        const updatedBonus = await Bonus.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { new: true, runValidators: true }
+        ).populate("employee", "name employeeId department designation email");
+
+        return res.status(200).json(updatedBonus);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route PUT /api/payroll/employee-salaries/:id
+exports.updateEmployeeSalary = async (req, res, next) => {
+    try {
+        const salary = await EmployeeSalary.findById(req.params.id);
+        if (!salary) {
+            return res.status(404).json({ message: "Employee salary mapping record nahi mila." });
+        }
+
+        const updatedSalary = await EmployeeSalary.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        ).populate("employee", "name employeeId department designation email");
+
+        return res.status(200).json(updatedSalary);
+    } catch (err) {
+        next(err);
+    }
+};
+
 const parseMonthYear = (month, year) => {
     const m = Number(month);
     const y = Number(year);
@@ -529,7 +693,7 @@ exports.getPayroll = async (req, res, next) => {
     }
 };
 
-// @route POST /api/payroll/generate (Single Employee)
+// @route POST /api/payroll/generate
 exports.generatePayroll = async (req, res, next) => {
     try {
         const { employee, month, year, allowances, deductions, bonus, overtimePay } = req.body;
@@ -550,7 +714,6 @@ exports.generatePayroll = async (req, res, next) => {
             return res.status(404).json({ message: "Employee record nahi mila." });
         }
 
-        // Attendance calculation
         const startDate = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
         const endDate = new Date(Date.UTC(y, m, 0, 23, 59, 59));
 
@@ -589,7 +752,7 @@ exports.generatePayroll = async (req, res, next) => {
     }
 };
 
-// @route POST /api/payroll/generate-bulk (Batch Run across Active Staff)
+// @route POST /api/payroll/generate-bulk
 exports.generateBulkPayroll = async (req, res, next) => {
     try {
         const { month, year, department } = req.body;
@@ -647,7 +810,7 @@ exports.generateBulkPayroll = async (req, res, next) => {
     }
 };
 
-// @route PUT /api/payroll/:id (Edit allowances/deductions)
+// @route PUT /api/payroll/:id
 exports.updatePayroll = async (req, res, next) => {
     try {
         const payroll = await Payroll.findById(req.params.id);
@@ -709,7 +872,7 @@ exports.markAsPaid = async (req, res, next) => {
     }
 };
 
-// @route GET /api/payroll/payslip/:id (Single Payslip for view/print)
+// @route GET /api/payroll/payslip/:id
 exports.getPayslip = async (req, res, next) => {
     try {
         const payroll = await Payroll.findById(req.params.id).populate(
@@ -753,7 +916,7 @@ exports.getPayslip = async (req, res, next) => {
     }
 };
 
-// @route GET /api/payroll/summary?month=&year=
+// @route GET /api/payroll/summary
 exports.getPayrollSummary = async (req, res, next) => {
     try {
         const { month, year } = req.query;
@@ -780,7 +943,6 @@ exports.getPayrollSummary = async (req, res, next) => {
 };
 
 // @route GET /api/payroll/processing-queue
-// Draft aur Processed payrolls ko period ke anusaar group karke queue return karta hai
 exports.getProcessingQueue = async (req, res, next) => {
     try {
         const batches = await Payroll.aggregate([
@@ -838,7 +1000,6 @@ exports.getProcessingQueue = async (req, res, next) => {
 };
 
 // @route POST /api/payroll/disburse/:batchId
-// Batch ke saare draft/processed payrolls ko ek click me "paid" mark karta hai
 exports.disburseBatch = async (req, res, next) => {
     try {
         const { batchId } = req.params;
@@ -874,12 +1035,7 @@ exports.disburseBatch = async (req, res, next) => {
     }
 };
 
-// ==========================================
-// PAYSLIPS LIST HANDLER (ADDED)
-// ==========================================
-
-// @route GET /api/payroll/payslips?month=&year=&employee=
-// Disbursed (Paid) aur Processed payslips ki master list return karta hai
+// @route GET /api/payroll/payslips
 exports.getPayslipsList = async (req, res, next) => {
     try {
         const { month, year, employee } = req.query;
@@ -929,6 +1085,36 @@ exports.getPayslipsList = async (req, res, next) => {
         });
 
         return res.status(200).json(formatted);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route PUT /api/payroll/reimbursements/:id
+exports.updateReimbursement = async (req, res, next) => {
+    try {
+        const { employeeId, category, amount, billDate, description, receiptUrl } = req.body;
+
+        const item = await Reimbursement.findById(req.params.id);
+        if (!item) {
+            return res.status(404).json({ message: "Reimbursement record nahi mila." });
+        }
+
+        const updateData = {};
+        if (employeeId) updateData.employee = employeeId;
+        if (category) updateData.category = category;
+        if (amount !== undefined) updateData.amount = Number(amount);
+        if (billDate) updateData.billDate = billDate;
+        if (description !== undefined) updateData.description = description.trim();
+        if (receiptUrl !== undefined) updateData.receiptUrl = receiptUrl.trim();
+
+        const updatedItem = await Reimbursement.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { new: true, runValidators: true }
+        ).populate("employee", "name employeeId department designation email");
+
+        return res.status(200).json(updatedItem);
     } catch (err) {
         next(err);
     }

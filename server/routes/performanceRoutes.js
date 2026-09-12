@@ -2,6 +2,10 @@ const express = require("express");
 const router = express.Router();
 const { protect, authorize } = require("../middleware/authMiddleware");
 const ctrl = require("../controllers/performanceController");
+const { getAggregateReport } = require('../controllers/performanceController');
+
+// Yeh route frontend ke fetch call ke sath match karega: GET /api/performance/aggregate-report
+router.get('/aggregate-report', getAggregateReport);
 
 // Goals
 router.get("/goals", protect, ctrl.getGoals);

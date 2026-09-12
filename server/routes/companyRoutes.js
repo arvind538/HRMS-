@@ -1,11 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const { getCompany, updateCompany } = require("../controllers/companyController");
-const { protect, authorize } = require("../middleware/authMiddleware"); // apna auth middleware use karo agar hai
+const { protect, authorize } = require("../middleware/authMiddleware");
 
-router.get("/", getCompany);
-router.put("/", updateCompany);
-router.get("/", protect, getCompany);
-router.put("/", protect, authorize("admin"), updateCompany);
+// Public ya Protected GET route (Agar aap chahte hain ki authenticated users hi company profile dekhein)
+router.route("/")
+    .get(protect, getCompany)
+    .put(protect, authorize("admin", "hr"), updateCompany); // Admin ya HR hi company profile update kar sakte hain
 
 module.exports = router;

@@ -33,13 +33,22 @@ exports.deleteAnnouncement = async (req, res, next) => {
     }
 };
 
+
 // ===== Notifications =====
-exports.getMyNotifications = async (req, res, next) => {
+exports.getMyNotifications = async (req, res) => {
     try {
-        const notifications = await Notification.find({ recipient: req.user.id }).sort({ createdAt: -1 }).limit(50);
-        res.json(notifications);
-    } catch (err) {
-        next(err);
+        const userId = req.user.id || req.user._id;
+
+        // Debugging ke liye console log check karein
+        // console.log("Fetching notifications for User ID:", userId);
+
+        const notifications = await Notification.find({ recipient: userId })
+            .sort({ createdAt: -1 });
+
+        res.status(200).json(notifications);
+    } catch (error) {
+        console.error("Notification fetch error:", error);
+        res.status(500).json({ message: "Server error while fetching notifications" });
     }
 };
 

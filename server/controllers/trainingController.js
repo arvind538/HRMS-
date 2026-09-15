@@ -125,3 +125,52 @@ exports.addCertification = async (req, res, next) => {
         next(err);
     }
 };
+
+// Backend Controller Example (Node.js/Express)
+const enrollTraining = async (req, res) => {
+    try {
+        const { id } = req.params; // Training ID
+        const { employeeId } = req.body; // Employee ID
+
+        const training = await Training.findById(id);
+        if (!training) {
+            return res.status(404).json({ success: false, message: "Training program not found." });
+        }
+
+        // Check if already enrolled (converting both to string for safe comparison)
+        const alreadyEnrolled = training.enrolledEmployees.some(
+            (emp) => String(emp._id || emp) === String(employeeId)
+        );
+
+        if (alreadyEnrolled) {
+            return res.status(400).json({ success: false, message: "Employee is already enrolled in this training." });
+        }
+
+        // Check capacity if maxParticipants exists
+        if (training.maxParticipants && training.enrolledEmployees.length >= training.maxParticipants) {
+            return res.status(400).json({ success: false, message: "Training program is already full." });
+        }
+
+        // Push employee ID and save
+        training.enrolledEmployees.push(employeeId);
+        await training.save();
+
+        // Updated training data return karein taaki frontend sync rahe
+        const updatedTraining = await Training.findById(id).populate("enrolledEmployees");
+
+        res.status(200).json({ success: true, message: "Successfully enrolled!", data: updatedTraining });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// Backend controller example (Node.js/Express)
+const getTrainings = async (req, res) => {
+    try {
+        // .populate("enrolledEmployees") lagana zaroori hai taaki objects mil sakein
+        const trainings = await Training.find().populate("enrolledEmployees");
+        res.status(200).json({ success: true, data: trainings });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};

@@ -5,6 +5,7 @@ const ctrl = require("../controllers/documentController");
 
 router.get("/", protect, ctrl.getDocuments);
 router.post("/", protect, authorize("admin", "hr"), ctrl.uploadDocument);
+router.put("/:id", protect, authorize("admin", "hr"), ctrl.updateDocument); // <-- Yeh naya route add kiya hai
 router.delete("/:id", protect, authorize("admin", "hr"), ctrl.deleteDocument);
 
 module.exports = router;

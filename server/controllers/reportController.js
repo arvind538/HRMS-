@@ -6,22 +6,19 @@ const Candidate = require("../models/Candidate");
 const Goal = require("../models/Goal"); // Performance ke liye required
 const Appraisal = require("../models/Appraisal"); // Performance ke liye required
 
+// Backend: controllers/reportController.js (ya jahan report API hai)
 exports.getEmployeeReport = async (req, res, next) => {
     try {
-        const employees = await Employee.find().populate("department", "name");
+        const employees = await Employee.find({}).populate("department", "name");
 
         const byDepartment = {};
-        employees.forEach((e) => {
-            const dept = e.department?.name || "Unassigned";
-            byDepartment[dept] = (byDepartment[dept] || 0) + 1;
+        employees.forEach(emp => {
+            // Agar department populated hai aur uska naam hai, toh woh use karein, warna "Unassigned"
+            const deptName = emp.department?.name || emp.department || "Unassigned";
+            byDepartment[deptName] = (byDepartment[deptName] || 0) + 1;
         });
 
-        res.json({
-            totalEmployees: employees.length,
-            activeEmployees: employees.filter((e) => e.status === "active").length,
-            exitedEmployees: employees.filter((e) => e.status === "exit").length,
-            byDepartment,
-        });
+        res.status(200).json({ byDepartment });
     } catch (err) {
         next(err);
     }

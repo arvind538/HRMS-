@@ -39,6 +39,7 @@ const branchRoutes = require('./routes/branchRoutes');
 const orgChartRoutes = require('./routes/orgChartRoutes');
 const holidayRoutes = require("./routes/holidayRoutes");
 
+
 const app = express();
 connectDB();
 

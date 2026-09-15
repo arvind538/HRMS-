@@ -17,22 +17,19 @@ const calculateDays = (start, end) => {
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 };
 
-// @route GET /api/leave?employee=&status=&leaveType=
+// Server: controllers/leaveController.js
 exports.getLeaves = async (req, res, next) => {
     try {
-        const { employee, status, leaveType } = req.query;
-        const filter = {};
+        const query = {};
+        if (req.query.status) query.status = req.query.status;
+        if (req.query.employee) query.employee = req.query.employee; // Agar query me employee hai
 
-        if (employee) filter.employee = employee;
-        if (status) filter.status = status;
-        if (leaveType) filter.leaveType = leaveType;
-
-        const leaves = await Leave.find(filter)
-            .populate("employee", "name employeeId department email")
-            .populate("approvedBy", "name email")
+        const leaves = await Leave.find(query)
+            // 🌟 Yahan "user" ki jagah "employee" likhein (kyunki aapke Leave schema me employee field hai)
+            .populate("employee", "name email employeeId department designation")
             .sort({ createdAt: -1 });
 
-        return res.status(200).json(leaves);
+        res.json(leaves);
     } catch (err) {
         next(err);
     }

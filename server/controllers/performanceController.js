@@ -145,6 +145,27 @@ exports.getAggregateReport = async (req, res, next) => {
     }
 };
 
+// controllers/performanceController.js ke andar isse add karein:
+exports.updateAppraisal = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const updatedAppraisal = await Appraisal.findByIdAndUpdate(
+            id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedAppraisal) {
+            return res.status(404).json({ success: false, message: "Appraisal record not found." });
+        }
+
+        res.status(200).json({ success: true, data: updatedAppraisal });
+    } catch (error) {
+        console.error("Error updating appraisal:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
 
 
 

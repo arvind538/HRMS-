@@ -1,0 +1,407 @@
+"use client";
+
+import React, { useState, useMemo } from "react";
+import {
+  FileSpreadsheet,
+  RefreshCw,
+  Calendar,
+  AlertCircle,
+  IndianRupee,
+  Users,
+  Coins,
+  Download // ✅ Added Download icon here
+} from "lucide-react";
+import api from "@/lib/api";
+import { toast } from "react-toastify";
+
+export default function PayrollReports() {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const currentYear = new Date().getFullYear().toString();
+  const currentMonth = String(new Date().getMonth() + 1).padStart(2, "0");
+
+  const [filters, setFilters] = useState({
+    month: currentMonth,
+    year: currentYear,
+    department: "ALL",
+  });
+
+  const monthNames = [
+    { value: "01", name: "January" },
+    { value: "02", name: "February" },
+    { value: "03", name: "March" },
+    { value: "04", name: "April" },
+    { value: "05", name: "May" },
+    { value: "06", name: "June" },
+    { value: "07", name: "July" },
+    { value: "08", name: "August" },
+    { value: "09", name: "September" },
+    { value: "10", name: "October" },
+    { value: "11", name: "November" },
+    { value: "12", name: "December" },
+  ];
+
+  const handleGenerate = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setData([]);
+
+    try {
+      const params = new URLSearchParams(filters).toString();
+      const response = await api.get(`/payroll/reports?${params}`);
+
+      const resData = response?.data;
+      const list = Array.isArray(resData)
+        ? resData
+        : Array.isArray(resData?.data)
+          ? resData.data
+          : [];
+
+      setData(list);
+
+      if (list.length === 0) {
+        toast.info(`No processed payrolls found for ${filters.month}/${filters.year}.`);
+      } else {
+        toast.success(`Payroll register compiled with ${list.length} records.`);
+      }
+    } catch (err) {
+      console.error("Report generation error:", err);
+      const errMsg =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        "Failed to compile payroll register from server.";
+      setError(errMsg);
+      toast.error(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const exportCSV = () => {
+    if (data.length === 0) {
+      toast.warn("No data available to export.");
+      return;
+    }
+
+    const headers = [
+      "Employee ID",
+      "Employee Name",
+      "Department",
+      "Gross Salary (INR)",
+      "Bonuses (INR)",
+      "Total Deductions (INR)",
+      "TDS Withheld (INR)",
+      "Net Payout (INR)",
+      "Disbursement Status"
+    ];
+
+    const rows = data.map((r) => [
+      `"${r.userId || "—"}"`,
+      `"${r.userName || "Unknown"}"`,
+      `"${r.department || "—"}"`,
+      `"${r.gross || 0}"`,
+      `"${r.bonus || 0}"`,
+      `"${r.deductions || 0}"`,
+      `"${r.tds || 0}"`,
+      `"${r.netPay || 0}"`,
+      `"${r.status || "—"}"`
+    ]);
+
+    const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Payroll_Register_${filters.department}_${filters.month}_${filters.year}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    toast.success("CSV Export Downloaded!");
+  };
+
+  // Aggregate Metrics based on current fetched data
+  const totalNetPayout = useMemo(() => {
+    return data.reduce((sum, r) => sum + (Number(r.netPay) || 0), 0);
+  }, [data]);
+
+  const totalTdsWithheld = useMemo(() => {
+    return data.reduce((sum, r) => sum + (Number(r.tds) || 0), 0);
+  }, [data]);
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 font-sans">
+      {/* Top Banner Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                Payroll Register & Audit Reports
+              </h1>
+            </div>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+              Compile monthly disbursement ledgers, verify payouts, and export bank/tax compliance CSV statements
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={exportCSV}
+          disabled={data.length === 0 || loading}
+          className="self-start sm:self-auto inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-xl shadow-xs transition"
+        >
+          <Download className="w-4 h-4" />
+          <span>Export CSV Statement</span>
+        </button>
+      </div>
+
+      {/* Filter Form Controls */}
+      <form
+        onSubmit={handleGenerate}
+        className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-end"
+      >
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+            Target Month
+          </label>
+          <select
+            value={filters.month}
+            onChange={(e) => setFilters({ ...filters, month: e.target.value })}
+            className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+          >
+            {monthNames.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+            Financial Year
+          </label>
+          <input
+            type="number"
+            min="2020"
+            max="2035"
+            required
+            value={filters.year}
+            onChange={(e) => setFilters({ ...filters, year: e.target.value })}
+            className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+            Department Filter
+          </label>
+          <select
+            value={filters.department}
+            onChange={(e) => setFilters({ ...filters, department: e.target.value })}
+            className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="ALL">All Departments</option>
+            <option value="IT">Engineering & Tech</option>
+            <option value="HR">Human Resources</option>
+            <option value="FINANCE">Finance</option>
+            <option value="SALES">Sales & Marketing</option>
+          </select>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-xs"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          {loading ? "Compiling Ledger..." : "Generate Ledger"}
+        </button>
+      </form>
+
+      {/* KPI Overview (Shown only when data is generated) */}
+      {!loading && !error && data.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Total Net Disbursement
+              </p>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">
+                ₹{totalNetPayout.toLocaleString("en-IN")}
+              </h3>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <IndianRupee className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                TDS Withheld (Compliance)
+              </p>
+              <h3 className="text-xl font-bold text-rose-600 mt-1">
+                ₹{totalTdsWithheld.toLocaleString("en-IN")}
+              </h3>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+              <Coins className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                Employees Compiled
+              </p>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">
+                {data.length} Records
+              </h3>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Report Results */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        {loading ? (
+          <div className="py-24 text-center space-y-3">
+            <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
+            <p className="text-sm font-semibold text-slate-800">Compiling financial ledgers...</p>
+            <p className="text-xs text-slate-500">This may take a moment for large datasets.</p>
+          </div>
+        ) : error ? (
+          <div className="py-16 text-center max-w-md mx-auto p-6">
+            <AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-2" />
+            <h3 className="text-sm font-bold text-slate-900">Failed to Compile Report</h3>
+            <p className="text-xs text-slate-500 mt-1 mb-4">{error}</p>
+          </div>
+        ) : data.length === 0 ? (
+          <div className="py-24 text-center max-w-sm mx-auto p-6">
+            <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <h3 className="text-sm font-bold text-slate-800">No Processed Data Found</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Select a valid Month/Year and click 'Generate Ledger' to view bank payout records.
+              Draft payrolls will not appear here.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                    <th className="py-3.5 px-6">Employee Code & Name</th>
+                    <th className="py-3.5 px-6">Department</th>
+                    <th className="py-3.5 px-6">Gross Pay</th>
+                    <th className="py-3.5 px-6">Bonus</th>
+                    <th className="py-3.5 px-6">Deductions</th>
+                    <th className="py-3.5 px-6">Tax / TDS</th>
+                    <th className="py-3.5 px-6 font-bold text-slate-900">Net Take-Home</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {data.map((r, idx) => (
+                    <tr key={r._id || idx} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-4 px-6">
+                        <div className="font-semibold text-slate-900 leading-tight">
+                          {r.userName}
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                          {r.userId}
+                        </div>
+                      </td>
+                      <td className="py-4 px-6 text-slate-600 text-xs font-medium">
+                        {r.department}
+                      </td>
+                      <td className="py-4 px-6 font-medium text-slate-700">
+                        ₹{(r.gross || 0).toLocaleString("en-IN")}
+                      </td>
+                      <td className="py-4 px-6 font-medium text-emerald-600">
+                        +₹{(r.bonus || 0).toLocaleString("en-IN")}
+                      </td>
+                      <td className="py-4 px-6 font-medium text-rose-600">
+                        -₹{(r.deductions || 0).toLocaleString("en-IN")}
+                      </td>
+                      <td className="py-4 px-6 font-medium text-amber-600">
+                        -₹{(r.tds || 0).toLocaleString("en-IN")}
+                      </td>
+                      <td className="py-4 px-6 font-extrabold text-indigo-700 text-base">
+                        ₹{(r.netPay || 0).toLocaleString("en-IN")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {data.map((r, idx) => (
+                <div key={r._id || idx} className="p-4 space-y-3 bg-white">
+                  <div>
+                    <h4 className="font-semibold text-slate-900 text-sm">{r.userName}</h4>
+                    <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                      <span>{r.userId}</span>
+                      <span>• {r.department}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1.5 text-xs">
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Gross Salary:</span>
+                      <span className="font-medium text-slate-800">
+                        ₹{(r.gross || 0).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                    {r.bonus > 0 && (
+                      <div className="flex justify-between items-center text-slate-600">
+                        <span>Bonuses:</span>
+                        <span className="font-medium text-emerald-600">
+                          +₹{r.bonus.toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center text-slate-600">
+                      <span>Total Deductions:</span>
+                      <span className="font-medium text-rose-600">
+                        -₹{(r.deductions || 0).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                    {r.tds > 0 && (
+                      <div className="flex justify-between items-center text-slate-600">
+                        <span>TDS Withheld:</span>
+                        <span className="font-medium text-amber-600">
+                          -₹{r.tds.toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center text-slate-900 font-bold pt-1.5 mt-1.5 border-t border-slate-200/60">
+                      <span>Net Disbursement:</span>
+                      <span className="text-indigo-600 text-sm font-black">
+                        ₹{(r.netPay || 0).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search,
   ChevronLeft,
@@ -8,17 +8,15 @@ import {
   AlertCircle,
   RefreshCw,
   Loader2,
-  UserCircle2,
 } from 'lucide-react';
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
-// Roles that can see everyone's attendance sheet. Anyone else only sees their own row.
 const PRIVILEGED_ROLES = ["admin", "hr"];
 
 export default function MonthlyAttendance() {
   const { user, loading: authLoading } = useAuth();
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // 1-12
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [searchTerm, setSearchTerm] = useState('');
   const [groupedData, setGroupedData] = useState([]);
@@ -31,15 +29,12 @@ export default function MonthlyAttendance() {
   const role = user?.role?.toLowerCase() || null;
   const roleChecked = !authLoading;
   const isPrivileged = role && PRIVILEGED_ROLES.includes(role);
-  // The logged-in person's own employee id (adjust if your AuthContext stores it elsewhere)
-  const myEmployeeId = user?.employee || user?._id || user?.id || null;
 
   const fetchMonthlyData = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMsg(null);
 
-      // Fetching monthly records from backend
       const { data } = await api.get("/attendance", {
         params: { month: selectedMonth, year: selectedYear },
       });
@@ -48,15 +43,16 @@ export default function MonthlyAttendance() {
       const employeeMap = {};
 
       records.forEach((rec) => {
-        // Safe extraction of employee object or ID
         const empObj = rec.employee && typeof rec.employee === "object" ? rec.employee : null;
         const empId = empObj?._id || empObj?.id || (typeof rec.employee === "string" ? rec.employee : null);
-
         if (!empId) return;
 
         if (!employeeMap[empId]) {
+          // Safe extraction for employee code/ID with multiple fallbacks
+          const resolvedCode = empObj?.employeeId || empObj?.empId || empObj?.code || (typeof empId === 'string' ? empId.slice(-6) : "—");
+
           employeeMap[empId] = {
-            employee: empObj || { _id: empId, name: "Staff Member", employeeId: empId.slice(-6) },
+            employee: empObj ? { ...empObj, employeeId: resolvedCode } : { _id: empId, name: "Staff Member", employeeId: resolvedCode },
             days: {},
             totalPresent: 0,
             totalLate: 0,
@@ -64,10 +60,8 @@ export default function MonthlyAttendance() {
           };
         }
 
-        // Extract day safely from record date
         const recDate = new Date(rec.date || rec.createdAt);
         const day = recDate.getDate();
-
         const status = (rec.status || "present").toLowerCase();
         employeeMap[empId].days[day] = status;
 
@@ -100,10 +94,12 @@ export default function MonthlyAttendance() {
   }, [selectedMonth, selectedYear]);
 
   useEffect(() => {
-    if (roleChecked) {
+    if (roleChecked && isPrivileged) {
       fetchMonthlyData();
+    } else if (roleChecked && !isPrivileged) {
+      setLoading(false);
     }
-  }, [roleChecked, fetchMonthlyData]);
+  }, [roleChecked, isPrivileged, fetchMonthlyData]);
 
   const handlePrevMonth = () => {
     if (selectedMonth === 1) {
@@ -152,36 +148,42 @@ export default function MonthlyAttendance() {
     }
   };
 
-  // Search filter (admin/hr only — a regular user only ever has their own single row)
-  const searchedList = groupedData.filter((item) => {
+  const visibleList = groupedData.filter((item) => {
     const q = searchTerm.toLowerCase();
     const name = (item.employee?.name || '').toLowerCase();
     const empCode = (item.employee?.employeeId || '').toLowerCase();
     return name.includes(q) || empCode.includes(q);
   });
 
-  // Admin/HR see everyone (subject to search); anyone else only ever sees their own row
-  const visibleList = useMemo(() => {
-    if (isPrivileged) return searchedList;
-    return groupedData.filter((item) => {
-      const empId = item.employee?._id || item.employee?.id;
-      return empId && myEmployeeId && String(empId) === String(myEmployeeId);
-    });
-  }, [isPrivileged, searchedList, groupedData, myEmployeeId]);
+  if (roleChecked && !isPrivileged) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center py-24 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-rose-50 flex items-center justify-center mb-4">
+          <AlertCircle className="w-7 h-7 text-rose-500" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-900">Access Denied</h2>
+        <p className="text-sm text-slate-500 mt-1 max-w-xs m-5">
+          Your role ({role}) does not have permission to access this page.
+        </p>
 
-  const pageTitle = isPrivileged ? "Monthly Attendance Sheet" : "My Attendance";
-  const pageSubtitle = isPrivileged
-    ? "Comprehensive monthly presence sheet, late marks, and leaves."
-    : "Your presence, late marks, and leaves for the month.";
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard")}
+          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full space-y-5 animate-in fade-in duration-300 pb-12 font-sans">
 
-      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">{pageTitle}</h1>
-          <p className="text-xs text-slate-500 mt-0.5">{pageSubtitle}</p>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Monthly Attendance Sheet</h1>
+          <p className="text-xs text-slate-500 mt-0.5">Comprehensive monthly presence sheet, late marks, and leaves.</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -199,7 +201,7 @@ export default function MonthlyAttendance() {
 
           <button
             onClick={fetchMonthlyData}
-            className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:bg-slate-100 active:scale-95 transition shadow-2xs"
+            className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:bg-slate-100 active:scale-95 transition shadow-2xs cursor-pointer"
             title="Refresh Sheet"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
@@ -207,25 +209,17 @@ export default function MonthlyAttendance() {
         </div>
       </div>
 
-      {/* Legend & Search (search only relevant for admin/hr browsing everyone) */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-        {isPrivileged ? (
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search employee by name or ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 transition"
-            />
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
-            <UserCircle2 className="w-4 h-4 text-indigo-500" />
-            Showing your own attendance record
-          </div>
-        )}
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+          <input
+            type="text"
+            placeholder="Search employee by name or ID..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 transition"
+          />
+        </div>
 
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <span className="text-[11px] font-semibold text-slate-400">Legend:</span>
@@ -251,7 +245,6 @@ export default function MonthlyAttendance() {
         </div>
       )}
 
-      {/* Monthly Sheet Table with smooth hover */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600 border-collapse">
@@ -292,15 +285,14 @@ export default function MonthlyAttendance() {
               ) : visibleList.length === 0 ? (
                 <tr>
                   <td colSpan={daysInMonth + 4} className="py-14 text-center text-slate-400 text-xs">
-                    {isPrivileged
-                      ? `No monthly records found for ${monthNames[selectedMonth - 1]} ${selectedYear}.`
-                      : `No attendance records found for you in ${monthNames[selectedMonth - 1]} ${selectedYear}.`}
+                    No monthly records found for {monthNames[selectedMonth - 1]} {selectedYear}.
                   </td>
                 </tr>
               ) : (
                 visibleList.map((item) => {
                   const empName = item.employee?.name || item.employee?.username || "Staff Member";
-                  const empId = item.employee?.employeeId || "—";
+                  // Multiple fallbacks to pick up employee code/ID correctly
+                  const empId = item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?._id?.slice(-6) || "—";
 
                   return (
                     <tr key={item.employee._id} className="hover:bg-indigo-50/40 transition-all duration-150 group">
@@ -311,7 +303,7 @@ export default function MonthlyAttendance() {
                           </div>
                           <div className="overflow-hidden">
                             <div className="font-semibold text-slate-900 truncate max-w-[130px]" title={empName}>{empName}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">{empId}</div>
+                            <div className="text-[10px] text-indigo-600 font-mono font-semibold">ID: {empId}</div>
                           </div>
                         </div>
                       </td>

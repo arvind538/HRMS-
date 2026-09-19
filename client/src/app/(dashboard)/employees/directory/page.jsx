@@ -152,8 +152,8 @@ export default function EmployeeDirectoryPage() {
     const statusOptions = [
         { value: "all", label: "All Statuses", dot: "bg-slate-400" },
         { value: "active", label: "Active", dot: "bg-emerald-500" },
-        { value: "inactive", label: "Inactive", dot: "bg-amber-500" },
-        { value: "exited", label: "Exited", dot: "bg-rose-500" },
+        // { value: "inactive", label: "Inactive", dot: "bg-amber-500" },
+        { value: "exit", label: "Exit", dot: "bg-rose-500" },
     ];
 
     return (

@@ -98,3 +98,33 @@ exports.resolveIssue = async (req, res, next) => {
         next(err);
     }
 };
+
+// Asset Update karna
+exports.updateAsset = async (req, res, next) => {
+    try {
+        const updatedAsset = await Asset.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+        if (!updatedAsset) {
+            return res.status(404).json({ message: "Asset not found" });
+        }
+        res.status(200).json({ success: true, data: updatedAsset });
+    } catch (err) {
+        next(err);
+    }
+};
+
+exports.deleteAsset = async (req, res, next) => {
+    try {
+        const deletedAsset = await Asset.findByIdAndDelete(req.params.id);
+        if (!deletedAsset) {
+            return res.status(404).json({ success: false, message: "Asset database mein nahi mila." });
+        }
+        res.status(200).json({ success: true, message: "Asset successfully delete ho gaya." });
+    } catch (err) {
+        console.error("Backend Delete Error:", err);
+        res.status(500).json({ success: false, message: err.message || "Server error during deletion." });
+    }
+};

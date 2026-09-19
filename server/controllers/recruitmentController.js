@@ -216,3 +216,74 @@ exports.updateOfferStatus = async (req, res, next) => {
         next(err);
     }
 };
+
+// @route DELETE /api/recruitment/interviews/:id
+exports.deleteInterview = async (req, res, next) => {
+    try {
+        const interview = await Interview.findByIdAndDelete(req.params.id);
+
+        if (!interview) {
+            return res.status(404).json({ message: "Interview schedule not found" });
+        }
+
+        res.json({ message: "Interview schedule successfully removed" });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route PUT /api/recruitment/interviews/:id
+exports.updateInterview = async (req, res, next) => {
+    try {
+        const interview = await Interview.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            {
+                new: true,          // Zaroori hai taaki updated document wapas mile
+                runValidators: true // Schema validation check karega
+            }
+        );
+
+        if (!interview) {
+            return res.status(404).json({ message: "Interview schedule not found" });
+        }
+
+        res.json(interview);
+    } catch (err) {
+        next(err);
+    }
+};
+
+exports.updatePosition = async (req, res, next) => {
+    try {
+        const updatedPosition = await JobPosition.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedPosition) {
+            return res.status(404).json({ message: "Job position not found" });
+        }
+
+        res.json(updatedPosition);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @desc    Delete Job Position
+// @route   DELETE /api/recruitment/positions/:id
+exports.deletePosition = async (req, res, next) => {
+    try {
+        const position = await JobPosition.findByIdAndDelete(req.params.id);
+
+        if (!position) {
+            return res.status(404).json({ message: "Job position not found" });
+        }
+
+        res.json({ message: "Job position successfully deleted" });
+    } catch (err) {
+        next(err);
+    }
+};

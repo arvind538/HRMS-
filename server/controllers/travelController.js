@@ -1,19 +1,23 @@
 const Travel = require("../models/Travel");
 
-exports.getTravelRequests = async (req, res, next) => {
+// GET /travel controller (Exported properly now)
+exports.getTravelRequests = async (req, res) => {
     try {
-        const { employee, status } = req.query;
-        const filter = {};
-        if (employee) filter.employee = employee;
-        if (status) filter.status = status;
+        const { employee } = req.query;
+        let query = {};
+        if (employee) query.employee = employee;
 
-        const requests = await Travel.find(filter)
-            .populate("employee", "name employeeId")
-            .populate("approvedBy", "name")
+        // .populate('employee') se user ka name, email, department mil jayega
+        const travels = await Travel.find(query)
+            .populate({
+                path: 'employee',
+                select: 'name email department'
+            })
             .sort({ createdAt: -1 });
-        res.json(requests);
+
+        res.status(200).json(travels);
     } catch (err) {
-        next(err);
+        res.status(500).json({ message: err.message });
     }
 };
 
@@ -69,6 +73,19 @@ exports.updateActualCost = async (req, res, next) => {
         );
         if (!request) return res.status(404).json({ message: "Travel request not found" });
         res.json(request);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// Travel Request Delete karna
+exports.deleteTravelRequest = async (req, res, next) => {
+    try {
+        const request = await Travel.findByIdAndDelete(req.params.id);
+        if (!request) {
+            return res.status(404).json({ message: "Travel request not found" });
+        }
+        res.status(200).json({ success: true, message: "Travel request deleted successfully" });
     } catch (err) {
         next(err);
     }

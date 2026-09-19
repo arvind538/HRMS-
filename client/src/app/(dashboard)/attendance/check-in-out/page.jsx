@@ -68,7 +68,7 @@ export default function CheckInOutManager() {
           <button
             onClick={fetchRecords}
             disabled={loading}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-xl transition shadow-sm disabled:opacity-50 active:scale-95"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium rounded-xl transition shadow-sm disabled:opacity-50 active:scale-95 cursor-pointer"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -136,7 +136,8 @@ export default function CheckInOutManager() {
                   {filteredRecords.map((item) => {
                     const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
                     const empName = emp.name || emp.username || "Staff Member";
-                    const empId = emp.employeeId || item.employee || "—";
+                    // Safe string handling for employee ID to avoid object rendering crash
+                    const empId = emp.employeeId || (typeof item.employee === "string" ? item.employee : emp._id ? String(emp._id).slice(-6) : "—");
                     const isCheckedIn = !!item.checkIn && !item.checkOut;
 
                     return (
@@ -182,7 +183,7 @@ export default function CheckInOutManager() {
               {filteredRecords.map((item) => {
                 const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
                 const empName = emp.name || emp.username || "Staff Member";
-                const empId = emp.employeeId || "—";
+                const empId = emp.employeeId || (typeof item.employee === "string" ? item.employee : emp._id ? String(emp._id).slice(-6) : "—");
                 const isCheckedIn = !!item.checkIn && !item.checkOut;
 
                 return (

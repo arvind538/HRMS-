@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { LogOut, RefreshCw, AlertCircle, CheckCircle2, Search, Calendar } from 'lucide-react';
+import { LogOut, RefreshCw, AlertCircle, CheckCircle2, Search, AlertTriangle } from 'lucide-react';
 import api from "@/lib/api";
 
 export default function EarlyLeaving() {
@@ -17,7 +17,7 @@ export default function EarlyLeaving() {
     setError(null);
     try {
       const { data } = await api.get("/attendance", { params: { month: selectedMonth, year: selectedYear } });
-      const list = Array.isArray(data) ? data : [];
+      const list = Array.isArray(data) ? data : (data.attendance || data.data || []);
       // Filter records where isEarlyLeaving is true
       setRecords(list.filter((r) => r.isEarlyLeaving));
     } catch (err) {
@@ -31,11 +31,12 @@ export default function EarlyLeaving() {
     fetchRecords();
   }, [fetchRecords]);
 
-  // Safe search filter
+  // Safe search filter with multi-level fallbacks
   const filteredRecords = records.filter((item) => {
     const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
-    const name = emp.name || emp.username || "";
-    const empId = emp.employeeId || "";
+    const name = emp.name || emp.fullName || emp.username || item.userName || "";
+    const empId = emp.employeeId || (typeof item.employee === "string" ? item.employee : emp._id ? String(emp._id) : "");
+
     return name.toLowerCase().includes(searchTerm.toLowerCase()) || empId.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
@@ -120,13 +121,14 @@ export default function EarlyLeaving() {
                   <th className="py-4 px-6">Employee</th>
                   <th className="py-4 px-6">Date</th>
                   <th className="py-4 px-6">Check Out Time</th>
+                  <th className="py-4 px-6">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredRecords.map((item) => {
                   const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
-                  const empName = emp.name || emp.username || "Staff Member";
-                  const empId = emp.employeeId || "—";
+                  const empName = emp.name || emp.fullName || emp.username || item.userName || "Staff Member";
+                  const empId = emp.employeeId || (typeof item.employee === "string" ? item.employee : emp._id ? String(emp._id).slice(-6) : "—");
 
                   return (
                     <tr key={item._id} className="hover:bg-indigo-50/40 transition-all duration-150 group">
@@ -142,10 +144,15 @@ export default function EarlyLeaving() {
                         </div>
                       </td>
                       <td className="py-4 px-6 text-slate-600 text-xs">
-                        {new Date(item.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+                        {item.date ? new Date(item.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '--'}
                       </td>
                       <td className="py-4 px-6 font-mono font-bold text-rose-600 text-xs">
                         {formatTime(item.checkOut)}
+                      </td>
+                      <td className="py-4 px-6">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 bg-rose-50 px-3 py-1 rounded-full border border-rose-200 shadow-2xs">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Early Departure
+                        </span>
                       </td>
                     </tr>
                   );

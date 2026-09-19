@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, RefreshCw, AlertCircle, Search, Calendar, Award } from 'lucide-react';
+import { Clock, RefreshCw, AlertCircle, Search, Award } from 'lucide-react';
 import api from "@/lib/api";
 
 export default function Overtime() {
@@ -16,12 +16,35 @@ export default function Overtime() {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await api.get("/attendance", { params: { month: selectedMonth, year: selectedYear } });
-      const list = Array.isArray(data) ? data : [];
-      // Filter records with valid overtime hours
-      setRecords(list.filter((r) => r.overtimeHours && r.overtimeHours > 0));
+      let list = [];
+
+      // Try fetching from primary /attendance endpoint with params
+      try {
+        const { data } = await api.get("/attendance", {
+          params: { month: selectedMonth, year: selectedYear }
+        });
+        const resData = data;
+        list = Array.isArray(resData) ? resData : (resData.attendance || resData.data || resData.records || []);
+      } catch (err1) {
+        console.warn("Primary endpoint failed, trying backup /attendance/overtime endpoint...");
+        // Fallback endpoint if your backend uses a dedicated overtime route
+        const { data } = await api.get("/attendance/overtime", {
+          params: { month: selectedMonth, year: selectedYear }
+        });
+        const resData = data;
+        list = Array.isArray(resData) ? resData : (resData.attendance || resData.data || resData.records || []);
+      }
+
+      // Filter records with valid overtime hours (handling both numbers and numeric strings)
+      const validRecords = list.filter((r) => {
+        const hours = Number(r?.overtimeHours || r?.extraHours || 0);
+        return hours > 0;
+      });
+
+      setRecords(validRecords);
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to load overtime records.");
+      console.error("Error fetching overtime records:", err);
+      setError(err.response?.data?.message || "Backend se overtime records fetch nahi ho paye. API endpoint check karein.");
     } finally {
       setLoading(false);
     }
@@ -31,12 +54,15 @@ export default function Overtime() {
     fetchOvertime();
   }, [fetchOvertime]);
 
-  // Safe search filtering by name or employee ID
+  // Secure filtering matching name or employee ID dynamically
   const filteredRecords = records.filter((item) => {
     const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
-    const name = emp.name || emp.username || "";
-    const empId = emp.employeeId || "";
-    return name.toLowerCase().includes(searchTerm.toLowerCase()) || empId.toLowerCase().includes(searchTerm.toLowerCase());
+    const name = emp.name || emp.username || item.name || "";
+    const empId = emp.employeeId || emp.id || "";
+    return (
+      name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      empId.toLowerCase().includes(searchTerm.toLowerCase())
+    );
   });
 
   return (
@@ -58,7 +84,9 @@ export default function Overtime() {
             className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
           >
             {Array.from({ length: 12 }, (_, i) => (
-              <option key={i + 1} value={i + 1}>{new Date(0, i).toLocaleString("default", { month: "long" })}</option>
+              <option key={i + 1} value={i + 1}>
+                {new Date(0, i).toLocaleString("default", { month: "long" })}
+              </option>
             ))}
           </select>
           <input
@@ -70,7 +98,7 @@ export default function Overtime() {
           <button
             onClick={fetchOvertime}
             disabled={loading}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 text-xs font-semibold rounded-xl transition cursor-pointer active:scale-95"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 text-xs font-semibold rounded-xl transition cursor-pointer active:scale-95 disabled:opacity-50"
             title="Refresh Data"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -108,7 +136,7 @@ export default function Overtime() {
           <div className="py-20 text-center px-4">
             <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
             <p className="text-sm font-semibold text-slate-700">No overtime records found</p>
-            <p className="text-xs text-slate-400 mt-0.5">No extra work hours logged for this period.</p>
+            <p className="text-xs text-slate-400 mt-0.5">No extra work hours logged for this period or backend response is empty.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -123,28 +151,29 @@ export default function Overtime() {
               <tbody className="divide-y divide-slate-100">
                 {filteredRecords.map((item) => {
                   const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
-                  const empName = emp.name || emp.username || "Staff Member";
-                  const empId = emp.employeeId || "—";
+                  const empName = emp.name || emp.username || item.name || "Staff Member";
+                  const empId = emp.employeeId || emp.id || "—";
+                  const overtimeVal = item.overtimeHours || item.extraHours || 0;
 
                   return (
-                    <tr key={item._id} className="hover:bg-indigo-50/40 transition-all duration-150 group">
+                    <tr key={item._id || Math.random()} className="hover:bg-indigo-50/40 transition-all duration-150 group">
                       <td className="py-4 px-6">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
+                          <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0 group-hover:scale-105 transition-transform">
                             {empName.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="font-semibold text-slate-800 text-xs sm:text-sm">{empName}</p>
+                            <p className="font-semibold text-slate-800 text-xs sm:text-sm group-hover:text-indigo-600 transition-colors">{empName}</p>
                             <p className="text-[11px] text-slate-400 font-mono">{empId}</p>
                           </div>
                         </div>
                       </td>
-                      <td className="py-4 px-6 text-slate-600 text-xs">
-                        {new Date(item.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+                      <td className="py-4 px-6 text-slate-600 text-xs font-medium">
+                        {item.date ? new Date(item.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                       </td>
                       <td className="py-4 px-6">
-                        <span className="inline-flex items-center gap-1.5 font-mono font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 text-xs">
-                          <Clock className="w-3.5 h-3.5 text-indigo-600" /> {item.overtimeHours} Hours
+                        <span className="inline-flex items-center gap-1.5 font-mono font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 text-xs group-hover:bg-indigo-100 transition-colors">
+                          <Clock className="w-3.5 h-3.5 text-indigo-600" /> {overtimeVal} Hours
                         </span>
                       </td>
                     </tr>

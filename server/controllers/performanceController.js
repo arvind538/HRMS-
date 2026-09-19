@@ -1,7 +1,10 @@
 const Goal = require("../models/Goal");
 const Appraisal = require("../models/Appraisal");
 
-// ===== Goals =====
+// ==========================================
+// ===== GOALS CONTROLLERS ==================
+// ==========================================
+
 exports.getGoals = async (req, res, next) => {
     try {
         const { employee, status } = req.query;
@@ -9,7 +12,9 @@ exports.getGoals = async (req, res, next) => {
         if (employee) filter.employee = employee;
         if (status) filter.status = status;
 
-        const goals = await Goal.find(filter).populate("employee", "name employeeId").sort({ targetDate: 1 });
+        const goals = await Goal.find(filter)
+            .populate("employee", "name employeeId department")
+            .sort({ targetDate: 1 });
         res.json(goals);
     } catch (err) {
         next(err);
@@ -19,7 +24,37 @@ exports.getGoals = async (req, res, next) => {
 exports.createGoal = async (req, res, next) => {
     try {
         const goal = await Goal.create(req.body);
-        res.status(201).json(goal);
+        const populatedGoal = await Goal.findById(goal._id).populate("employee", "name employeeId department");
+        res.status(201).json(populatedGoal);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// 🌟 Fixed: Added updateGoal function to resolve 404 error during goal editing
+exports.updateGoal = async (req, res, next) => {
+    try {
+        const { title, description, targetDate, status, employee, progress } = req.body;
+
+        const updateData = {};
+        if (title !== undefined) updateData.title = title.trim();
+        if (description !== undefined) updateData.description = description.trim();
+        if (targetDate !== undefined) updateData.targetDate = targetDate;
+        if (status !== undefined) updateData.status = status.toLowerCase();
+        if (employee !== undefined) updateData.employee = employee;
+        if (progress !== undefined) updateData.progress = Number(progress);
+
+        const updatedGoal = await Goal.findByIdAndUpdate(
+            req.params.id,
+            updateData,
+            { new: true, runValidators: true }
+        ).populate("employee", "name employeeId department");
+
+        if (!updatedGoal) {
+            return res.status(404).json({ success: false, message: "Goal record not found." });
+        }
+
+        res.status(200).json(updatedGoal);
     } catch (err) {
         next(err);
     }
@@ -30,7 +65,12 @@ exports.updateGoalProgress = async (req, res, next) => {
         const { progress } = req.body;
         const status = progress >= 100 ? "completed" : progress > 0 ? "in-progress" : "not-started";
 
-        const goal = await Goal.findByIdAndUpdate(req.params.id, { progress, status }, { new: true });
+        const goal = await Goal.findByIdAndUpdate(
+            req.params.id,
+            { progress: Number(progress), status },
+            { new: true }
+        ).populate("employee", "name employeeId department");
+
         if (!goal) return res.status(404).json({ message: "Goal not found" });
         res.json(goal);
     } catch (err) {
@@ -40,14 +80,18 @@ exports.updateGoalProgress = async (req, res, next) => {
 
 exports.deleteGoal = async (req, res, next) => {
     try {
-        await Goal.findByIdAndDelete(req.params.id);
-        res.json({ message: "Goal removed" });
+        const goal = await Goal.findByIdAndDelete(req.params.id);
+        if (!goal) return res.status(404).json({ message: "Goal not found" });
+        res.json({ success: true, message: "Goal removed" });
     } catch (err) {
         next(err);
     }
 };
 
-// ===== Appraisals =====
+// ==========================================
+// ===== APPRAISALS CONTROLLERS =============
+// ==========================================
+
 exports.getAppraisals = async (req, res, next) => {
     try {
         const { employee, status } = req.query;
@@ -56,7 +100,7 @@ exports.getAppraisals = async (req, res, next) => {
         if (status) filter.status = status;
 
         const appraisals = await Appraisal.find(filter)
-            .populate("employee", "name employeeId designation")
+            .populate("employee", "name employeeId designation department")
             .populate("reviewedBy", "name")
             .sort({ createdAt: -1 });
         res.json(appraisals);
@@ -68,20 +112,24 @@ exports.getAppraisals = async (req, res, next) => {
 exports.createAppraisal = async (req, res, next) => {
     try {
         const appraisal = await Appraisal.create(req.body);
-        res.status(201).json(appraisal);
+        const populatedAppraisal = await Appraisal.findById(appraisal._id)
+            .populate("employee", "name employeeId designation department")
+            .populate("reviewedBy", "name");
+        res.status(201).json(populatedAppraisal);
     } catch (err) {
         next(err);
     }
 };
 
-// employee khud apna self-assessment likhta hai
+// Employee khud apna self-assessment likhta hai
 exports.submitSelfAssessment = async (req, res, next) => {
     try {
         const appraisal = await Appraisal.findByIdAndUpdate(
             req.params.id,
             { selfAssessment: req.body.selfAssessment, status: "pending-manager" },
             { new: true }
-        );
+        ).populate("employee", "name employeeId designation department");
+
         if (!appraisal) return res.status(404).json({ message: "Appraisal not found" });
         res.json(appraisal);
     } catch (err) {
@@ -89,7 +137,7 @@ exports.submitSelfAssessment = async (req, res, next) => {
     }
 };
 
-// manager apna assessment aur final rating deta hai
+// Manager apna assessment aur final rating deta hai
 exports.submitManagerAssessment = async (req, res, next) => {
     try {
         const {
@@ -105,7 +153,9 @@ exports.submitManagerAssessment = async (req, res, next) => {
                 status: "completed",
             },
             { new: true }
-        );
+        ).populate("employee", "name employeeId designation department")
+            .populate("reviewedBy", "name");
+
         if (!appraisal) return res.status(404).json({ message: "Appraisal not found" });
         res.json(appraisal);
     } catch (err) {
@@ -113,21 +163,43 @@ exports.submitManagerAssessment = async (req, res, next) => {
     }
 };
 
-// ===== Aggregate Performance Reports (For Frontend Dashboard) =====
+exports.updateAppraisal = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const updatedAppraisal = await Appraisal.findByIdAndUpdate(
+            id,
+            req.body,
+            { new: true, runValidators: true }
+        ).populate("employee", "name employeeId designation department")
+            .populate("reviewedBy", "name");
+
+        if (!updatedAppraisal) {
+            return res.status(404).json({ success: false, message: "Appraisal record not found." });
+        }
+
+        res.status(200).json({ success: true, data: updatedAppraisal });
+    } catch (error) {
+        console.error("Error updating appraisal:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ==========================================
+// ===== AGGREGATE PERFORMANCE REPORTS ======
+// ==========================================
+
 exports.getAggregateReport = async (req, res, next) => {
     try {
-        // 1. Goal Completion Rate Calculation
         const totalGoals = await Goal.countDocuments();
         const completedGoals = await Goal.countDocuments({ status: "completed" });
         const goalCompletionRate = totalGoals > 0 ? Number(((completedGoals / totalGoals) * 100).toFixed(1)) : 0;
 
-        // 2. Average Appraisal Rating Calculation
         const appraisalsWithRating = await Appraisal.find({ rating: { $exists: true, $ne: null } });
         const totalAppraisals = appraisalsWithRating.length;
         const totalRatingSum = appraisalsWithRating.reduce((acc, curr) => acc + (curr.rating || 0), 0);
         const averageAppraisalRating = totalAppraisals > 0 ? Number((totalRatingSum / totalAppraisals).toFixed(1)) : 0;
 
-        // 3. Response Structure matching Frontend requirements
         res.json({
             success: true,
             goalCompletionRate: goalCompletionRate,
@@ -144,29 +216,6 @@ exports.getAggregateReport = async (req, res, next) => {
         next(err);
     }
 };
-
-// controllers/performanceController.js ke andar isse add karein:
-exports.updateAppraisal = async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const updatedAppraisal = await Appraisal.findByIdAndUpdate(
-            id,
-            req.body,
-            { new: true, runValidators: true }
-        );
-
-        if (!updatedAppraisal) {
-            return res.status(404).json({ success: false, message: "Appraisal record not found." });
-        }
-
-        res.status(200).json({ success: true, data: updatedAppraisal });
-    } catch (error) {
-        console.error("Error updating appraisal:", error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
 
 
 

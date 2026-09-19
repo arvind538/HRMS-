@@ -180,10 +180,10 @@ export default function TaxTDS() {
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 font-sans">
       {/* Top Banner Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
-            <Percent className="w-5 h-5" />
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-xl hover:border-indigo-200">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 transition-transform duration-300 hover:scale-105">
+            <Percent className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2.5">
@@ -209,14 +209,14 @@ export default function TaxTDS() {
               fetchEmployees();
             }}
             disabled={loading}
-            className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition disabled:opacity-50"
+            className="p-3 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition disabled:opacity-50 cursor-pointer"
             title="Recalculate tax brackets"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
           <button
             onClick={() => openDeclarationModal()}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-semibold rounded-xl shadow-xs transition"
+            className="inline-flex items-center gap-2 px-4.5 py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer active:scale-95"
           >
             <ShieldCheck className="w-4 h-4" />
             <span>Update Declaration</span>
@@ -227,60 +227,60 @@ export default function TaxTDS() {
       {/* KPI Overview */}
       {!loading && !error && taxData.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition-all duration-300 hover:shadow-xl hover:border-rose-200 group">
             <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-rose-600 transition-colors">
                 Monthly TDS Withholding Pool
               </p>
-              <h3 className="text-xl font-bold text-rose-600 mt-1">
+              <h3 className="text-xl sm:text-2xl font-extrabold text-rose-600 mt-1 font-mono">
                 ₹{totalMonthlyTds.toLocaleString("en-IN")}/mo
               </h3>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center group-hover:scale-110 transition-transform">
               <Coins className="w-5 h-5" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition-all duration-300 hover:shadow-xl hover:border-indigo-200 group">
             <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600 transition-colors">
                 Annual Tax Liability (FY 2026-27)
               </p>
-              <h3 className="text-xl font-bold text-slate-900 mt-1">
+              <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 font-mono">
                 ₹{totalAnnualTaxLiability.toLocaleString("en-IN")}
               </h3>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
               <IndianRupee className="w-5 h-5" />
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition-all duration-300 hover:shadow-xl hover:border-emerald-200 group">
             <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-emerald-600 transition-colors">
                 Tax Regime Split
               </p>
-              <h3 className="text-xl font-bold text-emerald-600 mt-1">
+              <h3 className="text-xl sm:text-2xl font-extrabold text-emerald-600 mt-1">
                 {taxData.filter((t) => t.regime === "NEW").length} New / {taxData.filter((t) => t.regime === "OLD").length} Old
               </h3>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
               <Scale className="w-5 h-5" />
             </div>
           </div>
         </div>
       )}
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+      {/* Filter and Search Bar with Interactive Regime Tabs */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 transition-all duration-300 hover:shadow-md">
         <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder="Search employee name, ID or PAN..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+            className="w-full pl-10 pr-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition"
           />
         </div>
 
@@ -289,8 +289,8 @@ export default function TaxTDS() {
             <button
               key={rg}
               onClick={() => setRegimeFilter(rg)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${regimeFilter === rg
-                ? "bg-slate-900 text-white shadow-xs"
+              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 cursor-pointer ${regimeFilter === rg
+                ? "bg-slate-900 text-white shadow-xs scale-105"
                 : "bg-slate-100 hover:bg-slate-200 text-slate-600"
                 }`}
             >
@@ -301,7 +301,7 @@ export default function TaxTDS() {
       </div>
 
       {/* Main Results Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition-all duration-300 hover:shadow-md">
         {loading ? (
           <div className="py-20 text-center space-y-3">
             <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
@@ -316,7 +316,7 @@ export default function TaxTDS() {
             <p className="text-xs text-slate-500 mt-1 mb-4">{error}</p>
             <button
               onClick={fetchTaxProfiles}
-              className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition"
+              className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition cursor-pointer"
             >
               Try Again
             </button>
@@ -336,13 +336,13 @@ export default function TaxTDS() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    <th className="py-3.5 px-6">Employee</th>
-                    <th className="py-3.5 px-6">Chosen Regime</th>
-                    <th className="py-3.5 px-6">Exemptions / Deductions</th>
-                    <th className="py-3.5 px-6">Taxable Income</th>
-                    <th className="py-3.5 px-6">Annual Tax</th>
-                    <th className="py-3.5 px-6">Monthly TDS</th>
-                    <th className="py-3.5 px-6 text-right">Action</th>
+                    <th className="py-4 px-6">Employee</th>
+                    <th className="py-4 px-6">Chosen Regime</th>
+                    <th className="py-4 px-6">Exemptions / Deductions</th>
+                    <th className="py-4 px-6">Taxable Income</th>
+                    <th className="py-4 px-6">Annual Tax</th>
+                    <th className="py-4 px-6">Monthly TDS</th>
+                    <th className="py-4 px-6 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
@@ -350,15 +350,14 @@ export default function TaxTDS() {
                     const id = item._id;
                     const empName = item.employee?.name || "Unknown Staff";
                     const empCode = item.employee?.employeeId || "—";
-                    const dept = item.employee?.department || "";
 
                     return (
-                      <tr key={id} className="hover:bg-slate-50/60 transition-colors">
+                      <tr key={id} className="hover:bg-indigo-50/40 transition-colors duration-150 group">
                         <td className="py-4 px-6">
-                          <div className="font-semibold text-slate-900 leading-tight">
+                          <div className="font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">
                             {empName}
                           </div>
-                          <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
+                          <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 font-mono">
                             <span>{empCode}</span>
                             <span>• PAN: {item.panNumber}</span>
                           </div>
@@ -366,16 +365,16 @@ export default function TaxTDS() {
 
                         <td className="py-4 px-6 whitespace-nowrap">
                           <span
-                            className={`inline-block text-xs font-mono font-bold px-2.5 py-1 rounded-md border ${item.regime === "NEW"
+                            className={`inline-block text-xs font-mono font-bold px-3 py-1 rounded-lg border ${item.regime === "NEW"
                               ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                              : "bg-slate-100 text-slate-700 border-slate-200"
+                              : "bg-amber-50 text-amber-800 border-amber-200"
                               }`}
                           >
                             {item.regime === "NEW" ? "NEW REGIME" : "OLD REGIME"}
                           </span>
                         </td>
 
-                        <td className="py-4 px-6 text-slate-600 text-xs font-medium">
+                        <td className="py-4 px-6 text-slate-600 text-xs font-semibold font-mono">
                           ₹{(item.exemptionsDeclared || 0).toLocaleString("en-IN")}
                           {item.regime === "OLD" && (
                             <span className="text-[11px] text-slate-400 block font-normal">
@@ -384,24 +383,24 @@ export default function TaxTDS() {
                           )}
                         </td>
 
-                        <td className="py-4 px-6 font-bold text-slate-900">
+                        <td className="py-4 px-6 font-bold text-slate-900 font-mono">
                           ₹{(item.taxableIncome || 0).toLocaleString("en-IN")}
                         </td>
 
-                        <td className="py-4 px-6 font-semibold text-slate-700">
+                        <td className="py-4 px-6 font-semibold text-slate-700 font-mono">
                           ₹{(item.annualTax || 0).toLocaleString("en-IN")}
                         </td>
 
-                        <td className="py-4 px-6 font-bold text-rose-600 text-base">
+                        <td className="py-4 px-6 font-extrabold text-rose-600 text-base font-mono">
                           ₹{(item.monthlyTDS || 0).toLocaleString("en-IN")}/mo
                         </td>
 
                         <td className="py-4 px-6 text-right whitespace-nowrap">
                           <button
                             onClick={() => openDeclarationModal(item)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold border border-slate-200 transition"
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-700 rounded-xl text-xs font-semibold border border-slate-200 transition cursor-pointer shadow-xs"
                           >
-                            <Edit3 className="w-3.5 h-3.5 text-slate-500" />
+                            <Edit3 className="w-3.5 h-3.5" />
                             <span>Edit</span>
                           </button>
                         </td>
@@ -420,40 +419,40 @@ export default function TaxTDS() {
                 const empCode = item.employee?.employeeId || "";
 
                 return (
-                  <div key={id} className="p-4 space-y-3 bg-white">
+                  <div key={id} className="p-4 space-y-3 bg-white hover:bg-slate-50 transition-colors">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <h4 className="font-semibold text-slate-900 text-sm">{empName}</h4>
-                        <p className="text-[11px] text-slate-400">
+                        <h4 className="font-bold text-slate-900 text-sm">{empName}</h4>
+                        <p className="text-[11px] text-slate-400 font-mono mt-0.5">
                           {empCode} | PAN: {item.panNumber}
                         </p>
                       </div>
                       <span
-                        className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-md border ${item.regime === "NEW"
+                        className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-md border ${item.regime === "NEW"
                           ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                          : "bg-slate-100 text-slate-700 border-slate-200"
+                          : "bg-amber-50 text-amber-800 border-amber-200"
                           }`}
                       >
                         {item.regime}
                       </span>
                     </div>
 
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1.5 text-xs">
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 space-y-2 text-xs">
                       <div className="flex justify-between items-center text-slate-600">
-                        <span>Taxable Income:</span>
-                        <span className="font-bold text-slate-800">
+                        <span className="font-medium">Taxable Income:</span>
+                        <span className="font-bold text-slate-800 font-mono">
                           ₹{(item.taxableIncome || 0).toLocaleString("en-IN")}
                         </span>
                       </div>
                       <div className="flex justify-between items-center text-slate-600">
-                        <span>Annual Tax:</span>
-                        <span className="font-semibold text-slate-700">
+                        <span className="font-medium">Annual Tax:</span>
+                        <span className="font-semibold text-slate-700 font-mono">
                           ₹{(item.annualTax || 0).toLocaleString("en-IN")}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center text-slate-900 font-bold pt-1 border-t border-slate-200/60">
+                      <div className="flex justify-between items-center text-slate-900 font-bold pt-2 mt-1 border-t border-slate-200/60">
                         <span>Monthly TDS:</span>
-                        <span className="text-rose-600 font-black text-sm">
+                        <span className="text-rose-600 font-black text-sm font-mono">
                           ₹{(item.monthlyTDS || 0).toLocaleString("en-IN")}/mo
                         </span>
                       </div>
@@ -461,9 +460,9 @@ export default function TaxTDS() {
 
                     <button
                       onClick={() => openDeclarationModal(item)}
-                      className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border border-slate-200 transition"
+                      className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border border-slate-200 transition cursor-pointer"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3.5 h-3.5 text-slate-500" />
                       <span>Update Tax Declaration</span>
                     </button>
                   </div>
@@ -476,27 +475,27 @@ export default function TaxTDS() {
 
       {/* Tax Declaration Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                  <ShieldCheck className="w-4 h-4" />
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 space-y-4 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-150">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5" />
                 </div>
                 <h3 className="font-bold text-slate-900 text-base">Income Tax Declaration</h3>
               </div>
               <button
                 onClick={() => setShowModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveDeclaration} className="space-y-3.5 text-xs">
+            <form onSubmit={handleSaveDeclaration} className="space-y-4 text-xs">
               {/* Employee Selector */}
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
+                <label className="font-semibold text-slate-700 block mb-1.5">
                   Select Employee
                 </label>
                 <div className="relative">
@@ -504,7 +503,7 @@ export default function TaxTDS() {
                     required
                     value={form.employeeId}
                     onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-                    className="w-full p-2.5 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer appearance-none"
+                    className="w-full p-3 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer appearance-none font-medium"
                   >
                     <option value="">-- Choose Employee --</option>
                     {employees.map((emp) => (
@@ -513,7 +512,7 @@ export default function TaxTDS() {
                       </option>
                     ))}
                   </select>
-                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                  <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
                     <ChevronDown className="w-4 h-4" />
                   </div>
                 </div>
@@ -522,90 +521,90 @@ export default function TaxTDS() {
               {/* Regime and PAN */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Tax Regime</label>
+                  <label className="font-semibold text-slate-700 block mb-1.5">Choose Tax Regime</label>
                   <select
                     value={form.regime}
                     onChange={(e) => setForm({ ...form, regime: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer font-bold"
                   >
-                    <option value="NEW">New Tax Regime</option>
-                    <option value="OLD">Old Tax Regime</option>
+                    <option value="NEW">⚡ New Tax Regime</option>
+                    <option value="OLD">🏛️ Old Tax Regime</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">PAN Card Number</label>
+                  <label className="font-semibold text-slate-700 block mb-1.5">PAN Card Number</label>
                   <input
                     type="text"
                     maxLength={10}
                     placeholder="ABCDE1234F"
                     value={form.panNumber}
                     onChange={(e) => setForm({ ...form, panNumber: e.target.value.toUpperCase() })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 uppercase focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 uppercase focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono font-semibold"
                   />
                 </div>
               </div>
 
-              {/* Old Regime Exemptions Fields */}
+              {/* Old Regime Exemptions Fields or New Regime Notice */}
               {form.regime === "OLD" ? (
-                <div className="space-y-3 p-3 bg-slate-50/75 rounded-2xl border border-slate-200/80">
-                  <p className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">
+                <div className="space-y-3 p-4 bg-amber-50/50 rounded-2xl border border-amber-200/60 animate-in fade-in duration-200">
+                  <p className="font-bold text-amber-900 text-[11px] uppercase tracking-wider">
                     Chapter VI-A Declarations (Old Regime)
                   </p>
                   <div>
-                    <label className="text-slate-600 block mb-1">Section 80C (PPF, ELSS, EPF - Max ₹1.5L)</label>
+                    <label className="text-slate-700 font-medium block mb-1">Section 80C (PPF, ELSS, EPF - Max ₹1.5L)</label>
                     <input
                       type="number"
                       placeholder="e.g. 150000"
                       value={form.section80C}
                       onChange={(e) => setForm({ ...form, section80C: e.target.value })}
-                      className="w-full p-2 bg-white border border-slate-200 rounded-lg text-slate-800"
+                      className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-mono"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-slate-600 block mb-1">Section 80D (Health)</label>
+                      <label className="text-slate-700 font-medium block mb-1">Section 80D (Health)</label>
                       <input
                         type="number"
                         placeholder="e.g. 25000"
                         value={form.section80D}
                         onChange={(e) => setForm({ ...form, section80D: e.target.value })}
-                        className="w-full p-2 bg-white border border-slate-200 rounded-lg text-slate-800"
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-mono"
                       />
                     </div>
                     <div>
-                      <label className="text-slate-600 block mb-1">HRA Exemption</label>
+                      <label className="text-slate-700 font-medium block mb-1">HRA Exemption</label>
                       <input
                         type="number"
                         placeholder="e.g. 60000"
                         value={form.hraExemption}
                         onChange={(e) => setForm({ ...form, hraExemption: e.target.value })}
-                        className="w-full p-2 bg-white border border-slate-200 rounded-lg text-slate-800"
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-mono"
                       />
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl text-[11px] text-indigo-700">
-                  <p className="font-semibold">Default Standard Deduction Applicable</p>
-                  <p className="mt-0.5 text-indigo-600">
-                    New tax regime offers automatic ₹75,000 standard deduction and nil tax on income up to ₹12 Lakhs under Section 87A rebate.
+                <div className="p-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl text-[11px] text-indigo-800 space-y-1 animate-in fade-in duration-200">
+                  <p className="font-bold">⚡ New Tax Regime Selected</p>
+                  <p className="text-indigo-700">
+                    Includes automatic ₹75,000 Standard Deduction and rebate under Section 87A. No Chapter VI-A itemized declarations needed.
                   </p>
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                  className="px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-xl shadow-xs transition disabled:opacity-50"
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-xl shadow-xs transition disabled:opacity-50 cursor-pointer active:scale-95"
                 >
                   {submitting ? "Saving..." : "Save Declaration"}
                 </button>

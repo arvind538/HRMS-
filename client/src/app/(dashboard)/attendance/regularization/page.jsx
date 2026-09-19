@@ -20,7 +20,7 @@ export default function AttendanceRegularization() {
   // Fetch employees list for dropdown selection
   useEffect(() => {
     api.get("/employees")
-      .then(({ data }) => setEmployees(Array.isArray(data) ? data : []))
+      .then(({ data }) => setEmployees(Array.isArray(data) ? data : (data.employees || data.data || [])))
       .catch((err) => console.error("Failed to load employees list", err));
   }, []);
 
@@ -37,9 +37,10 @@ export default function AttendanceRegularization() {
       const { data } = await api.get("/attendance", {
         params: { date: selectedDate, employee: selectedEmployee },
       });
-      const list = Array.isArray(data) ? data : [];
+      const list = Array.isArray(data) ? data : (data.attendance || data.data || []);
       const found = list.find((r) => {
-        const empId = r.employee?._id || r.employee?.id || r.employee;
+        const empObj = r.employee && typeof r.employee === "object" ? r.employee : null;
+        const empId = empObj?._id || empObj?.id || (typeof r.employee === "string" ? r.employee : null);
         return empId === selectedEmployee;
       });
 
@@ -51,7 +52,9 @@ export default function AttendanceRegularization() {
           remarks: found.remarks || '',
         });
       } else {
-        setError("No attendance log found for this employee on the selected date. A baseline record must exist (e.g., via check-in) to perform regularization.");
+        // Agar record nahi mila, toh blank/new record object set kar do taaki HR manually entry kar sake
+        setRecord({ _id: null, isNew: true, status: 'absent' });
+        setFormData({ checkIn: '09:30', checkOut: '18:30', remarks: '' });
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to fetch attendance record.");
@@ -67,7 +70,7 @@ export default function AttendanceRegularization() {
   // Submit regularization form
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!record) return;
+    if (!selectedEmployee) return;
 
     setSubmitting(true);
     setError(null);
@@ -79,12 +82,23 @@ export default function AttendanceRegularization() {
         return new Date(`${selectedDate}T${timeStr}:00`).toISOString();
       };
 
-      await api.post("/attendance/regularize", {
-        id: record._id,
-        checkIn: buildDateTime(formData.checkIn),
-        checkOut: buildDateTime(formData.checkOut),
-        remarks: formData.remarks,
-      });
+      // Agar record._id hai toh regularize route hit hoga, nahi toh mark/check-in api
+      if (record?._id) {
+        await api.post("/attendance/regularize", {
+          id: record._id,
+          checkIn: buildDateTime(formData.checkIn),
+          checkOut: buildDateTime(formData.checkOut),
+          remarks: formData.remarks,
+        });
+      } else {
+        // Naya entry create karne ke liye markAttendance ya check-in use karein
+        await api.post("/attendance/mark", {
+          employee: selectedEmployee,
+          status: "present",
+          checkInTime: buildDateTime(formData.checkIn),
+          notes: formData.remarks,
+        });
+      }
 
       setSuccessMsg("Attendance record regularized successfully!");
       toast.success("Attendance regularization saved!");
@@ -96,6 +110,8 @@ export default function AttendanceRegularization() {
       setSubmitting(false);
     }
   };
+
+  const selectedEmpObj = employees.find(emp => emp._id === selectedEmployee);
 
   return (
     <div className="w-full space-y-6 font-sans pb-12 animate-in fade-in duration-300">
@@ -172,16 +188,17 @@ export default function AttendanceRegularization() {
             <div className="mb-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-600">
               <div>
                 <span className="text-slate-400 block font-medium">Employee</span>
-                <strong className="text-slate-800 text-sm">{record.employee?.name || "Staff Member"}</strong>
+                <strong className="text-slate-800 text-sm">{selectedEmpObj?.name || record.employee?.name || "Staff Member"}</strong>
               </div>
               <div>
                 <span className="text-slate-400 block font-medium">Date Logged</span>
-                <strong className="text-slate-800 text-sm font-mono">{new Date(record.date).toLocaleDateString()}</strong>
+                <strong className="text-slate-800 text-sm font-mono">{new Date(selectedDate).toLocaleDateString()}</strong>
               </div>
               <div>
                 <span className="text-slate-400 block font-medium">Current Status</span>
-                <span className="inline-block mt-0.5 px-2.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full font-bold capitalize text-[11px]">
-                  {record.status || 'present'}
+                <span className={`inline-block mt-0.5 px-2.5 py-0.5 rounded-full font-bold capitalize text-[11px] ${record.isNew ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                  }`}>
+                  {record.isNew ? 'No Record (Will Create)' : (record.status || 'present')}
                 </span>
               </div>
             </div>

@@ -66,15 +66,15 @@ export default function GeneratePayroll() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4 px-4 sm:px-4 py-6">
+    <div className="max-w-5xl mx-auto space-y-3 px-4 sm:px-2 py-3 font-sans">
       {/* Top Banner Header */}
-      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 transition hover:shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 transition-all duration-300 hover:shadow-xl hover:border-indigo-200">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 transition-transform duration-300 hover:scale-105">
             <Coins className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                 Run Monthly Payroll Engine
               </h1>
@@ -89,33 +89,33 @@ export default function GeneratePayroll() {
         </div>
       </div>
 
-      {/* Process Flow Information Card */}
+      {/* Process Flow Information Cards with Hover Lift */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-1.5 transition hover:shadow-md">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-2 transition-all duration-300 hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1 group">
+          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-300">
             1
           </div>
-          <h4 className="font-bold text-slate-800 text-sm">Read Active Mappings</h4>
+          <h4 className="font-bold text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">Read Active Mappings</h4>
           <p className="text-xs text-slate-500">
             Pulls all staff assigned under active CTC contracts and salary templates.
           </p>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-1.5 transition hover:shadow-md">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-2 transition-all duration-300 hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1 group">
+          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-300">
             2
           </div>
-          <h4 className="font-bold text-slate-800 text-sm">Calculate Deductions</h4>
+          <h4 className="font-bold text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">Calculate Deductions</h4>
           <p className="text-xs text-slate-500">
             Auto-computes Employee PF (12% of Basic) and applicable Professional Tax.
           </p>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-1.5 transition hover:shadow-md">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-2 transition-all duration-300 hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1 group">
+          <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-300">
             3
           </div>
-          <h4 className="font-bold text-slate-800 text-sm">Finalize Net Payout</h4>
+          <h4 className="font-bold text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">Finalize Net Payout</h4>
           <p className="text-xs text-slate-500">
             Locks take-home figures and prepares records for banking disbursement.
           </p>
@@ -123,7 +123,7 @@ export default function GeneratePayroll() {
       </div>
 
       {/* Main Execution Card */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition hover:shadow-md">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition-all duration-300 hover:shadow-md">
         <div className="p-5 sm:p-6 border-b border-slate-100">
           <h3 className="text-base font-bold text-slate-900">Select Payroll Cycle</h3>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -141,7 +141,7 @@ export default function GeneratePayroll() {
                 <select
                   value={month}
                   onChange={(e) => setMonth(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer transition"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer transition"
                 >
                   {monthNames.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -163,7 +163,7 @@ export default function GeneratePayroll() {
                 required
                 value={year}
                 onChange={(e) => setYear(e.target.value)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition font-mono"
               />
             </div>
           </div>
@@ -182,7 +182,7 @@ export default function GeneratePayroll() {
             <button
               type="submit"
               disabled={generating}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 text-white font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition"
+              className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 text-white font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-indigo-100 transition-all duration-200 cursor-pointer active:scale-95"
             >
               {generating ? (
                 <>
@@ -202,7 +202,7 @@ export default function GeneratePayroll() {
 
       {/* Generation Result Banner & Summary Breakdown */}
       {result && (
-        <div className="space-y-4 animate-in fade-in zoom-in-95 duration-150">
+        <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
           <div className="bg-emerald-50 border border-emerald-200 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
@@ -220,13 +220,13 @@ export default function GeneratePayroll() {
             </div>
 
             <div className="flex items-center gap-4 text-xs font-semibold self-start sm:self-auto">
-              <div className="bg-white/90 px-3 py-1.5 rounded-lg border border-emerald-200 shadow-xs">
+              <div className="bg-white/90 px-3.5 py-2 rounded-xl border border-emerald-200 shadow-xs">
                 <span className="text-slate-500">Processed: </span>
                 <span className="text-slate-900 font-bold">
                   {result.totalProcessed || 0} Staff
                 </span>
               </div>
-              <div className="bg-white/90 px-3 py-1.5 rounded-lg border border-emerald-200 shadow-xs">
+              <div className="bg-white/90 px-3.5 py-2 rounded-xl border border-emerald-200 shadow-xs">
                 <span className="text-slate-500">Net Payout: </span>
                 <span className="text-emerald-700 font-bold">
                   ₹{(result.totalDisbursed || 0).toLocaleString("en-IN")}
@@ -237,7 +237,7 @@ export default function GeneratePayroll() {
 
           {/* Detailed Processed Employee Table */}
           {result.records && result.records.length > 0 && (
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition hover:shadow-md">
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition-all duration-300 hover:shadow-md">
               <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <FileCheck2 className="w-4 h-4 text-indigo-600" />
@@ -263,25 +263,25 @@ export default function GeneratePayroll() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {result.records.map((rec, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={idx} className="hover:bg-indigo-50/40 transition-colors duration-150">
                         <td className="py-3.5 px-5">
                           <div className="font-bold text-slate-800">
                             {rec.employee?.name || "Unknown"}
                           </div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="text-[11px] text-slate-400 font-mono">
                             {rec.employee?.employeeId || "—"}
                           </div>
                         </td>
                         <td className="py-3.5 px-5 font-semibold text-slate-700">
                           ₹{(rec.grossMonthly || 0).toLocaleString("en-IN")}
                         </td>
-                        <td className="py-3.5 px-5 text-slate-600">
+                        <td className="py-3.5 px-5 text-slate-600 font-mono">
                           ₹{(rec.earnings?.basic || 0).toLocaleString("en-IN")}
                         </td>
-                        <td className="py-3.5 px-5 text-rose-600 font-medium">
+                        <td className="py-3.5 px-5 text-rose-600 font-medium font-mono">
                           -₹{(rec.deductions?.total || 0).toLocaleString("en-IN")}
                         </td>
-                        <td className="py-3.5 px-5 text-right font-bold text-emerald-600 text-sm">
+                        <td className="py-3.5 px-5 text-right font-bold text-emerald-600 text-sm font-mono">
                           ₹{(rec.netPayable || 0).toLocaleString("en-IN")}
                         </td>
                       </tr>

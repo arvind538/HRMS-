@@ -17,21 +17,37 @@ const calculateDays = (start, end) => {
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 };
 
-// Server: controllers/leaveController.js
+// @route GET /api/leave
 exports.getLeaves = async (req, res, next) => {
     try {
         const query = {};
-        if (req.query.status) query.status = req.query.status;
-        if (req.query.employee) query.employee = req.query.employee; // Agar query me employee hai
+        if (req.query.status) query.status = req.query.status.toLowerCase();
+        if (req.query.employee) query.employee = req.query.employee;
 
-        const leaves = await Leave.find(query)
-            // 🌟 Yahan "user" ki jagah "employee" likhein (kyunki aapke Leave schema me employee field hai)
-            .populate("employee", "name email employeeId department designation")
-            .sort({ createdAt: -1 });
+        let leaves = [];
+        try {
+            // Try fetching with population
+            leaves = await Leave.find(query)
+                .populate("employee", "name fullName username email employeeId department designation code")
+                .sort({ createdAt: -1 });
+        } catch (popErr) {
+            console.warn("Population warning, falling back to raw find:", popErr.message);
+            // Fallback if population schema reference fails
+            leaves = await Leave.find(query).sort({ createdAt: -1 });
+        }
 
-        res.json(leaves);
+        return res.status(200).json({
+            success: true,
+            count: leaves.length,
+            leaves: leaves,
+            data: leaves
+        });
     } catch (err) {
-        next(err);
+        console.error("GET /leave 500 Error:", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || "Internal server error while fetching leaves."
+        });
     }
 };
 
@@ -40,7 +56,6 @@ exports.applyLeave = async (req, res, next) => {
     try {
         const { leaveType, startDate, endDate, reason } = req.body;
 
-        // Employee ID fallback: prefer logged-in auth user, fallback to body
         const employee = req.user?.employee || req.user?._id || req.body.employee;
 
         if (!employee) {
@@ -64,7 +79,7 @@ exports.applyLeave = async (req, res, next) => {
         });
 
         const populatedLeave = await Leave.findById(leave._id)
-            .populate("employee", "name employeeId department");
+            .populate("employee", "name fullName username employeeId department code");
 
         return res.status(201).json(populatedLeave);
     } catch (err) {
@@ -75,7 +90,6 @@ exports.applyLeave = async (req, res, next) => {
 // @route PUT /api/leave/:id/approve
 exports.approveLeave = async (req, res, next) => {
     try {
-        // Auth token se approver lein taaki frontend par depend na hona pade
         const approverId = req.user?.employee || req.user?._id || req.body.approvedBy;
 
         const leave = await Leave.findByIdAndUpdate(
@@ -87,8 +101,8 @@ exports.approveLeave = async (req, res, next) => {
             },
             { new: true }
         )
-            .populate("employee", "name employeeId department email")
-            .populate("approvedBy", "name");
+            .populate("employee", "name fullName username employeeId department email code")
+            .populate("approvedBy", "name fullName username");
 
         if (!leave) {
             return res.status(404).json({ message: "Leave request nahi mili." });
@@ -116,8 +130,8 @@ exports.rejectLeave = async (req, res, next) => {
             },
             { new: true }
         )
-            .populate("employee", "name employeeId department email")
-            .populate("approvedBy", "name");
+            .populate("employee", "name fullName username employeeId department email code")
+            .populate("approvedBy", "name fullName username");
 
         if (!leave) {
             return res.status(404).json({ message: "Leave request nahi mili." });
@@ -137,7 +151,7 @@ exports.cancelLeave = async (req, res, next) => {
             { status: "cancelled" },
             { new: true }
         )
-            .populate("employee", "name employeeId department");
+            .populate("employee", "name fullName username employeeId department code");
 
         if (!leave) {
             return res.status(404).json({ message: "Leave request nahi mili." });
@@ -155,7 +169,6 @@ exports.getLeaveBalance = async (req, res, next) => {
         const { employeeId } = req.params;
         const year = parseInt(req.query.year) || new Date().getFullYear();
 
-        // Specific calendar year date range
         const startOfYear = new Date(`${year}-01-01T00:00:00.000Z`);
         const endOfYear = new Date(`${year}-12-31T23:59:59.999Z`);
 

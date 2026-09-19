@@ -33,6 +33,23 @@ export default function LeaveDashboard() {
         return [];
     };
 
+    // 🌟 Robust Helper Functions for Extracting Employee Details cleanly
+    const getEmployeeName = (item) => {
+        const target = item.employee || item.user || {};
+        if (typeof target === "object" && target !== null) {
+            return target.name || target.fullName || target.username || item.employeeName || item.userName || "Staff Member";
+        }
+        return item.employeeName || item.userName || "Staff Member";
+    };
+
+    const getEmployeeRole = (item) => {
+        const target = item.employee || item.user || {};
+        if (typeof target === "object" && target !== null) {
+            return target.designation || target.department || target.role || item.department || "Staff";
+        }
+        return item.department || "Staff";
+    };
+
     const fetchDashboardData = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -75,8 +92,8 @@ export default function LeaveDashboard() {
                 if (isToday) {
                     todayEmployees.push({
                         id: l._id || l.id,
-                        name: l.user?.name || l.employeeName || l.userName || "Employee",
-                        role: l.user?.designation || l.department || "Staff",
+                        name: getEmployeeName(l),
+                        role: getEmployeeRole(l),
                         type: l.leaveType || l.type || "Casual Leave",
                         days: l.totalDays || 1,
                     });
@@ -128,9 +145,9 @@ export default function LeaveDashboard() {
     }, [fetchDashboardData]);
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto px-2 sm:px-4 lg:px-0">
+        <div className="space-y-6 max-w-7xl mx-auto px-2 sm:px-4 lg:px-0 font-sans">
             {/* Header bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80 bg-white p-5 rounded-2xl shadow-xs">
                 <div>
                     <div className="flex items-center gap-2.5">
                         <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
@@ -148,9 +165,9 @@ export default function LeaveDashboard() {
                 <button
                     onClick={fetchDashboardData}
                     disabled={loading}
-                    className="inline-flex items-center justify-center gap-2 self-start sm:self-auto px-4 py-2 bg-white hover:bg-slate-50 active:scale-[0.98] border border-slate-200 text-slate-700 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 shadow-2xs hover:shadow-xs disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center justify-center gap-2 self-start sm:self-auto px-4 py-2.5 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 active:scale-95 border border-slate-200 text-slate-700 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 shadow-2xs hover:shadow-md disabled:opacity-50 cursor-pointer"
                 >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-blue-600" : "text-slate-500"}`} />
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-600" : "text-slate-500"}`} />
                     <span>{loading ? "Syncing..." : "Refresh Metrics"}</span>
                 </button>
             </div>
@@ -164,7 +181,7 @@ export default function LeaveDashboard() {
                     </div>
                     <button
                         onClick={fetchDashboardData}
-                        className="px-3.5 py-1.5 bg-white text-rose-700 text-xs font-semibold rounded-lg border border-rose-200 hover:bg-rose-100/50 transition-colors shadow-2xs self-end sm:self-auto"
+                        className="px-3.5 py-1.5 bg-white text-rose-700 text-xs font-semibold rounded-lg border border-rose-200 hover:bg-rose-100/50 transition-colors shadow-2xs self-end sm:self-auto cursor-pointer"
                     >
                         Retry
                     </button>
@@ -211,7 +228,7 @@ export default function LeaveDashboard() {
             {/* Bottom Contextual Grids (Today Out & Pending Reviews) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 {/* Out Today List */}
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between">
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs hover:shadow-xl hover:border-indigo-200 transition-all duration-300 flex flex-col justify-between group">
                     <div>
                         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                             <div className="flex items-center gap-2">
@@ -234,18 +251,18 @@ export default function LeaveDashboard() {
                                 </div>
                             ) : (
                                 stats.todayLeaveList.map((emp, i) => (
-                                    <div key={emp.id || i} className="py-3.5 flex items-center justify-between gap-3 group hover:bg-slate-50/50 px-2 rounded-xl transition-colors">
+                                    <div key={emp.id || i} className="py-3.5 flex items-center justify-between gap-3 group/item hover:bg-indigo-50/40 px-3 rounded-xl transition-all duration-200">
                                         <div className="flex items-center gap-3 min-w-0">
-                                            <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs text-slate-700 shrink-0 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                                            <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-xs text-slate-700 shrink-0 group-hover/item:bg-indigo-100 group-hover/item:text-indigo-700 transition-colors">
                                                 {emp.name.charAt(0).toUpperCase()}
                                             </div>
                                             <div className="truncate">
-                                                <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">{emp.name}</p>
+                                                <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate group-hover/item:text-indigo-600 transition-colors">{emp.name}</p>
                                                 <p className="text-[11px] text-slate-500 truncate">{emp.role}</p>
                                             </div>
                                         </div>
                                         <div className="text-right shrink-0">
-                                            <span className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                                            <span className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-100 capitalize">
                                                 {emp.type}
                                             </span>
                                         </div>
@@ -257,7 +274,7 @@ export default function LeaveDashboard() {
                 </div>
 
                 {/* Pending Requests Preview */}
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between">
+                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 sm:p-6 shadow-xs hover:shadow-xl hover:border-amber-200 transition-all duration-300 flex flex-col justify-between group">
                     <div>
                         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                             <div className="flex items-center gap-2">
@@ -279,21 +296,24 @@ export default function LeaveDashboard() {
                                     🎉 All caught up! There are no pending leave requests to review.
                                 </div>
                             ) : (
-                                stats.recentPendingList.map((item, i) => (
-                                    <div key={item._id || item.id || i} className="py-3.5 flex items-center justify-between gap-3 group hover:bg-slate-50/50 px-2 rounded-xl transition-colors">
-                                        <div className="truncate">
-                                            <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate">
-                                                {item.user?.name || item.employeeName || "Employee"}
-                                            </p>
-                                            <p className="text-[11px] text-slate-500 mt-0.5">
-                                                {item.leaveType || item.type || "Leave"} • {item.totalDays || 1} day(s)
-                                            </p>
+                                stats.recentPendingList.map((item, i) => {
+                                    const employeeName = getEmployeeName(item);
+                                    return (
+                                        <div key={item._id || item.id || i} className="py-3.5 flex items-center justify-between gap-3 group/item hover:bg-amber-50/40 px-3 rounded-xl transition-all duration-200">
+                                            <div className="truncate">
+                                                <p className="text-xs sm:text-sm font-semibold text-slate-900 truncate group-hover/item:text-amber-700 transition-colors">
+                                                    {employeeName}
+                                                </p>
+                                                <p className="text-[11px] text-slate-500 mt-0.5 capitalize">
+                                                    {item.leaveType || item.type || "Leave"} • {item.totalDays || 1} day(s)
+                                                </p>
+                                            </div>
+                                            <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shrink-0 group-hover/item:bg-amber-100 transition-colors">
+                                                Action Required
+                                            </span>
                                         </div>
-                                        <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-700 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 shrink-0 group-hover:bg-amber-100 transition-colors">
-                                            Action Required
-                                        </span>
-                                    </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
                     </div>
@@ -306,12 +326,12 @@ export default function LeaveDashboard() {
 function MetricCard({ label, value, icon, badgeBg, subtext, highlight = false, loading = false }) {
     return (
         <div
-            className={`bg-white border rounded-2xl p-5 shadow-xs transition-all duration-300 hover:shadow-md hover:-translate-y-0.5 ${highlight ? "border-amber-300 ring-2 ring-amber-500/10" : "border-slate-200/90"
+            className={`bg-white border rounded-2xl p-5 shadow-xs transition-all duration-300 hover:shadow-xl hover:-translate-y-1 group ${highlight ? "border-amber-300 ring-2 ring-amber-500/10" : "border-slate-200/90 hover:border-indigo-300"
                 }`}
         >
             <div className="flex items-center justify-between gap-3">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{label}</span>
-                <div className={`p-2.5 rounded-xl ${badgeBg} transition-transform duration-300 group-hover:scale-105`}>{icon}</div>
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-indigo-600 transition-colors">{label}</span>
+                <div className={`p-2.5 rounded-xl ${badgeBg} transition-transform duration-300 group-hover:scale-110`}>{icon}</div>
             </div>
 
             <div className="mt-3">

@@ -13,11 +13,15 @@ import {
     Download,
     Building2,
     Mail,
-    ChevronRight,
     Sparkles,
     X,
     ChevronDown,
     Check,
+    Calendar,
+    Edit3,
+    Trash2,
+    MoreVertical,
+    Eye,
 } from "lucide-react";
 import api from "@/lib/api";
 
@@ -39,6 +43,11 @@ export default function EmployeesPage() {
 
     const [deptOpen, setDeptOpen] = useState(false);
     const [statusOpen, setStatusOpen] = useState(false);
+
+    // Track which employee's status dropdown or action menu is open
+    const [activeRowStatusDropdown, setActiveRowStatusDropdown] = useState(null);
+    const [activeRowActionDropdown, setActiveRowActionDropdown] = useState(null);
+    const [deletingId, setDeletingId] = useState(null);
 
     const deptDropdownRef = useRef(null);
     const statusDropdownRef = useRef(null);
@@ -74,10 +83,65 @@ export default function EmployeesPage() {
             if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target)) {
                 setStatusOpen(false);
             }
+            if (!e.target.closest(".row-status-dropdown-container")) {
+                setActiveRowStatusDropdown(null);
+            }
+            if (!e.target.closest(".row-action-dropdown-container")) {
+                setActiveRowActionDropdown(null);
+            }
         };
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
+
+    const handleStatusChange = async (employeeId, newStatus, e) => {
+        e.stopPropagation();
+        setActiveRowStatusDropdown(null);
+
+        try {
+            const exitDateValue = newStatus === "exit" ? new Date().toISOString().split("T")[0] : null;
+
+            setEmployees((prev) =>
+                prev.map((emp) =>
+                    emp._id === employeeId
+                        ? { ...emp, status: newStatus, exitDate: exitDateValue || emp.exitDate }
+                        : emp
+                )
+            );
+
+            if (newStatus === "exit") {
+                await api.put(`/employees/${employeeId}/exit`, {
+                    status: newStatus,
+                    exitDate: exitDateValue
+                });
+            } else {
+                await api.put(`/employees/${employeeId}`, { status: newStatus });
+            }
+        } catch (err) {
+            console.error("Backend validation error:", err.response?.data || err.message);
+            fetchEmployees(search);
+        }
+    };
+
+    const handleDeleteEmployee = async (employeeId, e) => {
+        e.stopPropagation();
+        setActiveRowActionDropdown(null);
+
+        if (!window.confirm("Are you sure you want to permanently delete this employee record?")) {
+            return;
+        }
+
+        setDeletingId(employeeId);
+        try {
+            setEmployees((prev) => prev.filter((emp) => emp._id !== employeeId));
+            await api.delete(`/employees/${employeeId}`);
+        } catch (err) {
+            console.error("Failed to delete employee:", err.response?.data || err.message);
+            fetchEmployees(search);
+        } finally {
+            setDeletingId(null);
+        }
+    };
 
     const departments = useMemo(() => {
         const set = new Set();
@@ -94,25 +158,32 @@ export default function EmployeesPage() {
             const matchesDept =
                 departmentFilter === "all" ||
                 dept.toLowerCase() === departmentFilter.toLowerCase();
+
+            const empStatus = (emp.status || "active").toLowerCase();
             const matchesStatus =
                 statusFilter === "all" ||
-                (emp.status || "active").toLowerCase() === statusFilter.toLowerCase();
+                empStatus === statusFilter.toLowerCase();
+
             return matchesDept && matchesStatus;
         });
     }, [employees, departmentFilter, statusFilter]);
 
     const activeCount = useMemo(
-        () => employees.filter((e) => (e.status || "active") === "active").length,
+        () => employees.filter((e) => (e.status || "active").toLowerCase() === "active").length,
+        [employees]
+    );
+
+    const exitedCount = useMemo(
+        () => employees.filter((e) => (e.status || "").toLowerCase() === "exit").length,
         [employees]
     );
 
     const handleExportCSV = () => {
-        const headers = "Employee ID,Name,Email,Department,Designation,Status\n";
+        const headers = "Employee ID,Name,Email,Department,Designation,Status,Exit Date\n";
         const rows = filteredEmployees
             .map(
                 (e) =>
-                    `"${e.employeeId || ""}","${e.name || ""}","${e.email || ""}","${e.department?.name || e.department || e.branch || ""
-                    }","${e.designation || ""}","${e.status || "active"}"`
+                    `"${e.employeeId || ""}","${e.name || ""}","${e.email || ""}","${e.department?.name || e.department || e.branch || ""}","${e.designation || ""}","${e.status || "active"}","${e.exitDate || ""}"`
             )
             .join("\n");
 
@@ -128,17 +199,21 @@ export default function EmployeesPage() {
     const statusOptions = [
         { value: "all", label: "All States", color: "bg-slate-400" },
         { value: "active", label: "Active Only", color: "bg-emerald-500" },
-        { value: "inactive", label: "Inactive", color: "bg-amber-500" },
-        { value: "exited", label: "Exited", color: "bg-rose-500" },
+        { value: "exit", label: "Exit", color: "bg-rose-500" },
+    ];
+
+    const rowStatusChoices = [
+        { value: "active", label: "Active", color: "bg-emerald-500" },
+        { value: "exit", label: "Exit", color: "bg-rose-500" },
     ];
 
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8 font-sans antialiased text-slate-900">
-            {/* Top Hero Banner with Smooth Action Elements */}
+            {/* Top Hero Banner */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-sm transition-all duration-300 hover:shadow-md">
                 <div>
                     <div className="flex items-center gap-2.5">
-                        <h1 className="text-2xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
                             Staff Directory
                         </h1>
                         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/75 shadow-2xs">
@@ -171,7 +246,7 @@ export default function EmployeesPage() {
                 </div>
             </div>
 
-            {/* Metric Highlights Grid with Hover Elevation */}
+            {/* Metric Highlights Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                 <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex items-center justify-between transition-all duration-300 hover:shadow-md hover:border-indigo-200 group cursor-pointer">
                     <div>
@@ -201,17 +276,17 @@ export default function EmployeesPage() {
                     </div>
                 </div>
 
-                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex items-center justify-between transition-all duration-300 hover:shadow-md hover:border-violet-200 group cursor-pointer">
+                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex items-center justify-between transition-all duration-300 hover:shadow-md hover:border-rose-200 group cursor-pointer">
                     <div>
-                        <span className="text-[11px] font-extrabold text-violet-600 uppercase tracking-wider">
-                            Departments
+                        <span className="text-[11px] font-extrabold text-rose-600 uppercase tracking-wider">
+                            Exited Staff
                         </span>
                         <h3 className="text-3xl font-extrabold text-slate-900 font-mono mt-1 tracking-tight">
-                            {departments.length}
+                            {exitedCount.toLocaleString()}
                         </h3>
                     </div>
-                    <div className="w-12 h-12 rounded-2xl bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100/80 shadow-2xs transition-transform duration-300 group-hover:scale-110">
-                        <Building2 size={22} />
+                    <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100/80 shadow-2xs transition-transform duration-300 group-hover:scale-110">
+                        <UserX size={22} />
                     </div>
                 </div>
             </div>
@@ -360,7 +435,7 @@ export default function EmployeesPage() {
                 </div>
             </div>
 
-            {/* Responsive Table Section with Hover Dynamics */}
+            {/* Responsive Table Section */}
             <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
                 {loading ? (
                     <div className="py-24 flex flex-col items-center justify-center space-y-3">
@@ -385,21 +460,28 @@ export default function EmployeesPage() {
                                     <th className="py-3.5 px-6">Personnel</th>
                                     <th className="py-3.5 px-4">Department</th>
                                     <th className="py-3.5 px-4">Designation</th>
-                                    <th className="py-3.5 px-4">Account State</th>
-                                    <th className="py-3.5 px-6 text-right">Action</th>
+                                    <th className="py-3.5 px-4">Account State (Click to Edit)</th>
+                                    <th className="py-3.5 px-6 text-right">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-sm">
                                 {filteredEmployees.map((row) => {
-                                    const isActive = (row.status || "active").toLowerCase() === "active";
+                                    const currentStatus = (row.status || "active").toLowerCase();
+                                    const isRowDropdownOpen = activeRowStatusDropdown === row._id;
+                                    const isActionDropdownOpen = activeRowActionDropdown === row._id;
+                                    const isDeleting = deletingId === row._id;
+
                                     return (
                                         <tr
                                             key={row._id}
-                                            onClick={() => router.push(`/employees/${row._id}`)}
-                                            className="group hover:bg-indigo-50/50 active:bg-indigo-100/60 cursor-pointer transition-all duration-150"
+                                            className="group hover:bg-indigo-50/50 active:bg-indigo-100/60 transition-all duration-150"
                                         >
+                                            {/* Personnel Column - Click Name to go to /employees/profile?id=... */}
                                             <td className="py-4 px-6">
-                                                <div className="flex items-center gap-3.5">
+                                                <div
+                                                    onClick={() => router.push(`/employees/profile?id=${row._id}`)}
+                                                    className="flex items-center gap-3.5 cursor-pointer"
+                                                >
                                                     <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-xs border border-indigo-200/80 group-hover:scale-105 transition-transform duration-200">
                                                         {getInitials(row.name)}
                                                     </div>
@@ -414,12 +496,14 @@ export default function EmployeesPage() {
                                                     </div>
                                                 </div>
                                             </td>
+
                                             <td className="py-4 px-4">
                                                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200/80 px-3 py-1 rounded-xl shadow-2xs group-hover:border-indigo-200 transition-colors">
                                                     <Building2 size={13} className="text-slate-400 group-hover:text-indigo-500" />
                                                     <span>{row.department?.name || row.department || "General"}</span>
                                                 </span>
                                             </td>
+
                                             <td className="py-4 px-4">
                                                 <p className="text-xs font-bold text-slate-800">
                                                     {row.designation || "Staff Member"}
@@ -428,24 +512,120 @@ export default function EmployeesPage() {
                                                     {row.role || "Employee"}
                                                 </p>
                                             </td>
-                                            <td className="py-4 px-4">
-                                                <span
-                                                    className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border capitalize shadow-2xs ${isActive
-                                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200/80"
-                                                        : "bg-slate-100 text-slate-600 border-slate-200"
-                                                        }`}
-                                                >
-                                                    <span
-                                                        className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+
+                                            <td className="py-4 px-4 relative">
+                                                <div className="relative row-status-dropdown-container inline-block">
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setActiveRowStatusDropdown(isRowDropdownOpen ? null : row._id);
+                                                            setActiveRowActionDropdown(null);
+                                                        }}
+                                                        className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border capitalize shadow-2xs cursor-pointer transition-all ${currentStatus === "active"
+                                                            ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100"
+                                                            : "bg-rose-50 text-rose-700 border-rose-200/80 hover:bg-rose-100"
                                                             }`}
-                                                    />
-                                                    {row.status || "Active"}
-                                                </span>
+                                                    >
+                                                        <span
+                                                            className={`w-1.5 h-1.5 rounded-full ${currentStatus === "active"
+                                                                ? "bg-emerald-500 animate-pulse"
+                                                                : "bg-rose-500"
+                                                                }`}
+                                                        />
+                                                        <span>{currentStatus}</span>
+                                                        <ChevronDown size={12} className="ml-0.5 opacity-60" />
+                                                    </button>
+
+                                                    {/* Status Menu */}
+                                                    {isRowDropdownOpen && (
+                                                        <div className="absolute left-0 mt-2 w-36 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-900/10 py-1.5 z-50">
+                                                            {rowStatusChoices.map((choice) => (
+                                                                <button
+                                                                    key={choice.value}
+                                                                    type="button"
+                                                                    onClick={(e) => handleStatusChange(row._id, choice.value, e)}
+                                                                    className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50/60 hover:text-indigo-600 transition-colors"
+                                                                >
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className={`w-2 h-2 rounded-full ${choice.color}`} />
+                                                                        <span className="capitalize">{choice.label}</span>
+                                                                    </div>
+                                                                    {currentStatus === choice.value && (
+                                                                        <Check size={13} className="text-indigo-600" />
+                                                                    )}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {currentStatus === "exit" && row.exitDate && (
+                                                    <div className="text-[10px] text-rose-500 font-semibold mt-1 flex items-center gap-1">
+                                                        <Calendar size={10} /> Exit: {row.exitDate}
+                                                    </div>
+                                                )}
                                             </td>
-                                            <td className="py-4 px-6 text-right">
-                                                <span className="inline-flex p-2 rounded-xl text-slate-400 group-hover:text-indigo-600 group-hover:bg-white transition-all duration-200 shadow-2xs group-hover:shadow-xs">
-                                                    <ChevronRight size={16} />
-                                                </span>
+
+                                            {/* Action Menu (Three-dot Toggle) */}
+                                            <td className="py-4 px-6 text-right relative">
+                                                <div className="relative row-action-dropdown-container inline-block">
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setActiveRowActionDropdown(isActionDropdownOpen ? null : row._id);
+                                                            setActiveRowStatusDropdown(null);
+                                                        }}
+                                                        disabled={isDeleting}
+                                                        className="inline-flex p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-all cursor-pointer"
+                                                    >
+                                                        {isDeleting ? (
+                                                            <Loader2 size={16} className="animate-spin text-rose-600" />
+                                                        ) : (
+                                                            <MoreVertical size={16} />
+                                                        )}
+                                                    </button>
+
+                                                    {/* Dropdown Menu for View, Edit, Delete */}
+                                                    {isActionDropdownOpen && (
+                                                        <div className="absolute right-0 mt-2 w-40 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-900/10 py-1.5 z-50 text-left">
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    router.push(`/employees/profile?id=${row._id}`);
+                                                                }}
+                                                                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
+                                                            >
+                                                                <Eye size={14} className="text-slate-400" />
+                                                                <span>View Profile</span>
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    router.push(`/employees/add?id=${row._id}`);
+                                                                }}
+                                                                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
+                                                            >
+                                                                <Edit3 size={14} className="text-slate-400" />
+                                                                <span>Edit Details</span>
+                                                            </button>
+
+                                                            <div className="my-1 border-t border-slate-100" />
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => handleDeleteEmployee(row._id, e)}
+                                                                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                                <span>Delete Record</span>
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </td>
                                         </tr>
                                     );

@@ -1,4 +1,3 @@
-// src/app/(dashboard)/leave/approvals/page.jsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -10,13 +9,45 @@ import {
   X,
   ArrowRight,
   FileText,
+  Loader2,
+  ShieldAlert
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "react-toastify";
 
+// Allowed roles for approving/reviewing leaves
+const ALLOWED_ROLES = ["admin", "hr"];
+
+function AccessDeniedScreen({ role, router }) {
+  return (
+    <div className="w-full min-h-[600px] flex flex-col items-center justify-center gap-4 px-4 text-center">
+      <div className="w-20 h-20 rounded-3xl bg-rose-50 border border-rose-100 flex items-center justify-center">
+        <ShieldAlert size={38} className="text-rose-500" />
+      </div>
+      <div className="space-y-1.5">
+        <h2 className="text-xl font-black text-slate-900 tracking-tight">
+          Access Denied
+        </h2>
+        <p className="text-sm font-medium text-slate-500 max-w-xs">
+          Your role ({role || "employee"}) does not have permission to access this page.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => router.push("/dashboard")}
+        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95 cursor-pointer"
+      >
+        Back to Dashboard
+      </button>
+    </div>
+  );
+}
+
 export default function LeaveApproval() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [approvals, setApprovals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -26,6 +57,10 @@ export default function LeaveApproval() {
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [selectedLeaveId, setSelectedLeaveId] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
+
+  const role = user?.role?.toLowerCase() || null;
+  const roleChecked = !authLoading;
+  const hasAccess = role && ALLOWED_ROLES.includes(role);
 
   const fetchPending = useCallback(async () => {
     setLoading(true);
@@ -56,8 +91,12 @@ export default function LeaveApproval() {
   }, []);
 
   useEffect(() => {
-    fetchPending();
-  }, [fetchPending]);
+    if (roleChecked && hasAccess) {
+      fetchPending();
+    } else if (roleChecked) {
+      setLoading(false);
+    }
+  }, [roleChecked, hasAccess, fetchPending]);
 
   const approverId =
     user?.employee?._id ||
@@ -136,6 +175,21 @@ export default function LeaveApproval() {
     const target = item.employee || item.user;
     return target?.department || target?.designation || item.department || "";
   };
+
+  if (!roleChecked) {
+    return (
+      <div className="w-full min-h-[600px] flex flex-col items-center justify-center gap-3 text-slate-400">
+        <Loader2 size={38} className="animate-spin text-indigo-600" />
+        <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
+          Verifying access...
+        </p>
+      </div>
+    );
+  }
+
+  if (!hasAccess) {
+    return <AccessDeniedScreen role={role} router={router} />;
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-2 sm:px-4 lg:px-0 font-sans">

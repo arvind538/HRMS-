@@ -8,7 +8,10 @@ const trainingSchema = new mongoose.Schema({
     startDate: Date,
     endDate: Date,
     mode: { type: String, enum: ["online", "offline", "hybrid"], default: "online" },
-    maxParticipants: Number,
+
+    // Fix: Default capacity set kar di hai taaki undefined ya 0 hone par error na aaye
+    maxParticipants: { type: Number, default: 50 },
+
     status: { type: String, enum: ["upcoming", "ongoing", "completed", "cancelled"], default: "upcoming" },
 
     enrolledEmployees: [

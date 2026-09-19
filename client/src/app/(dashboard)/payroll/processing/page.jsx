@@ -88,7 +88,7 @@ export default function PayrollProcessing() {
   }, [batches]);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-2 lg:px-4 py-6">
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-2 lg:px-2 py-6">
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs transition hover:shadow-md">
         <div className="flex items-center gap-3">

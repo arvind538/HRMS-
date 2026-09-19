@@ -17,7 +17,9 @@ import {
   ChevronRight,
   Sparkles,
   ChevronDown,
-  Check
+  Check,
+  Edit3,
+  Trash2
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
@@ -38,6 +40,7 @@ export default function JobPositionsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [editId, setEditId] = useState(null); // Track if editing
 
   // Filters & Selected State for Details Drawer
   const [searchQuery, setSearchQuery] = useState("");
@@ -89,13 +92,45 @@ export default function JobPositionsPage() {
     fetchData();
   }, [fetchData]);
 
-  const handleCreate = async (e) => {
+  // Open Modal for Create or Edit
+  const handleOpenModal = (e, pos = null) => {
+    if (e) e.stopPropagation();
+    if (pos) {
+      setEditId(pos._id);
+      setForm({
+        title: pos.title || "",
+        department: pos.department?._id || pos.department || "",
+        experienceRequired: pos.experienceRequired || "",
+        numberOfOpenings: pos.numberOfOpenings || 1,
+        description: pos.description || "",
+      });
+    } else {
+      setEditId(null);
+      setForm({
+        title: "",
+        department: "",
+        experienceRequired: "",
+        numberOfOpenings: 1,
+        description: "",
+      });
+    }
+    setModalOpen(true);
+  };
+
+  // Submit Create or Update
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.post("/recruitment/positions", form);
-      toast.success("Job position successfully created!");
+      if (editId) {
+        await api.put(`/recruitment/positions/${editId}`, form);
+        toast.success("Job position successfully updated!");
+      } else {
+        await api.post("/recruitment/positions", form);
+        toast.success("Job position successfully created!");
+      }
       setModalOpen(false);
+      setEditId(null);
       setForm({
         title: "",
         department: "",
@@ -105,9 +140,24 @@ export default function JobPositionsPage() {
       });
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to create job position.");
+      toast.error(err.response?.data?.message || "Operation failed.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Delete Position
+  const handleDelete = async (e, id) => {
+    e.stopPropagation();
+    if (!window.confirm("Are you sure you want to delete this job position?")) return;
+
+    try {
+      await api.delete(`/recruitment/positions/${id}`);
+      toast.success("Job position successfully deleted.");
+      setPositions((prev) => prev.filter((p) => p._id !== id));
+      if (selectedPosition?._id === id) setSelectedPosition(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to delete position.");
     }
   };
 
@@ -206,7 +256,7 @@ export default function JobPositionsPage() {
             <RefreshCw size={16} className={refreshing ? "animate-spin text-indigo-600" : ""} />
           </button>
           <Button
-            onClick={() => setModalOpen(true)}
+            onClick={(e) => handleOpenModal(e, null)}
             className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-5 py-3 text-xs sm:text-sm font-bold shadow-md shadow-indigo-600/20 hover:shadow-lg transition-all active:scale-95 flex items-center gap-2 cursor-pointer"
           >
             <Plus size={16} /> New Job Position
@@ -321,7 +371,7 @@ export default function JobPositionsPage() {
                 <th className="py-4 px-6">Experience</th>
                 <th className="py-4 px-6">Vacancies</th>
                 <th className="py-4 px-6">Status</th>
-                <th className="py-4 px-6 text-right">Action</th>
+                <th className="py-4 px-6 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
@@ -336,7 +386,7 @@ export default function JobPositionsPage() {
                     <td className="py-4 px-6"><div className="h-4 bg-slate-100 rounded-xl w-16" /></td>
                     <td className="py-4 px-6"><div className="h-4 bg-slate-100 rounded-xl w-12" /></td>
                     <td className="py-4 px-6"><div className="h-6 bg-slate-100 rounded-full w-20" /></td>
-                    <td className="py-4 px-6 text-right"><div className="h-4 bg-slate-100 rounded-xl w-6 ml-auto" /></td>
+                    <td className="py-4 px-6 text-right"><div className="h-4 bg-slate-100 rounded-xl w-16 ml-auto" /></td>
                   </tr>
                 ))
               ) : filteredPositions.length === 0 ? (
@@ -412,11 +462,24 @@ export default function JobPositionsPage() {
                         </div>
                       </td>
 
-                      {/* Arrow Action */}
-                      <td className="py-4 px-6 text-right">
-                        <span className="inline-flex p-2 rounded-xl text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition-all">
-                          <ChevronRight size={16} />
-                        </span>
+                      {/* Edit & Delete Action Buttons */}
+                      <td className="py-4 px-6 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={(e) => handleOpenModal(e, pos)}
+                            title="Edit Position"
+                            className="p-2 bg-slate-50 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 rounded-xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-2xs cursor-pointer active:scale-95"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                          <button
+                            onClick={(e) => handleDelete(e, pos._id)}
+                            title="Delete Position"
+                            className="p-2 bg-slate-50 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-xl border border-slate-200/80 hover:border-rose-200 transition-all shadow-2xs cursor-pointer active:scale-95"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -500,21 +563,31 @@ export default function JobPositionsPage() {
               </div>
             </div>
 
-            <div className="pt-6 border-t border-slate-100">
+            <div className="pt-6 border-t border-slate-100 flex items-center gap-3">
+              <Button
+                onClick={(e) => {
+                  const posToEdit = selectedPosition;
+                  setSelectedPosition(null);
+                  handleOpenModal(null, posToEdit);
+                }}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-3 font-bold text-xs shadow-md transition-all cursor-pointer"
+              >
+                Edit Position
+              </Button>
               <Button
                 onClick={() => setSelectedPosition(null)}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-2xl py-3 font-bold text-xs shadow-md transition-all cursor-pointer"
+                className="px-5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl py-3 font-bold text-xs transition-all cursor-pointer"
               >
-                Close Details
+                Close
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* New Job Position Modal */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Create New Job Position">
-        <form onSubmit={handleCreate} className="space-y-4 pt-2">
+      {/* Create / Edit Job Position Modal */}
+      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editId ? "Edit Job Position" : "Create New Job Position"}>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
           <div>
             <label className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">Position Title *</label>
             <input
@@ -579,7 +652,7 @@ export default function JobPositionsPage() {
             loading={submitting}
             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-3.5 font-bold text-xs shadow-md shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer mt-2"
           >
-            Create Position
+            {editId ? "Update Position" : "Create Position"}
           </Button>
         </form>
       </Modal>

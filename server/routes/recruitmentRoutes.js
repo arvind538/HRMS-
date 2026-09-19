@@ -20,6 +20,17 @@ router.get("/interviews", protect, ctrl.getInterviews);
 router.post("/interviews", protect, authorize("admin", "hr", "manager"), ctrl.scheduleInterview);
 router.put("/interviews/:id", protect, authorize("admin", "hr", "manager"), ctrl.updateInterview);
 router.put("/interviews/:id/feedback", protect, authorize("admin", "hr", "manager"), ctrl.submitFeedback);
+router.delete("/interviews/:id", protect, authorize("admin", "hr", "manager"), ctrl.deleteInterview); // ✅ Added Delete Route
+
+// Job Positions Routes
+router.get("/positions", protect, ctrl.getPositions);
+router.post("/positions", protect, authorize("admin", "hr"), ctrl.createPosition);
+
+// ✅ Yeh wala PUT route hona hi chahiye (Isko add karein agar nahi hai)
+router.put("/positions/:id", protect, authorize("admin", "hr"), ctrl.updatePosition);
+
+// Delete route bhi verify kar lein
+router.delete("/positions/:id", protect, authorize("admin"), ctrl.deletePosition);
 
 // Offers
 router.get("/offers", protect, authorize("admin", "hr"), ctrl.getOffers);

@@ -12,14 +12,17 @@ const getNormalizedDate = (dateInput = new Date()) => {
 exports.markAttendance = async (req, res, next) => {
     try {
         const { status, checkInTime, notes, employee } = req.body;
+        // Priority: explicit employee body -> logged in user's employee ref -> logged in user's id
         const targetEmployee = employee || req.user?.employee || req.user?.id;
 
-        // Date ko properly normalize karein ya selected record date use karein
-        const today = getNormalizedDate();
+        if (!targetEmployee) {
+            return res.status(400).json({ message: "Employee ID is missing. Please log in again." });
+        }
 
+        const today = getNormalizedDate();
         const cleanStatus = (status || "present").toLowerCase();
 
-        const attendance = await Attendance.findOneAndUpdate(
+        let attendance = await Attendance.findOneAndUpdate(
             { employee: targetEmployee, date: today },
             {
                 employee: targetEmployee,
@@ -31,6 +34,9 @@ exports.markAttendance = async (req, res, next) => {
             },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
+
+        // Populate employee details immediately so response contains name & employeeId
+        attendance = await attendance.populate("employee", "employeeId name department role");
 
         try {
             await ActivityLog.create({
@@ -69,8 +75,7 @@ exports.getAttendance = async (req, res, next) => {
             filter.date = { $gte: start, $lte: end };
         } else if (month && year) {
             filter.date = {
-                $gte: new Date(year, month - 1, 1, 0, 0, 0),
-                $lte: new Date(year, month, 0, 23, 59, 59),
+                $gte: new Date(year, month - 1, 1, 0, 0, 0), $lte: new Date(year, month, 0, 23, 59, 59),
             };
         } else {
             const todayStart = new Date();
@@ -80,15 +85,11 @@ exports.getAttendance = async (req, res, next) => {
             filter.date = { $gte: todayStart, $lte: todayEnd };
         }
 
-        let query = Attendance.find(filter).sort({ date: -1 });
+        // Hamesha employee details populate karein taaki frontend par naam show ho sake
+        const records = await Attendance.find(filter)
+            .populate("employee", "employeeId name department role")
+            .sort({ date: -1 });
 
-        try {
-            query = query.populate("employee", "employeeId name department role");
-        } catch (popErr) {
-            console.log("Population skipped:", popErr.message);
-        }
-
-        const records = await query;
         res.json(records);
     } catch (err) {
         next(err);
@@ -124,10 +125,9 @@ exports.getAttendanceReports = async (req, res, next) => {
             );
         }
 
-        // Map data to match exact frontend expectations
         const formattedReports = attendanceRecords.map(item => ({
             _id: item._id,
-            userId: item.employee?.employeeId || item.employee?._id?.slice(-6) || "N/A",
+            userId: item.employee?.employeeId || item.employee?._id?.toString().slice(-6) || "N/A",
             userName: item.employee?.name || "Staff Member",
             department: item.employee?.department || "N/A",
             date: item.date ? new Date(item.date).toISOString().slice(0, 10) : "",
@@ -146,15 +146,17 @@ exports.getAttendanceReports = async (req, res, next) => {
 // @route POST /api/attendance/check-in
 exports.checkIn = async (req, res, next) => {
     try {
-        const { employee } = req.body;
-        if (!employee) {
-            return res.status(400).json({ message: "Employee ID is required for check-in" });
+        // req.body se ya authenticated user (`req.user`) se employee ID fetch karein
+        const targetEmployee = req.body.employee || req.user?.employee || req.user?.id;
+
+        if (!targetEmployee) {
+            return res.status(400).json({ message: "Employee ID is required for check-in. Please login again." });
         }
 
         const today = getNormalizedDate();
 
-        const existing = await Attendance.findOne({ employee, date: today });
-        if (existing) {
+        let existing = await Attendance.findOne({ employee: targetEmployee, date: today });
+        if (existing && existing.checkIn) {
             return res.status(400).json({ message: "Already checked in today" });
         }
 
@@ -162,13 +164,25 @@ exports.checkIn = async (req, res, next) => {
         const officeStart = new Date();
         officeStart.setHours(9, 30, 0, 0);
 
-        const record = await Attendance.create({
-            employee,
-            date: today,
-            checkIn: now,
-            status: "present",
-            isLate: now > officeStart,
-        });
+        let record;
+        if (existing) {
+            existing.checkIn = now;
+            existing.status = "present";
+            existing.isLate = now > officeStart;
+            await existing.save();
+            record = existing;
+        } else {
+            record = await Attendance.create({
+                employee: targetEmployee,
+                date: today,
+                checkIn: now,
+                status: "present",
+                isLate: now > officeStart,
+            });
+        }
+
+        // Return populated record so frontend gets the employee name instantly
+        record = await record.populate("employee", "employeeId name department role");
 
         res.status(201).json(record);
     } catch (err) {
@@ -179,14 +193,14 @@ exports.checkIn = async (req, res, next) => {
 // @route PUT /api/attendance/check-out
 exports.checkOut = async (req, res, next) => {
     try {
-        const { employee } = req.body;
-        if (!employee) {
+        const targetEmployee = req.body.employee || req.user?.employee || req.user?.id;
+        if (!targetEmployee) {
             return res.status(400).json({ message: "Employee ID is required for check-out" });
         }
 
         const today = getNormalizedDate();
 
-        const record = await Attendance.findOne({ employee, date: today });
+        let record = await Attendance.findOne({ employee: targetEmployee, date: today });
         if (!record) {
             return res.status(404).json({ message: "No check-in found for today. Please check-in first." });
         }
@@ -202,6 +216,8 @@ exports.checkOut = async (req, res, next) => {
         record.isEarlyLeaving = now < officeEnd;
 
         await record.save();
+        record = await record.populate("employee", "employeeId name department role");
+
         res.json(record);
     } catch (err) {
         next(err);
@@ -212,11 +228,12 @@ exports.checkOut = async (req, res, next) => {
 exports.regularizeAttendance = async (req, res, next) => {
     try {
         const { id, checkIn, checkOut, remarks } = req.body;
-        const record = await Attendance.findByIdAndUpdate(
+        let record = await Attendance.findByIdAndUpdate(
             id,
             { checkIn, checkOut, remarks, status: "present" },
             { new: true }
-        );
+        ).populate("employee", "employeeId name department role");
+
         res.json(record);
     } catch (err) {
         next(err);
@@ -231,8 +248,7 @@ exports.getAttendanceSummary = async (req, res, next) => {
 
         if (month && year) {
             filter.date = {
-                $gte: new Date(year, month - 1, 1, 0, 0, 0),
-                $lte: new Date(year, month, 0, 23, 59, 59),
+                $gte: new Date(year, month - 1, 1, 0, 0, 0), $lte: new Date(year, month, 0, 23, 59, 59),
             };
         }
 
@@ -246,6 +262,24 @@ exports.getAttendanceSummary = async (req, res, next) => {
         };
 
         res.json(summary);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route DELETE /api/attendance/:id
+exports.deleteAttendance = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+
+        // Check karein ki ID valid format mein hai ya nahi
+        const deletedRecord = await Attendance.findByIdAndDelete(id);
+
+        if (!deletedRecord) {
+            return res.status(404).json({ message: "Attendance record database mein nahi mila." });
+        }
+
+        res.status(200).json({ success: true, message: "Attendance record successfully delete ho gaya." });
     } catch (err) {
         next(err);
     }

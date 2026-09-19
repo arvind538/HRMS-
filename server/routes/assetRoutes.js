@@ -12,4 +12,9 @@ router.get("/:id/history", protect, ctrl.getAssetHistory);
 router.post("/maintenance", protect, authorize("admin", "hr"), ctrl.reportIssue);
 router.put("/maintenance/:id/resolve", protect, authorize("admin", "hr"), ctrl.resolveIssue);
 
+// PUT route add karein update ke liye
+router.put("/:id", protect, authorize("admin", "hr"), ctrl.updateAsset);
+// ✅ Yeh line hona zaroori hai
+router.delete("/:id", protect, authorize("admin", "hr"), ctrl.deleteAsset);
+
 module.exports = router;

@@ -127,8 +127,34 @@ exports.getEmployee = async (req, res, next) => {
 // @route POST /api/employees
 exports.createEmployee = async (req, res, next) => {
     try {
-        const count = await Employee.countDocuments();
-        const employeeId = `EMP${String(count + 1).padStart(4, "0")}`;
+        let employeeId = req.body.employeeId;
+
+        // Agar frontend se employeeId nahi aayi hai, toh safe tarike se next ID generate karein
+        if (!employeeId || employeeId.trim() === "") {
+            const lastEmployee = await Employee.findOne({ employeeId: { $regex: /^EMP/ } }).sort({ createdAt: -1 });
+
+            let nextNumber = 1;
+            if (lastEmployee && lastEmployee.employeeId) {
+                const numericPart = parseInt(lastEmployee.employeeId.replace("EMP", ""), 10);
+                if (!isNaN(numericPart)) {
+                    nextNumber = numericPart + 1;
+                }
+            } else {
+                // Fallback agar koi EMP format ka ID na mile toh total count le lo
+                const count = await Employee.countDocuments();
+                nextNumber = count + 1;
+            }
+
+            employeeId = `EMP${String(nextNumber).padStart(4, "0")}`;
+
+            // Double check loop taaki agar race condition mein bhi duplicate ho toh next number le le
+            let existing = await Employee.findOne({ employeeId });
+            while (existing) {
+                nextNumber++;
+                employeeId = `EMP${String(nextNumber).padStart(4, "0")}`;
+                existing = await Employee.findOne({ employeeId });
+            }
+        }
 
         const employee = await Employee.create({ ...req.body, employeeId });
 

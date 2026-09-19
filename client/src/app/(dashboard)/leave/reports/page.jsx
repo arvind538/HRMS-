@@ -15,16 +15,54 @@ import {
   FileText,
   ChevronDown,
   Filter,
-  Printer
+  Printer,
+  Loader2,
+  ShieldAlert
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+
+const ALLOWED_ROLES = ["admin", "hr"];
+
+function AccessDeniedScreen({ role, router }) {
+  return (
+    <div className="w-full min-h-[600px] flex flex-col items-center justify-center gap-4 px-4 text-center">
+      <div className="w-20 h-20 rounded-3xl bg-rose-50 border border-rose-100 flex items-center justify-center">
+        <ShieldAlert size={38} className="text-rose-500" />
+      </div>
+      <div className="space-y-1.5">
+        <h2 className="text-xl font-black text-slate-900 tracking-tight">
+          Access Denied
+        </h2>
+        <p className="text-sm font-medium text-slate-500 max-w-xs">
+          Your role ({role || "employee"}) does not have permission to access this page.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => router.push("/dashboard")}
+        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95 cursor-pointer"
+      >
+        Back to Dashboard
+      </button>
+    </div>
+  );
+}
 
 export default function LeaveReports() {
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searched, setSearched] = useState(false);
   const [tableSearch, setTableSearch] = useState("");
+
+  const role = user?.role?.toLowerCase() || null;
+  const roleChecked = !authLoading;
+  const hasAccess = role && ALLOWED_ROLES.includes(role);
 
   const today = new Date();
   const startOfYear = new Date(today.getFullYear(), 0, 1).toISOString().slice(0, 10);
@@ -114,12 +152,29 @@ export default function LeaveReports() {
     [filters]
   );
 
+  // 🌟 Robust Helper Functions for Extracting Employee Details
+  const getEmployeeName = (r) => {
+    const emp = r.employee || r.user || {};
+    if (typeof emp === "object") {
+      return emp.name || emp.fullName || emp.username || r.employeeName || "Staff Member";
+    }
+    return r.employeeName || "Staff Member";
+  };
+
+  const getEmployeeCode = (r) => {
+    const emp = r.employee || r.user || {};
+    if (typeof emp === "object") {
+      return emp.employeeId || emp.code || emp._id?.toString().slice(-6) || r.employeeId || "—";
+    }
+    return r.employeeId || "—";
+  };
+
   const visibleData = useMemo(() => {
     if (!tableSearch.trim()) return data;
     const q = tableSearch.toLowerCase().trim();
     return data.filter((r) => {
-      const empName = (r.employee?.name || r.employeeName || "").toLowerCase();
-      const empId = (r.employee?.employeeId || "").toLowerCase();
+      const empName = getEmployeeName(r).toLowerCase();
+      const empId = getEmployeeCode(r).toLowerCase();
       const leaveType = (r.leaveType || "").toLowerCase();
       return empName.includes(q) || empId.includes(q) || leaveType.includes(q);
     });
@@ -164,8 +219,8 @@ export default function LeaveReports() {
       "Reason",
     ];
     const rows = visibleData.map((r) => [
-      `"${r.employee?.employeeId || ""}"`,
-      `"${r.employee?.name || r.employeeName || "Unknown"}"`,
+      `"${getEmployeeCode(r)}"`,
+      `"${getEmployeeName(r)}"`,
       `"${r.leaveType?.toUpperCase() || ""}"`,
       formatDate(r.startDate),
       formatDate(r.endDate),
@@ -208,8 +263,23 @@ export default function LeaveReports() {
     }
   };
 
+  if (!roleChecked) {
+    return (
+      <div className="w-full min-h-[600px] flex flex-col items-center justify-center gap-3 text-slate-400">
+        <Loader2 size={38} className="animate-spin text-indigo-600" />
+        <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
+          Verifying access...
+        </p>
+      </div>
+    );
+  }
+
+  if (!hasAccess) {
+    return <AccessDeniedScreen role={role} router={router} />;
+  }
+
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 print:p-0">
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-2 lg:px-3 py-2 print:p-0 font-sans">
       {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs print:border-none print:shadow-none">
         <div>
@@ -231,7 +301,7 @@ export default function LeaveReports() {
             type="button"
             onClick={() => window.print()}
             disabled={visibleData.length === 0}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 transition disabled:opacity-40"
+            className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 transition disabled:opacity-40 cursor-pointer"
           >
             <Printer className="w-4 h-4 text-slate-500" />
             <span className="hidden sm:inline">Print / PDF</span>
@@ -240,7 +310,7 @@ export default function LeaveReports() {
             type="button"
             onClick={exportCSV}
             disabled={visibleData.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition disabled:opacity-40"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition disabled:opacity-40 cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export CSV</span>
@@ -259,21 +329,21 @@ export default function LeaveReports() {
             <button
               type="button"
               onClick={() => applyPreset("THIS_MONTH")}
-              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
             >
               This Month
             </button>
             <button
               type="button"
               onClick={() => applyPreset("LAST_30_DAYS")}
-              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
             >
               Last 30 Days
             </button>
             <button
               type="button"
               onClick={() => applyPreset("ALL_TIME")}
-              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+              className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
             >
               All Records
             </button>
@@ -348,7 +418,7 @@ export default function LeaveReports() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition disabled:opacity-60"
+            className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition disabled:opacity-60 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             <span>{loading ? "Fetching..." : "Generate Report"}</span>
@@ -464,8 +534,8 @@ export default function LeaveReports() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {visibleData.map((r) => {
-                    const empName = r.employee?.name || r.employeeName || "Unknown Employee";
-                    const empCode = r.employee?.employeeId || r.employee?.code || "—";
+                    const empName = getEmployeeName(r);
+                    const empCode = getEmployeeCode(r);
 
                     return (
                       <tr key={r._id} className="hover:bg-slate-50/60 transition-colors">
@@ -473,7 +543,7 @@ export default function LeaveReports() {
                           <div className="font-semibold text-slate-800 text-xs sm:text-sm">
                             {empName}
                           </div>
-                          <div className="text-[11px] text-slate-400">{empCode}</div>
+                          <div className="text-[11px] text-slate-400 font-mono mt-0.5">{empCode}</div>
                         </td>
                         <td className="py-4 px-6">
                           <span className="font-medium text-slate-700 capitalize text-xs">
@@ -510,15 +580,15 @@ export default function LeaveReports() {
             {/* Mobile Cards */}
             <div className="md:hidden divide-y divide-slate-100">
               {visibleData.map((r) => {
-                const empName = r.employee?.name || r.employeeName || "Unknown";
-                const empCode = r.employee?.employeeId || "";
+                const empName = getEmployeeName(r);
+                const empCode = getEmployeeCode(r);
 
                 return (
                   <div key={r._id} className="p-4 space-y-3 bg-white">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <h4 className="font-semibold text-slate-900 text-sm">{empName}</h4>
-                        {empCode && <p className="text-[11px] text-slate-400">{empCode}</p>}
+                        {empCode && <p className="text-[11px] text-slate-400 font-mono">{empCode}</p>}
                       </div>
                       {getStatusBadge(r.status)}
                     </div>
@@ -532,7 +602,7 @@ export default function LeaveReports() {
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 font-mono">
                       <span>{formatDate(r.startDate)}</span>
                       <ArrowRight className="w-3 h-3 text-slate-400" />
                       <span>{formatDate(r.endDate)}</span>

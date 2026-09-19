@@ -8,14 +8,19 @@ const {
     checkOut,
     regularizeAttendance,
     getAttendanceSummary,
-    getAttendanceReports, // ✅ Added reports controller
+    getAttendanceReports,
+    deleteAttendance, // ✅ Added deleteAttendance controller import
 } = require("../controllers/attendanceController");
 
 router.get("/", protect, getAttendance);
-router.get("/reports", protect, authorize("admin", "hr", "manager"), getAttendanceReports); // ✅ Added /reports route to fix 404
+router.get("/reports", protect, authorize("admin", "hr", "manager"), getAttendanceReports);
 router.post("/mark", protect, authorize("admin", "hr", "manager"), markAttendance);
 router.post("/check-in", protect, checkIn);
 router.put("/check-out", protect, checkOut);
+
+// ✅ Added protect and authorize middleware to delete route for safety
+router.delete("/:id", protect, authorize("admin", "hr"), deleteAttendance);
+
 router.post("/regularize", protect, authorize("admin", "hr", "manager"), regularizeAttendance);
 router.get("/summary/:employeeId", protect, getAttendanceSummary);
 

@@ -42,11 +42,11 @@ export default function CoursesPage() {
   }, {});
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+    <div className="space-y-6 max-w-7xl mx-auto p-2 sm:p-3 lg:p-4">
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5">
+          <h1 className="text-2xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
             <BookOpen className="text-indigo-600" size={28} />
             Course Catalog
           </h1>
@@ -86,7 +86,7 @@ export default function CoursesPage() {
               </div>
 
               {/* Courses Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-5">
                 {items.map((t) => (
                   <div
                     key={t._id}

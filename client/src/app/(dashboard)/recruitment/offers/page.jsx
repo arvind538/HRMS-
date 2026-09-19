@@ -117,7 +117,7 @@ export default function OfferLettersPage() {
         ...form,
         offeredSalary: Number(form.offeredSalary),
       });
-      toast.success("Offer Letter successfully create ho gaya!");
+      toast.success("Offer Letter successfully created!");
       setModalOpen(false);
       setForm({
         candidate: "",

@@ -16,50 +16,100 @@ export default function AttendanceReports() {
     status: 'ALL'
   });
 
+  // Helper function to safely format time
+  const formatTime = (timeVal) => {
+    if (!timeVal) return '--';
+    try {
+      const date = new Date(timeVal);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      return timeVal;
+    } catch {
+      return timeVal;
+    }
+  };
+
   const handleFetchReport = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      // Direct reports endpoint hit karein with query parameters
       const { data } = await api.get("/attendance/reports", { params: filters });
       const list = Array.isArray(data) ? data : (data.reports || data.data || []);
 
-      const mapped = list.map(item => ({
-        userId: item.userId || item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?._id?.slice(-6) || "N/A",
-        userName: item.userName || item.employee?.name || item.employee?.fullName || "Staff Member",
-        date: item.date ? new Date(item.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-        checkIn: item.checkIn ? new Date(item.checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-        checkOut: item.checkOut ? new Date(item.checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-        hours: item.workHours ? `${item.workHours}h` : (item.hours ? `${item.hours}h` : ''),
-        status: item.status || 'present'
-      }));
+      const mapped = list.map(item => {
+        const empObj = item.employee || item.user || item.userId || {};
+
+        const empId = empObj.employeeId ||
+          empObj.empId ||
+          empObj.code ||
+          empObj._id ||
+          item.employeeId ||
+          item.empId ||
+          "N/A";
+
+        const empName = empObj.name ||
+          empObj.fullName ||
+          empObj.username ||
+          item.userName ||
+          item.name ||
+          "Staff Member";
+
+        return {
+          id: item._id || Math.random(),
+          userId: typeof empId === 'string' ? empId.slice(-6) : empId,
+          userName: empName,
+          date: item.date ? new Date(item.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+          checkIn: formatTime(item.checkIn || item.inTime),
+          checkOut: formatTime(item.checkOut || item.outTime),
+          hours: item.workHours ? `${item.workHours}h` : (item.hours ? `${item.hours}h` : '--'),
+          status: item.status || 'present'
+        };
+      });
 
       setReportData(mapped);
       toast.success("Attendance report generated successfully!");
     } catch (err) {
       console.warn("Dedicated reports route failed, trying fallback logs endpoint...", err);
 
-      // Fallback mechanism: agar /reports route 404 de toh /attendance ya /attendance/all try karein
       try {
         const { data: fallbackData } = await api.get("/attendance");
         const rawList = Array.isArray(fallbackData) ? fallbackData : (fallbackData.attendance || fallbackData.data || []);
 
-        const mapped = rawList.map(item => ({
-          userId: item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?._id?.slice(-6) || item.userId || "N/A",
-          userName: item.employee?.name || item.employee?.fullName || item.userName || "Staff Member",
-          date: new Date(item.date || item.createdAt || Date.now()).toISOString().slice(0, 10),
-          checkIn: item.checkIn ? new Date(item.checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-          checkOut: item.checkOut ? new Date(item.checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-          hours: item.workHours ? `${item.workHours}h` : '',
-          status: item.status || 'present'
-        }));
+        const mapped = rawList.map(item => {
+          const empObj = item.employee || item.user || item.userId || {};
+
+          const empId = empObj.employeeId ||
+            empObj.empId ||
+            empObj.code ||
+            empObj._id ||
+            item.employeeId ||
+            "N/A";
+
+          const empName = empObj.name ||
+            empObj.fullName ||
+            empObj.username ||
+            item.userName ||
+            "Staff Member";
+
+          return {
+            id: item._id || Math.random(),
+            userId: typeof empId === 'string' ? empId.slice(-6) : empId,
+            userName: empName,
+            date: new Date(item.date || item.createdAt || Date.now()).toISOString().slice(0, 10),
+            checkIn: formatTime(item.checkIn || item.inTime),
+            checkOut: formatTime(item.checkOut || item.outTime),
+            hours: item.workHours ? `${item.workHours}h` : '--',
+            status: item.status || 'present'
+          };
+        });
 
         setReportData(mapped);
         toast.success("Report loaded successfully from attendance logs!");
       } catch (fallbackErr) {
         console.error("Both endpoints failed:", fallbackErr);
-        setError("Failed to fetch report data from server. Please check if your backend server is running and routes exist.");
+        setError("Failed to fetch report data from server. Please check if your backend server is running.");
         toast.error("Failed to generate report.");
       }
     } finally {
@@ -82,6 +132,7 @@ export default function AttendanceReports() {
 
   return (
     <div className="w-full space-y-6 font-sans pb-12 animate-in fade-in duration-300">
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
@@ -177,7 +228,7 @@ export default function AttendanceReports() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="w-full text-left text-sm border-collapse">
               <thead className="bg-slate-50/75 border-b border-slate-200/80 text-xs font-bold text-slate-500 uppercase tracking-wider">
                 <tr>
                   <th className="py-4 px-6">Emp ID</th>
@@ -190,14 +241,33 @@ export default function AttendanceReports() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {reportData.map((item, idx) => (
-                  <tr key={item._id || idx} className="hover:bg-indigo-50/40 transition-all duration-150 group">
-                    <td className="py-4 px-6 font-mono text-xs font-semibold text-slate-500">{item.userId}</td>
-                    <td className="py-4 px-6 font-semibold text-slate-800 text-xs sm:text-sm">{item.userName}</td>
-                    <td className="py-4 px-6 text-slate-600 text-xs">{item.date}</td>
-                    <td className="py-4 px-6 font-mono text-xs text-slate-600">{item.checkIn || '--'}</td>
-                    <td className="py-4 px-6 font-mono text-xs text-slate-600">{item.checkOut || '--'}</td>
-                    <td className="py-4 px-6 font-mono text-xs font-medium text-slate-600">{item.hours || '--'}</td>
+                {reportData.map((item) => (
+                  <tr
+                    key={item.id}
+                    className="hover:bg-indigo-50/60 hover:shadow-2xs transition-all duration-200 group cursor-pointer"
+                  >
+                    <td className="py-4 px-6 font-mono text-xs font-bold text-indigo-600">
+                      <span className="bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100 group-hover:bg-indigo-100 transition-colors">
+                        {item.userId}
+                      </span>
+                    </td>
+
+                    <td className="py-4 px-6">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px] flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                          {item.userName ? item.userName.charAt(0).toUpperCase() : 'U'}
+                        </div>
+                        <span className="font-bold text-slate-900 text-xs sm:text-sm tracking-tight group-hover:text-indigo-900 transition-colors">
+                          {item.userName}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="py-4 px-6 text-slate-600 text-xs font-medium">{item.date}</td>
+                    <td className="py-4 px-6 font-mono text-xs text-slate-600">{item.checkIn}</td>
+                    <td className="py-4 px-6 font-mono text-xs text-slate-600">{item.checkOut}</td>
+                    <td className="py-4 px-6 font-mono text-xs font-medium text-slate-600">{item.hours}</td>
+
                     <td className="py-4 px-6">
                       <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold capitalize border ${item.status?.toLowerCase() === 'present'
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'

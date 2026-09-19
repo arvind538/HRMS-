@@ -17,9 +17,10 @@ export default function LateComing() {
     setError(null);
     try {
       const { data } = await api.get("/attendance", { params: { month: selectedMonth, year: selectedYear } });
-      const list = Array.isArray(data) ? data : [];
-      // Filter records where isLate is true
-      setRecords(list.filter((r) => r.isLate || r.status === 'late'));
+      const list = Array.isArray(data) ? data : (data.attendance || data.data || []);
+
+      // Filter records where isLate is true or status is late
+      setRecords(list.filter((r) => r.isLate || r.status?.toLowerCase() === 'late'));
     } catch (err) {
       setError(err.response?.data?.message || "Late coming records fetch nahi ho paye.");
     } finally {
@@ -33,8 +34,9 @@ export default function LateComing() {
 
   const filteredRecords = records.filter((item) => {
     const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
-    const name = emp.name || emp.username || "";
-    const empId = emp.employeeId || "";
+    const name = emp.name || emp.username || item.userName || "";
+    const empId = emp.employeeId || (typeof item.employee === "string" ? item.employee : emp._id ? String(emp._id).slice(-6) : "");
+
     return name.toLowerCase().includes(searchTerm.toLowerCase()) || empId.toLowerCase().includes(searchTerm.toLowerCase());
   });
 
@@ -125,8 +127,8 @@ export default function LateComing() {
               <tbody className="divide-y divide-slate-100">
                 {filteredRecords.map((item) => {
                   const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
-                  const empName = emp.name || emp.username || "Staff Member";
-                  const empId = emp.employeeId || "—";
+                  const empName = emp.name || emp.username || item.userName || "Staff Member";
+                  const empId = emp.employeeId || (typeof item.employee === "string" ? item.employee : emp._id ? String(emp._id).slice(-6) : "—");
 
                   return (
                     <tr key={item._id} className="hover:bg-indigo-50/40 transition-all duration-150 group">
@@ -142,7 +144,7 @@ export default function LateComing() {
                         </div>
                       </td>
                       <td className="py-4 px-6 text-slate-600 text-xs">
-                        {new Date(item.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+                        {item.date ? new Date(item.date).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '--'}
                       </td>
                       <td className="py-4 px-6 font-mono font-bold text-rose-600 text-xs">{formatTime(item.checkIn)}</td>
                       <td className="py-4 px-6">

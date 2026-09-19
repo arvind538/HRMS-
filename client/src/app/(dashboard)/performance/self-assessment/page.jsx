@@ -72,7 +72,7 @@ export default function SelfAssessmentPage() {
       await api.put(`/performance/appraisals/${id}/self-assessment`, {
         selfAssessment: assessmentText
       });
-      toast.success("Self-assessment submitted successfully! 🎉");
+      toast.success("Self-assessment submitted successfully!");
 
       setDrafts(prev => {
         const newDrafts = { ...prev };
@@ -97,11 +97,11 @@ export default function SelfAssessmentPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 font-sans">
+    <div className="space-y-6 max-w-5xl mx-auto p-4 sm:p-3 lg:p-4 font-sans">
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5">
+          <h1 className="text-2xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
             <ClipboardEdit className="text-indigo-600" size={28} />
             Self Assessment
           </h1>

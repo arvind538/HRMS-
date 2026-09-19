@@ -1,24 +1,24 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import {
     Mail,
     Phone,
     Building2,
     Calendar,
-    Briefcase,
     IndianRupee,
     Loader2,
     RefreshCw,
     Camera,
     CheckCircle2,
-    Shield,
-    UserCheck,
-    Save,
 } from "lucide-react";
 import api from "@/lib/api";
 
 export default function EmployeeProfilePage() {
+    const searchParams = useSearchParams();
+    const urlId = searchParams.get("id");
+
     const [employees, setEmployees] = useState([]);
     const [selectedId, setSelectedId] = useState("");
     const [loading, setLoading] = useState(true);
@@ -32,8 +32,14 @@ export default function EmployeeProfilePage() {
             const res = await api.get("/employees");
             const list = Array.isArray(res?.data) ? res.data : [];
             setEmployees(list);
-            if (list.length > 0 && !selectedId) {
-                setSelectedId(list[0]._id || list[0].id);
+
+            if (list.length > 0) {
+                // If an ID is passed in URL query, select it; otherwise pick the first one
+                if (urlId && list.some(e => (e._id || e.id) === urlId)) {
+                    setSelectedId(urlId);
+                } else if (!selectedId) {
+                    setSelectedId(list[0]._id || list[0].id);
+                }
             }
         } catch (err) {
             console.error("Failed to fetch employees:", err);
@@ -44,11 +50,10 @@ export default function EmployeeProfilePage() {
 
     useEffect(() => {
         fetchEmployees();
-    }, []);
+    }, [urlId]);
 
     const employee = employees.find((e) => (e._id || e.id) === selectedId);
 
-    // Handle Image Upload & Save persistently to backend
     const handleImageUpload = async (e) => {
         const file = e.target.files[0];
         if (!file || !employee) return;
@@ -57,14 +62,12 @@ export default function EmployeeProfilePage() {
         reader.onloadend = async () => {
             const base64Image = reader.result;
 
-            // Optimistically update local UI
             setEmployees((prev) =>
                 prev.map((emp) =>
                     (emp._id || emp.id) === selectedId ? { ...emp, avatar: base64Image } : emp
                 )
             );
 
-            // Persist to backend database so it remains after refresh
             try {
                 setSaving(true);
                 await api.put(`/employees/${selectedId}`, {
@@ -113,7 +116,7 @@ export default function EmployeeProfilePage() {
                     </select>
                     <button
                         onClick={fetchEmployees}
-                        className="p-2.5 border border-slate-200 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-indigo-600 transition-all shadow-xs active:scale-95"
+                        className="p-2.5 border border-slate-200 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-indigo-600 transition-all shadow-xs active:scale-95 cursor-pointer"
                         title="Refresh Directory"
                     >
                         <RefreshCw size={16} />
@@ -145,7 +148,6 @@ export default function EmployeeProfilePage() {
                                 </div>
                             )}
 
-                            {/* Camera Hover Upload Button */}
                             <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
@@ -188,8 +190,7 @@ export default function EmployeeProfilePage() {
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {/* Email */}
-                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5 hover:bg-slate-50 transition-colors">
+                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5">
                                 <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
                                     <Mail size={18} />
                                 </div>
@@ -199,8 +200,7 @@ export default function EmployeeProfilePage() {
                                 </div>
                             </div>
 
-                            {/* Phone */}
-                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5 hover:bg-slate-50 transition-colors">
+                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5">
                                 <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
                                     <Phone size={18} />
                                 </div>
@@ -210,8 +210,7 @@ export default function EmployeeProfilePage() {
                                 </div>
                             </div>
 
-                            {/* Department */}
-                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5 hover:bg-slate-50 transition-colors">
+                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5">
                                 <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
                                     <Building2 size={18} />
                                 </div>
@@ -223,8 +222,7 @@ export default function EmployeeProfilePage() {
                                 </div>
                             </div>
 
-                            {/* Joining Date */}
-                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5 hover:bg-slate-50 transition-colors">
+                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5">
                                 <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
                                     <Calendar size={18} />
                                 </div>
@@ -236,8 +234,7 @@ export default function EmployeeProfilePage() {
                                 </div>
                             </div>
 
-                            {/* Salary Compensation */}
-                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5 hover:bg-slate-50 transition-colors sm:col-span-2">
+                            <div className="p-4 bg-slate-50/70 rounded-2xl border border-slate-200/60 flex items-center gap-3.5 sm:col-span-2">
                                 <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
                                     <IndianRupee size={18} />
                                 </div>

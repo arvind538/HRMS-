@@ -14,89 +14,76 @@ const {
     getProcessingQueue,
     disburseBatch,
     getPayslipsList,
-    getBonuses,
-    createBonus,
-    updateBonus,
-    deleteBonus,
-    getDeductions,
-    createDeduction,      // <-- Singular name
-    updateDeduction,
-    deleteDeduction,
+    getPayrollReports,
+    getTaxTdsList,
+    upsertTaxProfile,
+    getReimbursements,
+    createReimbursement,
+    updateReimbursementStatus,
+    deleteReimbursement,
     getLoans,
     createLoan,
     updateLoan,
     updateLoanStatus,
     deleteLoan,
-    getReimbursements,
-    createReimbursement,
-    updateReimbursement,
-    updateReimbursementStatus,
-    deleteReimbursement,
-    getTaxTdsList,
-    upsertTaxProfile,
-    getPayrollReports,
+    getDeductions,
+    createDeduction,
+    deleteDeduction,
+    getBonuses,
+    createBonus,
+    deleteBonus,
     getEmployeeSalaries,
     createEmployeeSalary,
-    updateEmployeeSalary,
     deleteEmployeeSalary,
+    updateDeduction,
+    updateBonus,
+    updateEmployeeSalary,
+    updateReimbursement
 } = require("../controllers/payrollController");
 
-// ==========================================
-// STATIC ROUTES (HAMESHA /:id SE PEHLE HONGE)
-// ==========================================
-router.get("/summary", protect, authorize("admin", "hr"), getPayrollSummary);
-router.get("/processing-queue", protect, authorize("admin", "hr"), getProcessingQueue);
-router.get("/payslips", protect, authorize("admin", "hr", "employee"), getPayslipsList);
-router.get("/reports", protect, authorize("admin", "hr", "finance"), getPayrollReports);
+router.get("/", protect, getPayrolls);
+router.get("/reports", protect, getPayrollReports);
+router.get("/tax-tds", protect, getTaxTdsList);
+router.post("/tax-tds", protect, upsertTaxProfile);
 
-router.get("/tax-tds", protect, authorize("admin", "hr", "employee"), getTaxTdsList);
-router.post("/tax-tds", protect, authorize("admin", "hr", "employee"), upsertTaxProfile);
+router.get("/reimbursements", protect, getReimbursements);
+router.post("/reimbursements", protect, createReimbursement);
+router.put("/reimbursements/:id", protect, updateReimbursement);
+router.put("/reimbursements/:id/status", protect, updateReimbursementStatus);
+router.delete("/reimbursements/:id", protect, deleteReimbursement);
 
-// Employee Salaries (Mappings) Routes
-router.get("/employee-salaries", protect, authorize("admin", "hr"), getEmployeeSalaries);
-router.post("/employee-salaries", protect, authorize("admin", "hr"), createEmployeeSalary);
-router.put("/employee-salaries/:id", protect, authorize("admin", "hr"), updateEmployeeSalary);
-router.delete("/employee-salaries/:id", protect, authorize("admin"), deleteEmployeeSalary);
+router.get("/loans", protect, getLoans);
+router.post("/loans", protect, createLoan);
+router.put("/loans/:id", protect, updateLoan);
+router.put("/loans/:id/status", protect, updateLoanStatus);
+router.delete("/loans/:id", protect, deleteLoan);
 
-router.get("/bonuses", protect, authorize("admin", "hr"), getBonuses);
-router.post("/bonuses", protect, authorize("admin", "hr"), createBonus);
-router.put("/bonuses/:id", protect, authorize("admin", "hr"), updateBonus);
-router.delete("/bonuses/:id", protect, authorize("admin"), deleteBonus);
+router.get("/deductions", protect, getDeductions);
+router.post("/deductions", protect, createDeduction);
+router.put("/deductions/:id", protect, updateDeduction);
+router.delete("/deductions/:id", protect, deleteDeduction);
 
-router.get("/deductions", protect, authorize("admin", "hr"), getDeductions);
-router.post("/deductions", protect, authorize("admin", "hr"), createDeduction); // <-- Corrected here
-router.put("/deductions/:id", protect, authorize("admin", "hr"), updateDeduction);
-router.delete("/deductions/:id", protect, authorize("admin"), deleteDeduction);
+router.get("/bonuses", protect, getBonuses);
+router.post("/bonuses", protect, createBonus);
+router.put("/bonuses/:id", protect, updateBonus);
+router.delete("/bonuses/:id", protect, deleteBonus);
 
-router.get("/loans", protect, authorize("admin", "hr"), getLoans);
-router.post("/loans", protect, authorize("admin", "hr"), createLoan);
-router.put("/loans/:id", protect, authorize("admin", "hr"), updateLoan);
-router.put("/loans/:id/status", protect, authorize("admin", "hr"), updateLoanStatus);
-router.delete("/loans/:id", protect, authorize("admin"), deleteLoan);
+router.get("/employee-salaries", protect, getEmployeeSalaries);
+router.post("/employee-salaries", protect, createEmployeeSalary);
+router.put("/employee-salaries/:id", protect, updateEmployeeSalary);
+router.delete("/employee-salaries/:id", protect, deleteEmployeeSalary);
 
-// Reimbursements Routes
-router.get("/reimbursements", protect, authorize("admin", "hr", "employee"), getReimbursements);
-router.post("/reimbursements", protect, authorize("admin", "hr", "employee"), createReimbursement);
-router.put("/reimbursements/:id", protect, authorize("admin", "hr"), updateReimbursement);
-router.put("/reimbursements/:id/status", protect, authorize("admin", "hr"), updateReimbursementStatus);
-router.delete("/reimbursements/:id", protect, authorize("admin"), deleteReimbursement);
-
-router.post("/disburse/:batchId", protect, authorize("admin"), disburseBatch);
+router.post("/generate", protect, generatePayroll);
+router.post("/generate-bulk", protect, generateBulkPayroll);
+router.get("/summary", protect, getPayrollSummary);
+router.get("/processing-queue", protect, getProcessingQueue);
+router.post("/disburse/:batchId", protect, disburseBatch);
+router.get("/payslips", protect, getPayslipsList);
 router.get("/payslip/:id", protect, getPayslip);
 
-router.post("/generate", protect, authorize("admin", "hr"), generatePayroll);
-router.post("/generate-bulk", protect, authorize("admin", "hr"), generateBulkPayroll);
-
-router.get("/", protect, authorize("admin", "hr"), getPayrolls);
-router.put("/:id/process", protect, authorize("admin", "hr"), processPayroll);
-router.put("/:id/mark-paid", protect, authorize("admin"), markAsPaid);
-
-// ==========================================
-// DYNAMIC /:id ROUTE (HAMESHA AAKHIRI MEIN)
-// ==========================================
-router
-    .route("/:id")
-    .get(protect, getPayroll)
-    .put(protect, authorize("admin", "hr"), updatePayroll);
+router.get("/:id", protect, getPayroll);
+router.put("/:id", protect, updatePayroll);
+router.put("/:id/process", protect, processPayroll);
+router.put("/:id/mark-paid", protect, markAsPaid);
 
 module.exports = router;

@@ -77,7 +77,7 @@ export default function TrainingReportsPage() {
   }, {});
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-3 lg:p-4 font-sans">
+    <div className="space-y-4 max-w-7xl mx-auto p-4 sm:p-3 lg:p-4 font-sans">
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
         <div>

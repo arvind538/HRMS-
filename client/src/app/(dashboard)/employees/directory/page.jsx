@@ -152,7 +152,6 @@ export default function EmployeeDirectoryPage() {
     const statusOptions = [
         { value: "all", label: "All Statuses", dot: "bg-slate-400" },
         { value: "active", label: "Active", dot: "bg-emerald-500" },
-        // { value: "inactive", label: "Inactive", dot: "bg-amber-500" },
         { value: "exit", label: "Exit", dot: "bg-rose-500" },
     ];
 
@@ -178,7 +177,7 @@ export default function EmployeeDirectoryPage() {
                     <button
                         type="button"
                         onClick={() => router.push("/employees/add")}
-                        className="inline-flex items-center gap-2 px-4.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition-all active:scale-95"
+                        className="inline-flex items-center gap-2 px-4.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer"
                     >
                         <Plus size={15} />
                         <span>Add Employee</span>
@@ -188,7 +187,7 @@ export default function EmployeeDirectoryPage() {
                         type="button"
                         onClick={() => fetchEmployees(true)}
                         disabled={refreshing || loading}
-                        className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-indigo-600 transition-all shadow-xs active:scale-95 disabled:opacity-50"
+                        className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 hover:text-indigo-600 transition-all shadow-xs active:scale-95 disabled:opacity-50 cursor-pointer"
                         title="Refresh Directory"
                     >
                         <RefreshCw
@@ -201,7 +200,7 @@ export default function EmployeeDirectoryPage() {
                         <button
                             type="button"
                             onClick={() => setViewMode("grid")}
-                            className={`p-2 rounded-xl text-xs font-bold transition-all ${viewMode === "grid"
+                            className={`p-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${viewMode === "grid"
                                 ? "bg-white text-indigo-600 shadow-sm"
                                 : "text-slate-500 hover:text-slate-900"
                                 }`}
@@ -212,7 +211,7 @@ export default function EmployeeDirectoryPage() {
                         <button
                             type="button"
                             onClick={() => setViewMode("list")}
-                            className={`p-2 rounded-xl text-xs font-bold transition-all ${viewMode === "list"
+                            className={`p-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${viewMode === "list"
                                 ? "bg-white text-indigo-600 shadow-sm"
                                 : "text-slate-500 hover:text-slate-900"
                                 }`}
@@ -242,7 +241,7 @@ export default function EmployeeDirectoryPage() {
                         <button
                             type="button"
                             onClick={() => setSearchInput("")}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
                         >
                             <X size={14} />
                         </button>
@@ -258,7 +257,7 @@ export default function EmployeeDirectoryPage() {
                                 setDeptOpen((prev) => !prev);
                                 setStatusOpen(false);
                             }}
-                            className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-2xl border transition-all duration-200 shadow-xs ${deptOpen
+                            className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-2xl border transition-all duration-200 shadow-xs cursor-pointer ${deptOpen
                                 ? "bg-white border-indigo-600 ring-4 ring-indigo-600/10 text-indigo-950"
                                 : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
                                 }`}
@@ -292,7 +291,7 @@ export default function EmployeeDirectoryPage() {
                                     setSelectedDept("all");
                                     setDeptOpen(false);
                                 }}
-                                className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold transition-colors ${selectedDept === "all"
+                                className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold transition-colors cursor-pointer ${selectedDept === "all"
                                     ? "text-indigo-600 bg-indigo-50/70 font-bold"
                                     : "text-slate-700 hover:bg-slate-50"
                                     }`}
@@ -309,7 +308,7 @@ export default function EmployeeDirectoryPage() {
                                         setSelectedDept(dept);
                                         setDeptOpen(false);
                                     }}
-                                    className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold transition-colors ${selectedDept === dept
+                                    className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold transition-colors cursor-pointer ${selectedDept === dept
                                         ? "text-indigo-600 bg-indigo-50/70 font-bold"
                                         : "text-slate-700 hover:bg-slate-50"
                                         }`}
@@ -331,7 +330,7 @@ export default function EmployeeDirectoryPage() {
                                 setStatusOpen((prev) => !prev);
                                 setDeptOpen(false);
                             }}
-                            className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-2xl border transition-all duration-200 shadow-xs ${statusOpen
+                            className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-2xl border transition-all duration-200 shadow-xs cursor-pointer ${statusOpen
                                 ? "bg-white border-indigo-600 ring-4 ring-indigo-600/10 text-indigo-950"
                                 : "bg-white border-slate-200 text-slate-700 hover:border-slate-300"
                                 }`}
@@ -372,7 +371,7 @@ export default function EmployeeDirectoryPage() {
                                         setSelectedStatus(opt.value);
                                         setStatusOpen(false);
                                     }}
-                                    className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold transition-colors ${selectedStatus === opt.value
+                                    className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold transition-colors cursor-pointer ${selectedStatus === opt.value
                                         ? "text-indigo-600 bg-indigo-50/70 font-bold"
                                         : "text-slate-700 hover:bg-slate-50"
                                         }`}
@@ -439,7 +438,7 @@ export default function EmployeeDirectoryPage() {
                                 setSelectedDept("all");
                                 setSelectedStatus("all");
                             }}
-                            className="inline-flex items-center px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                            className="inline-flex items-center px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
                         >
                             Reset Filters
                         </button>
@@ -471,12 +470,12 @@ export default function EmployeeDirectoryPage() {
                         return (
                             <div
                                 key={empId}
-                                onClick={() => router.push(`/employees/${empId}`)}
-                                className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs hover:shadow-md hover:border-indigo-300 transition-all duration-200 flex flex-col justify-between group cursor-pointer"
+                                onClick={() => router.push("/employees/profile")}
+                                className="bg-white rounded-3xl border border-slate-200/80 p-6 shadow-xs hover:shadow-xl hover:border-indigo-500/50 transition-all duration-300 flex flex-col justify-between group cursor-pointer hover:-translate-y-1"
                             >
                                 <div>
                                     <div className="flex items-start justify-between mb-4">
-                                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-black text-sm shadow-xs border border-indigo-200 group-hover:scale-105 transition-transform">
+                                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-black text-sm shadow-xs border border-indigo-200 group-hover:scale-110 transition-transform">
                                             {getInitials(displayName)}
                                         </div>
                                         <span
@@ -531,7 +530,7 @@ export default function EmployeeDirectoryPage() {
 
                                     <button
                                         type="button"
-                                        onClick={() => router.push(`/employees/${empId}`)}
+                                        onClick={() => router.push("/employees/profile")}
                                         className="w-full mt-2 py-2 text-xs font-bold text-indigo-700 bg-indigo-50/70 hover:bg-indigo-600 hover:text-white rounded-xl border border-indigo-200/60 transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-98"
                                     >
                                         <span>Inspect Profile</span>
@@ -580,12 +579,12 @@ export default function EmployeeDirectoryPage() {
                                 return (
                                     <tr
                                         key={empId}
-                                        onClick={() => router.push(`/employees/${empId}`)}
-                                        className="hover:bg-slate-50/60 transition-colors group cursor-pointer"
+                                        onClick={() => router.push("/employees/profile")}
+                                        className="hover:bg-indigo-50/30 transition-colors group cursor-pointer"
                                     >
                                         <td className="py-3.5 px-6">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs border border-indigo-200">
+                                                <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs border border-indigo-200 group-hover:scale-110 transition-transform">
                                                     {getInitials(displayName)}
                                                 </div>
                                                 <div>
@@ -627,7 +626,7 @@ export default function EmployeeDirectoryPage() {
                                         <td className="py-3.5 px-6 text-right" onClick={(e) => e.stopPropagation()}>
                                             <button
                                                 type="button"
-                                                onClick={() => router.push(`/employees/${empId}`)}
+                                                onClick={() => router.push("/employees/profile")}
                                                 className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-100 transition-colors cursor-pointer"
                                             >
                                                 <span>Profile</span>

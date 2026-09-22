@@ -1,6 +1,7 @@
+// src/app/(dashboard)/leaves/approvals/page.jsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   CheckCircle2,
   RefreshCw,
@@ -17,8 +18,8 @@ import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "react-toastify";
 
-// Allowed roles for approving/reviewing leaves
-const ALLOWED_ROLES = ["admin", "hr"];
+// Allowed roles for reviewing/approving team leave requests
+const ALLOWED_ROLES = ["admin", "hr", "manager", "team_lead", "lead"];
 
 function AccessDeniedScreen({ role, router }) {
   return (
@@ -31,7 +32,7 @@ function AccessDeniedScreen({ role, router }) {
           Access Denied
         </h2>
         <p className="text-sm font-medium text-slate-500 max-w-xs">
-          Your role ({role || "employee"}) does not have permission to access this page.
+          Your role ({role || "employee"}) does not have permission to approve team leaves.
         </p>
       </div>
       <button
@@ -58,9 +59,22 @@ export default function LeaveApproval() {
   const [selectedLeaveId, setSelectedLeaveId] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
-  const role = user?.role?.toLowerCase() || null;
+  // Safe normalized role extraction (handles string, object, array)
+  const currentRole = useMemo(() => {
+    if (!user) return null;
+    const rawRole = user.role || user.userRole || user.type;
+    if (typeof rawRole === "string") return rawRole.toLowerCase().trim();
+    if (typeof rawRole === "object" && rawRole !== null) {
+      return (rawRole.name || rawRole.title || "").toLowerCase().trim();
+    }
+    if (Array.isArray(user.roles) && user.roles.length > 0) {
+      return String(user.roles[0]).toLowerCase().trim();
+    }
+    return null;
+  }, [user]);
+
   const roleChecked = !authLoading;
-  const hasAccess = role && ALLOWED_ROLES.includes(role);
+  const hasAccess = Boolean(currentRole && ALLOWED_ROLES.includes(currentRole));
 
   const fetchPending = useCallback(async () => {
     setLoading(true);
@@ -80,11 +94,15 @@ export default function LeaveApproval() {
       setApprovals(list);
     } catch (err) {
       console.error("Fetch pending leaves error:", err.response || err);
-      setError(
-        err.response?.data?.message ||
-        err.response?.data?.error ||
-        "Failed to load pending applications."
-      );
+      if (err.response?.status === 403) {
+        setError("Your manager/staff account is not authorized by the backend to fetch approvals.");
+      } else {
+        setError(
+          err.response?.data?.message ||
+          err.response?.data?.error ||
+          "Failed to load pending applications."
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -100,6 +118,7 @@ export default function LeaveApproval() {
 
   const approverId =
     user?.employee?._id ||
+    user?.employee?.id ||
     user?.employee ||
     user?._id ||
     user?.id;
@@ -109,8 +128,13 @@ export default function LeaveApproval() {
     try {
       const endpoint = decision === "approve" ? `/leave/${id}/approve` : `/leave/${id}/reject`;
       const payload = decision === "approve"
-        ? { approvedBy: approverId }
-        : { approvedBy: approverId, rejectionReason: reason.trim() || "Rejected by manager" };
+        ? { approvedBy: approverId, reviewerId: approverId, reviewerRole: currentRole }
+        : {
+          approvedBy: approverId,
+          reviewerId: approverId,
+          reviewerRole: currentRole,
+          rejectionReason: reason.trim() || `Rejected by ${currentRole}`
+        };
 
       const res = await api.put(endpoint, payload);
 
@@ -131,7 +155,7 @@ export default function LeaveApproval() {
         err.response?.data?.message ||
         err.response?.data?.error ||
         (err.response?.status === 403
-          ? "Access denied: You do not have permission to approve leaves."
+          ? "Access denied: You do not have permission to approve/reject leaves."
           : "An error occurred while processing this action.");
 
       toast.error(msg);
@@ -157,7 +181,6 @@ export default function LeaveApproval() {
     }).format(d);
   };
 
-  // 🌟 Robust Helper: Extracts name cleanly from populated employee/user object or fallback fields
   const getEmployeeName = (item) => {
     const target = item.employee || item.user || item.applicant;
     if (target && typeof target === "object") {
@@ -168,12 +191,12 @@ export default function LeaveApproval() {
 
   const getEmployeeCode = (item) => {
     const target = item.employee || item.user;
-    return target?.employeeId || target?.code || item.employeeId || "";
+    return target?.employeeId || target?.empId || target?.code || item.employeeId || "";
   };
 
   const getEmployeeDepartment = (item) => {
     const target = item.employee || item.user;
-    return target?.department || target?.designation || item.department || "";
+    return target?.department?.name || target?.department || target?.designation || item.department || "";
   };
 
   if (!roleChecked) {
@@ -181,14 +204,14 @@ export default function LeaveApproval() {
       <div className="w-full min-h-[600px] flex flex-col items-center justify-center gap-3 text-slate-400">
         <Loader2 size={38} className="animate-spin text-indigo-600" />
         <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
-          Verifying access...
+          Verifying access permissions...
         </p>
       </div>
     );
   }
 
   if (!hasAccess) {
-    return <AccessDeniedScreen role={role} router={router} />;
+    return <AccessDeniedScreen role={currentRole} router={router} />;
   }
 
   return (
@@ -202,6 +225,9 @@ export default function LeaveApproval() {
             </h1>
             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
               {approvals.length} Pending
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase tracking-wider">
+              {currentRole} panel
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">

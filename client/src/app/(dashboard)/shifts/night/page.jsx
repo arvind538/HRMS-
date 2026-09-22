@@ -94,7 +94,7 @@ export default function NightShiftPage() {
     <div className="max-w-7xl mx-auto space-y-6 px-4 sm:px-6 lg:px-8 py-6 transition-all duration-300">
 
       {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">Night Shifts Roster</h1>

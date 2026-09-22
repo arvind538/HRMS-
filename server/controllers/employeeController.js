@@ -268,6 +268,8 @@ exports.exitEmployee = async (req, res, next) => {
 
 
 
+
+
 // const Employee = require("../models/employeeModel");
 // const ActivityLog = require("../models/activityLogModel");
 

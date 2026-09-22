@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar,
   Search,
@@ -22,7 +22,8 @@ import api from "@/lib/api";
 import { toast } from "react-toastify";
 import { useAuth } from "@/context/AuthContext";
 
-const ALLOWED_ROLES = ["admin", "hr"];
+// Allowed roles for this page
+const ALLOWED_ROLES = ["admin", "hr", "manager", "team_lead", "lead"];
 
 function AccessDeniedScreen({ role, router }) {
   return (
@@ -35,13 +36,13 @@ function AccessDeniedScreen({ role, router }) {
           Access Denied
         </h2>
         <p className="text-sm font-medium text-slate-500 max-w-xs">
-          Your role ({role || "employee"}) does not have permission to access this page.
+          Your role ({role || "employee"}) does not have permission to access the attendance command center.
         </p>
       </div>
       <button
         type="button"
         onClick={() => router.push("/dashboard")}
-        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95"
+        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95 cursor-pointer"
       >
         Back to Dashboard
       </button>
@@ -71,9 +72,25 @@ export default function DailyAttendance() {
   const [recordToDelete, setRecordToDelete] = useState(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  const role = user?.role?.toLowerCase() || null;
+  // Safe normalized role extraction (handles string, object, array formats)
+  const currentRole = useMemo(() => {
+    if (!user) return null;
+    const rawRole = user.role || user.userRole || user.type;
+    if (typeof rawRole === "string") return rawRole.toLowerCase().trim();
+    if (typeof rawRole === "object" && rawRole !== null) {
+      return (rawRole.name || rawRole.title || "").toLowerCase().trim();
+    }
+    if (Array.isArray(user.roles) && user.roles.length > 0) {
+      return String(user.roles[0]).toLowerCase().trim();
+    }
+    return null;
+  }, [user]);
+
   const roleChecked = !authLoading;
-  const hasAccess = role && ALLOWED_ROLES.includes(role);
+  const hasAccess = Boolean(currentRole && ALLOWED_ROLES.includes(currentRole));
+
+  // Admin and HR can delete; Managers can view and update
+  const canDelete = currentRole === "admin" || currentRole === "hr";
 
   const fetchAttendance = useCallback(async () => {
     try {
@@ -81,7 +98,7 @@ export default function DailyAttendance() {
       setErrorMsg(null);
 
       const { data } = await api.get("/attendance", { params: { date: selectedDate } });
-      const list = Array.isArray(data) ? data : [];
+      const list = Array.isArray(data) ? data : (data?.data || data?.records || []);
       setRecords(list);
 
       setSummary({
@@ -89,18 +106,18 @@ export default function DailyAttendance() {
         present: list.filter((r) => r?.status?.toLowerCase() === "present").length,
         late: list.filter((r) => r?.status?.toLowerCase() === "late").length,
         absent: list.filter((r) => r?.status?.toLowerCase() === "absent").length,
-        halfDay: list.filter((r) => r?.status?.toLowerCase() === "half-day" || r?.status?.toLowerCase() === "half day").length,
+        halfDay: list.filter((r) => ["half-day", "half day"].includes(r?.status?.toLowerCase())).length,
       });
     } catch (err) {
       console.error("Fetch attendance error:", err);
       if (err.response?.status === 401) {
-        setErrorMsg("Login expired hai — dobara login karo.");
+        setErrorMsg("Session expired. Please log in again.");
       } else if (err.response?.status === 403) {
-        setErrorMsg("Aapke role ko ye data dekhne ki permission nahi hai.");
+        setErrorMsg("Your manager/staff profile is not authorized on the backend API.");
       } else if (!err.response) {
-        setErrorMsg("Backend server tak pahunch nahi paaye — check karo backend chal raha hai ya nahi.");
+        setErrorMsg("Unable to reach backend server. Please check your network or server status.");
       } else {
-        setErrorMsg(err.response?.data?.message || "Kuch galat ho gaya, dobara try karo.");
+        setErrorMsg(err.response?.data?.message || "Failed to fetch attendance data.");
       }
     } finally {
       setLoading(false);
@@ -130,6 +147,7 @@ export default function DailyAttendance() {
         employee: empId,
         status: newStatus,
         checkInTime: selectedRecord.checkIn || new Date(),
+        date: selectedDate
       });
 
       toast.success("Attendance status updated successfully!");
@@ -156,7 +174,7 @@ export default function DailyAttendance() {
       fetchAttendance();
     } catch (err) {
       console.error("Delete error:", err);
-      toast.error(err.response?.data?.message || "Failed to delete record. Check backend route.");
+      toast.error(err.response?.data?.message || "Failed to delete record.");
     } finally {
       setDeleteSubmitting(false);
     }
@@ -211,14 +229,14 @@ export default function DailyAttendance() {
       <div className="w-full min-h-[600px] flex flex-col items-center justify-center gap-3 text-slate-400">
         <Loader2 size={38} className="animate-spin text-indigo-600" />
         <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
-          Verifying access...
+          Verifying access permissions...
         </p>
       </div>
     );
   }
 
   if (!hasAccess) {
-    return <AccessDeniedScreen role={role} router={router} />;
+    return <AccessDeniedScreen role={currentRole} router={router} />;
   }
 
   return (
@@ -227,7 +245,12 @@ export default function DailyAttendance() {
       {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Daily Attendance</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Daily Attendance</h1>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase tracking-wider">
+              {currentRole} view
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">Live real-time daily shift & attendance monitor</p>
         </div>
 
@@ -244,7 +267,8 @@ export default function DailyAttendance() {
 
           <button
             onClick={fetchAttendance}
-            className="p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:bg-slate-100 active:scale-95 transition shadow-xs cursor-pointer"
+            disabled={loading}
+            className="p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:bg-slate-100 active:scale-95 transition shadow-xs cursor-pointer disabled:opacity-50"
             title="Refresh Data"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
@@ -318,6 +342,87 @@ export default function DailyAttendance() {
             <span>{errorMsg}</span>
           </div>
         )}
+
+        {/* Mobile View Cards */}
+        <div className="block md:hidden divide-y divide-slate-100">
+          {loading ? (
+            <div className="py-12 text-center text-slate-400">
+              <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600 mb-2" />
+              Loading records...
+            </div>
+          ) : filteredRecords.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              No attendance records found for this date.
+            </div>
+          ) : (
+            filteredRecords.map((item) => {
+              const emp = item?.employee && typeof item.employee === "object" ? item.employee : {};
+              const empName = emp.name || emp.username || "Staff Member";
+              const empId = emp.employeeId || emp._id?.slice(-6) || "—";
+              const dept = emp.department?.name || emp.department || emp.role || "General";
+
+              return (
+                <div key={item._id} className="p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={`https://ui-avatars.com/api/?name=${encodeURIComponent(empName)}&background=6366f1&color=fff`}
+                        alt={empName}
+                        className="w-9 h-9 rounded-full object-cover border border-slate-200"
+                      />
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-900">{empName}</h4>
+                        <span className="text-[11px] text-slate-400 font-mono">{empId} • {dept}</span>
+                      </div>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border capitalize ${getStatusBadge(item.status)}`}>
+                      {item.status || 'present'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl text-center text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-semibold">IN</span>
+                      <span className="font-mono text-slate-700">{formatTime(item.checkIn)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-semibold">OUT</span>
+                      <span className="font-mono text-slate-700">{formatTime(item.checkOut)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-semibold">HOURS</span>
+                      <span className="font-mono text-slate-700">{item.workHours ? `${item.workHours}h` : "--"}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      onClick={() => {
+                        setSelectedRecord(item);
+                        setNewStatus(item.status || "present");
+                        setIsModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-600 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" /> Edit
+                    </button>
+                    {canDelete && (
+                      <button
+                        onClick={() => {
+                          setRecordToDelete(item);
+                          setIsDeleteModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
 
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
@@ -393,17 +498,19 @@ export default function DailyAttendance() {
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
 
-                          {/* Delete Button */}
-                          <button
-                            onClick={() => {
-                              setRecordToDelete(item);
-                              setIsDeleteModalOpen(true);
-                            }}
-                            className="p-2 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 rounded-xl transition shadow-xs cursor-pointer"
-                            title="Delete Record"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {/* Delete Button (Only Admin & HR) */}
+                          {canDelete && (
+                            <button
+                              onClick={() => {
+                                setRecordToDelete(item);
+                                setIsDeleteModalOpen(true);
+                              }}
+                              className="p-2 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 rounded-xl transition shadow-xs cursor-pointer"
+                              title="Delete Record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -415,7 +522,7 @@ export default function DailyAttendance() {
         </div>
       </div>
 
-      {/* 🌟 Edit Modal Overlay */}
+      {/* Edit Modal Overlay */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-6 transform scale-100 animate-in zoom-in-95 duration-200 border border-slate-100">
@@ -426,7 +533,7 @@ export default function DailyAttendance() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Update Attendance Status</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Modify shift or attendance records manually</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Modify employee attendance shift record</p>
                 </div>
               </div>
               <button
@@ -475,8 +582,8 @@ export default function DailyAttendance() {
         </div>
       )}
 
-      {/* 🛑 Delete Confirmation Modal Overlay */}
-      {isDeleteModalOpen && (
+      {/* Delete Confirmation Modal Overlay */}
+      {isDeleteModalOpen && canDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 space-y-5 transform scale-100 animate-in zoom-in-95 duration-200 border border-slate-100 text-center">
             <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
@@ -485,7 +592,7 @@ export default function DailyAttendance() {
 
             <div>
               <h3 className="text-base font-bold text-slate-900">Delete Attendance Record?</h3>
-              <p className="text-xs text-slate-500 mt-1">This action cannot be undone. The attendance log for this staff member will be permanently removed.</p>
+              <p className="text-xs text-slate-500 mt-1">This action cannot be undone. The attendance log will be permanently deleted.</p>
             </div>
 
             <div className="flex items-center gap-3 pt-2">

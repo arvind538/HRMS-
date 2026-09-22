@@ -1,3 +1,4 @@
+// src/app/(dashboard)/reports/leave-summary/page.jsx (or your Leave Summary route)
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
@@ -43,15 +44,44 @@ export default function LeaveSummaryPage() {
     const [refreshing, setRefreshing] = useState(false);
     const [leaves, setLeaves] = useState([]);
 
+    // Safe extraction helper for varied backend responses
+    const extractList = (resData) => {
+        if (!resData) return [];
+        if (Array.isArray(resData)) return resData;
+        if (Array.isArray(resData.leaves)) return resData.leaves;
+        if (Array.isArray(resData.data)) return resData.data;
+        if (Array.isArray(resData.data?.leaves)) return resData.data.leaves;
+        if (Array.isArray(resData.records)) return resData.records;
+        if (Array.isArray(resData.docs)) return resData.docs;
+        return [];
+    };
+
     const fetchLeaves = useCallback(async (isManual = false) => {
         if (isManual) setRefreshing(true);
         else setLoading(true);
 
         try {
-            const res = await api.get("/leave");
-            setLeaves(Array.isArray(res?.data) ? res.data : []);
+            // Fetch leaves and fallback reports concurrently
+            const [leavesRes, reportsRes] = await Promise.allSettled([
+                api.get("/leave"),
+                api.get("/reports/leave")
+            ]);
+
+            let extracted = [];
+
+            if (leavesRes.status === "fulfilled") {
+                extracted = extractList(leavesRes.value?.data);
+            }
+
+            // If main /leave endpoint returned empty, check report endpoint
+            if (extracted.length === 0 && reportsRes.status === "fulfilled") {
+                extracted = extractList(reportsRes.value?.data);
+            }
+
+            setLeaves(extracted);
         } catch (err) {
             console.error("Leave summary fetch error:", err);
+            setLeaves([]);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -64,16 +94,19 @@ export default function LeaveSummaryPage() {
 
     const stats = useMemo(() => {
         const total = leaves.length;
-        const approved = leaves.filter((l) => l.status === "approved").length;
-        const pending = leaves.filter((l) => l.status === "pending").length;
-        const rejected = leaves.filter((l) => l.status === "rejected").length;
+
+        // Normalizing statuses to lowercase trimmed strings
+        const approved = leaves.filter((l) => String(l.status || "").toLowerCase().trim() === "approved").length;
+        const pending = leaves.filter((l) => String(l.status || "").toLowerCase().trim() === "pending").length;
+        const rejected = leaves.filter((l) => String(l.status || "").toLowerCase().trim() === "rejected").length;
 
         const approvalRate = total > 0 ? ((approved / total) * 100).toFixed(1) : "0.0";
 
         const typeMap = {};
         leaves.forEach((l) => {
-            const type = l.leaveType ? l.leaveType.toUpperCase() : "OTHER";
-            typeMap[type] = (typeMap[type] || 0) + 1;
+            const rawType = l.leaveType || l.type || l.category || "OTHER";
+            const cleanType = String(rawType).replace(/[-_]/g, " ").toUpperCase().trim();
+            typeMap[cleanType] = (typeMap[cleanType] || 0) + 1;
         });
 
         const byType = Object.entries(typeMap)
@@ -143,7 +176,7 @@ export default function LeaveSummaryPage() {
                         type="button"
                         onClick={() => fetchLeaves(true)}
                         disabled={refreshing}
-                        className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80 text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-60"
+                        className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80 text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-60 cursor-pointer"
                         title="Sync dataset"
                     >
                         <RefreshCw size={15} className={refreshing ? "animate-spin text-indigo-600" : ""} />
@@ -153,7 +186,7 @@ export default function LeaveSummaryPage() {
                     <button
                         type="button"
                         onClick={handleExportSummary}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95 cursor-pointer"
                     >
                         <Download size={15} />
                         <span>Export Snapshot</span>
@@ -197,7 +230,7 @@ export default function LeaveSummaryPage() {
                     </p>
                 </div>
 
-                {/* Pending -> /leave/approval (Approval workflow page) */}
+                {/* Pending -> /leave/approval */}
                 <div
                     onClick={() => router.push("/leave/approval")}
                     className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-amber-300 transition-all duration-300 cursor-pointer group"
@@ -286,7 +319,7 @@ export default function LeaveSummaryPage() {
                             </div>
                         </div>
 
-                        {/* List & Progress Visual Bars (Redirects to /leave/requests?type=...) */}
+                        {/* List & Progress Visual Bars */}
                         <div className="lg:col-span-7 space-y-3.5">
                             {stats.byType.map((item) => {
                                 const percentage = stats.total > 0 ? ((item.value / stats.total) * 100).toFixed(1) : 0;

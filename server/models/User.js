@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema(
         email: { type: String, required: true, unique: true },
         password: { type: String, required: true },
         role: { type: String, enum: ["admin", "hr", "manager", "employee"], default: "employee" },
-        employee: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null }, // ✅ ye field add/verify karo
+        employee: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null }, //  ye field add/verify karo
         isActive: { type: Boolean, default: true },
     },
     { timestamps: true }

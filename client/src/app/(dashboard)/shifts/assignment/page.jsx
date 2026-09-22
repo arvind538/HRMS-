@@ -59,10 +59,10 @@ export default function ShiftAssignmentPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 px-4 sm:px-6 lg:px-8 py-6 transition-all duration-300">
+    <div className="max-w-2xl mx-auto space-y-6 px-4 sm:px-2 lg:px-3 py-3 transition-all duration-300">
 
       {/* Header Section */}
-      <div className="border-b border-slate-200 pb-5">
+      <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-3 sm:p-4 rounded-3xl border border-slate-200/80 shadow-xs">
         <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Shift Assignment</h1>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">Assign custom shift schedules to employees for specific dates.</p>
       </div>

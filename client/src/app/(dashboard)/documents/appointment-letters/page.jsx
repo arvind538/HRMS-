@@ -11,7 +11,7 @@ export default function AppointmentLettersPage() {
   const { user } = useAuth();
   const category = "appointment-letter";
   const title = "Appointment Letters";
-  const description = "Jab candidate company join kar leta hai ya probation period clear karta hai, tab formal Appointment Letter / Employment Agreement yahan upload hota hai.";
+  const description = "When a candidate joins the company or clears their probation period, the formal Appointment Letter / Employment Agreement is uploaded here..";
   const employeeSpecific = true;
 
   const [documents, setDocuments] = useState([]);
@@ -115,7 +115,7 @@ export default function AppointmentLettersPage() {
   return (
     <div className="space-y-6 transition-all duration-300">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">{title}</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl">{description}</p>

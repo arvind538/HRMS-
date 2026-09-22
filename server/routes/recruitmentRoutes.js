@@ -26,6 +26,8 @@ router.delete("/interviews/:id", protect, authorize("admin", "hr", "manager"), c
 router.get("/positions", protect, ctrl.getPositions);
 router.post("/positions", protect, authorize("admin", "hr"), ctrl.createPosition);
 
+router.get("/positions", protect, authorize("admin", "hr"), ctrl.getPositions);
+
 // ✅ Yeh wala PUT route hona hi chahiye (Isko add karein agar nahi hai)
 router.put("/positions/:id", protect, authorize("admin", "hr"), ctrl.updatePosition);
 

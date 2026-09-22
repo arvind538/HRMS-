@@ -11,7 +11,7 @@ export default function SalaryLettersPage() {
   const { user } = useAuth();
   const category = "salary-letter";
   const title = "Salary Letters & Pay Slips";
-  const description = "Salary revision letters, increment letters, promotion letters, and monthly employee pay slips manage karein.";
+  const description = "Manage salary revision letters, increment letters, promotion letters, and monthly employee payslips";
   const employeeSpecific = true;
 
   const [documents, setDocuments] = useState([]);
@@ -161,7 +161,7 @@ export default function SalaryLettersPage() {
   return (
     <div className="space-y-6 transition-all duration-300">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">{title}</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl">{description}</p>

@@ -66,7 +66,7 @@ export default function InternalMessagesPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div>
+      <div className="flex-col md:flex-row md:items-center gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
         <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Internal Messaging</h1>
         <p className="text-xs text-slate-500 mt-1">Direct and secure communication channels with colleagues.</p>
       </div>

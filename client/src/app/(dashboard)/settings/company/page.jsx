@@ -71,10 +71,10 @@ export default function CompanySettingsPage() {
   const currentLogoSrc = (!imgError && form.companyLogo) ? form.companyLogo : getInitialsLogo(form.companyName);
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div className="w-full max-w-3xl mx-auto px-4 sm:px-3 lg:px-4 py- space-y-3">
 
       {/* Header Section */}
-      <div className="border-b border-slate-200 pb-5">
+      <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/85 shadow-xs transition-all">
         <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
           Company Settings
         </h1>

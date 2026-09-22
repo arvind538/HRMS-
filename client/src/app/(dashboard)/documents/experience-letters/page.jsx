@@ -11,7 +11,7 @@ export default function ExperienceLettersPage() {
   const { user } = useAuth();
   const category = "experience-letter";
   const title = "Experience & Relieving Letters";
-  const description = "Jab koi employee company chhod kar jata hai ya internship complete karta hai, toh experience certificates aur relieving letters yahan manage hote hain.";
+  const description = "When an employee leaves the company or completes their internship, experience certificates and relieving letters are managed here";
   const employeeSpecific = true;
 
   const [documents, setDocuments] = useState([]);
@@ -140,7 +140,7 @@ export default function ExperienceLettersPage() {
   return (
     <div className="space-y-6 transition-all duration-300">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">{title}</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl">{description}</p>

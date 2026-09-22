@@ -96,7 +96,7 @@ export default function LoginHistoryPage() {
   ];
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-3 lg:px-3 py-3">
       {/* Header Banner & Summary Stats */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="space-y-1">

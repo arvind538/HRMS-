@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { modulePermissions } from "@/data/permissions";
-import { CheckCircle2, XCircle, ShieldCheck, Search, Lock, KeyRound } from "lucide-react";
+import { canAccessPath } from "@/data/permissions";
+import { CheckCircle2, XCircle, Search, KeyRound } from "lucide-react";
 
 const ROLES = ["admin", "hr", "manager", "employee"];
 
@@ -14,12 +14,25 @@ const ROLE_CONFIG = {
 };
 
 const MODULE_LABELS = {
-  dashboard: "Dashboard", employees: "Employee Management", organization: "Organization",
-  recruitment: "Recruitment", attendance: "Attendance", leave: "Leave Management",
-  payroll: "Payroll", performance: "Performance", training: "Training & Development",
-  expenses: "Expenses", travel: "Travel", assets: "Assets", documents: "Documents",
-  communication: "Communication", shifts: "Shift Management", compliance: "Compliance",
-  reports: "Reports", settings: "Settings", users: "User & Access Management",
+  dashboard: "Dashboard",
+  employees: "Employee Management",
+  organization: "Organization",
+  recruitment: "Recruitment",
+  attendance: "Attendance",
+  leave: "Leave Management",
+  payroll: "Payroll",
+  performance: "Performance",
+  training: "Training & Development",
+  expenses: "Expenses",
+  travel: "Travel",
+  assets: "Assets",
+  documents: "Documents",
+  communication: "Communication",
+  shifts: "Shift Management",
+  compliance: "Compliance",
+  reports: "Reports",
+  settings: "Settings",
+  users: "User & Access Management",
 };
 
 export default function PermissionsPage() {
@@ -35,7 +48,7 @@ export default function PermissionsPage() {
   }, [searchQuery]);
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-3 lg:px-4 py-3">
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="space-y-1">
@@ -54,9 +67,13 @@ export default function PermissionsPage() {
 
         {/* Legend pills */}
         <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100 text-xs text-slate-600">
-          <span className="flex items-center gap-1 font-semibold text-emerald-700"><CheckCircle2 size={14} /> Allowed</span>
+          <span className="flex items-center gap-1 font-semibold text-emerald-700">
+            <CheckCircle2 size={14} /> Allowed
+          </span>
           <span className="text-slate-300">|</span>
-          <span className="flex items-center gap-1 font-semibold text-rose-700"><XCircle size={14} /> Restricted</span>
+          <span className="flex items-center gap-1 font-semibold text-rose-700">
+            <XCircle size={14} /> Restricted
+          </span>
         </div>
       </div>
 
@@ -98,38 +115,35 @@ export default function PermissionsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {filteredModules.length > 0 ? (
-                filteredModules.map(([key, label], index) => {
-                  const allowed = modulePermissions[key] || [];
-                  return (
-                    <tr
-                      key={key}
-                      className="group hover:bg-indigo-50/30 transition-all duration-150"
-                    >
-                      <td className="px-6 py-4 font-semibold text-slate-800 group-hover:text-indigo-950 transition-colors">
-                        <div className="flex items-center gap-2">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-300 group-hover:bg-indigo-600 transition-colors"></span>
-                          {label}
-                        </div>
-                      </td>
-                      {ROLES.map((r) => {
-                        const isAllowed = allowed.includes(r);
-                        return (
-                          <td key={r} className="px-4 py-4 text-center">
-                            {isAllowed ? (
-                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-50 border border-emerald-200 shadow-2xs group-hover:scale-110 transition-transform">
-                                <CheckCircle2 size={16} className="text-emerald-600 stroke-[2.5]" />
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-rose-50/60 border border-rose-200/70 shadow-2xs">
-                                <XCircle size={16} className="text-rose-500/80 stroke-[2.5]" />
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })
+                filteredModules.map(([key, label]) => (
+                  <tr
+                    key={key}
+                    className="group hover:bg-indigo-50/30 transition-all duration-150"
+                  >
+                    <td className="px-6 py-4 font-semibold text-slate-800 group-hover:text-indigo-950 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300 group-hover:bg-indigo-600 transition-colors"></span>
+                        {label}
+                      </div>
+                    </td>
+                    {ROLES.map((r) => {
+                      const isAllowed = canAccessPath(r, `/${key}`);
+                      return (
+                        <td key={r} className="px-4 py-4 text-center">
+                          {isAllowed ? (
+                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-50 border border-emerald-200 shadow-2xs group-hover:scale-110 transition-transform">
+                              <CheckCircle2 size={16} className="text-emerald-600 stroke-[2.5]" />
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-rose-50/60 border border-rose-200/70 shadow-2xs">
+                              <XCircle size={16} className="text-rose-500/80 stroke-[2.5]" />
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))
               ) : (
                 <tr>
                   <td colSpan={ROLES.length + 1} className="py-16 text-center text-slate-400 text-sm font-medium">

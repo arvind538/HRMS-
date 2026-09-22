@@ -1119,3 +1119,20 @@ exports.updateReimbursement = async (req, res, next) => {
         next(err);
     }
 };
+
+
+exports.deletePayroll = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deleted = await Payroll.findByIdAndDelete(id);
+
+        if (!deleted) {
+            return res.status(404).json({ message: "Payslip record not found in database" });
+        }
+
+        return res.status(200).json({ success: true, message: "Payslip deleted successfully" });
+    } catch (error) {
+        console.error("Delete payroll error:", error);
+        return res.status(500).json({ message: "Server error deleting payslip", error: error.message });
+    }
+};

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { FileSpreadsheet, RefreshCw, Calendar, AlertCircle, BarChart3 } from 'lucide-react';
+import { FileSpreadsheet, RefreshCw, Calendar, AlertCircle, BarChart3, IdCard } from 'lucide-react';
 import api from "@/lib/api";
 import { toast } from "react-toastify";
 
@@ -30,40 +30,91 @@ export default function AttendanceReports() {
     }
   };
 
+  // Safe helper to deeply extract and format Employee ID
+  const resolveEmpId = (item) => {
+    const emp = item?.employee;
+    const usr = item?.user || item?.userId;
+
+    // Direct code / employeeId properties
+    const candidate =
+      (typeof emp === "object" ? emp?.employeeId || emp?.empId || emp?.code || emp?.customId : null) ||
+      (typeof usr === "object" ? usr?.employeeId || usr?.empId || usr?.code : null) ||
+      item?.employeeId ||
+      item?.empId ||
+      item?.code ||
+      item?.employeeCode;
+
+    if (candidate && String(candidate).trim() && String(candidate).toLowerCase() !== "null") {
+      return String(candidate).trim();
+    }
+
+    // Fallback: Check MongoDB ObjectId string if populated
+    const fallbackId =
+      (typeof emp === "object" ? emp?._id || emp?.id : emp) ||
+      (typeof usr === "object" ? usr?._id || usr?.id : usr) ||
+      item?._id;
+
+    if (fallbackId && typeof fallbackId === "string" && fallbackId.length >= 4) {
+      return `EMP${fallbackId.slice(-4).toUpperCase()}`;
+    }
+
+    return "EMP-001";
+  };
+
+  // Safe helper to extract Employee Name
+  const resolveEmpName = (item) => {
+    const emp = item?.employee;
+    const usr = item?.user || item?.userId;
+
+    const candidate =
+      (typeof emp === "object" ? emp?.name || emp?.fullName || emp?.username : null) ||
+      (typeof usr === "object" ? usr?.name || usr?.fullName || usr?.username : null) ||
+      (typeof emp === "string" && isNaN(Number(emp)) && emp.length < 24 ? emp : null) ||
+      item?.userName ||
+      item?.name ||
+      item?.employeeName;
+
+    return candidate || "Staff Member";
+  };
+
   const handleFetchReport = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const { data } = await api.get("/attendance/reports", { params: filters });
-      const list = Array.isArray(data) ? data : (data.reports || data.data || []);
+      let list = [];
 
-      const mapped = list.map(item => {
-        const empObj = item.employee || item.user || item.userId || {};
+      // 1. Dedicated Reports Endpoint
+      try {
+        const { data } = await api.get("/attendance/reports", { params: filters });
+        list = Array.isArray(data) ? data : (data.reports || data.data || data.records || []);
+      } catch {
+        list = [];
+      }
 
-        const empId = empObj.employeeId ||
-          empObj.empId ||
-          empObj.code ||
-          empObj._id ||
-          item.employeeId ||
-          item.empId ||
-          "N/A";
+      // 2. Fallback to base attendance endpoint if reports route was empty
+      if (list.length === 0) {
+        const { data: fallbackData } = await api.get("/attendance", { params: filters });
+        list = Array.isArray(fallbackData)
+          ? fallbackData
+          : (fallbackData.attendance || fallbackData.data || fallbackData.records || []);
+      }
 
-        const empName = empObj.name ||
-          empObj.fullName ||
-          empObj.username ||
-          item.userName ||
-          item.name ||
-          "Staff Member";
-
+      const mapped = list.map((item, index) => {
         return {
-          id: item._id || Math.random(),
-          userId: typeof empId === 'string' ? empId.slice(-6) : empId,
-          userName: empName,
-          date: item.date ? new Date(item.date).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+          id: item._id || item.id || index,
+          userId: resolveEmpId(item),
+          userName: resolveEmpName(item),
+          date: item.date
+            ? new Date(item.date).toISOString().slice(0, 10)
+            : new Date(item.createdAt || Date.now()).toISOString().slice(0, 10),
           checkIn: formatTime(item.checkIn || item.inTime),
           checkOut: formatTime(item.checkOut || item.outTime),
-          hours: item.workHours ? `${item.workHours}h` : (item.hours ? `${item.hours}h` : '--'),
+          hours: item.workHours
+            ? `${item.workHours}h`
+            : item.hours
+              ? `${item.hours}h`
+              : '--',
           status: item.status || 'present'
         };
       });
@@ -71,47 +122,9 @@ export default function AttendanceReports() {
       setReportData(mapped);
       toast.success("Attendance report generated successfully!");
     } catch (err) {
-      console.warn("Dedicated reports route failed, trying fallback logs endpoint...", err);
-
-      try {
-        const { data: fallbackData } = await api.get("/attendance");
-        const rawList = Array.isArray(fallbackData) ? fallbackData : (fallbackData.attendance || fallbackData.data || []);
-
-        const mapped = rawList.map(item => {
-          const empObj = item.employee || item.user || item.userId || {};
-
-          const empId = empObj.employeeId ||
-            empObj.empId ||
-            empObj.code ||
-            empObj._id ||
-            item.employeeId ||
-            "N/A";
-
-          const empName = empObj.name ||
-            empObj.fullName ||
-            empObj.username ||
-            item.userName ||
-            "Staff Member";
-
-          return {
-            id: item._id || Math.random(),
-            userId: typeof empId === 'string' ? empId.slice(-6) : empId,
-            userName: empName,
-            date: new Date(item.date || item.createdAt || Date.now()).toISOString().slice(0, 10),
-            checkIn: formatTime(item.checkIn || item.inTime),
-            checkOut: formatTime(item.checkOut || item.outTime),
-            hours: item.workHours ? `${item.workHours}h` : '--',
-            status: item.status || 'present'
-          };
-        });
-
-        setReportData(mapped);
-        toast.success("Report loaded successfully from attendance logs!");
-      } catch (fallbackErr) {
-        console.error("Both endpoints failed:", fallbackErr);
-        setError("Failed to fetch report data from server. Please check if your backend server is running.");
-        toast.error("Failed to generate report.");
-      }
+      console.error("Report fetch error:", err);
+      setError("Failed to fetch report data from server. Please verify backend connection.");
+      toast.error("Failed to generate report.");
     } finally {
       setLoading(false);
     }
@@ -120,7 +133,10 @@ export default function AttendanceReports() {
   const exportCSV = () => {
     if (reportData.length === 0) return;
     const headers = ["Employee ID,Name,Date,Check In,Check Out,Total Hours,Status"];
-    const rows = reportData.map(r => `"${r.userId}","${r.userName}","${r.date}","${r.checkIn || ''}","${r.checkOut || ''}","${r.hours || ''}","${r.status}"`);
+    const rows = reportData.map(
+      (r) =>
+        `"${r.userId}","${r.userName}","${r.date}","${r.checkIn || ''}","${r.checkOut || ''}","${r.hours || ''}","${r.status}"`
+    );
     const blob = new Blob([[...headers, ...rows].join('\n')], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -132,14 +148,15 @@ export default function AttendanceReports() {
 
   return (
     <div className="w-full space-y-6 font-sans pb-12 animate-in fade-in duration-300">
-
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
           <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-indigo-600" /> Attendance Reports & Analytics
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">Generate, filter, and export detailed attendance records and insights</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Generate, filter, and export detailed attendance records and insights
+          </p>
         </div>
         <button
           onClick={exportCSV}
@@ -151,7 +168,10 @@ export default function AttendanceReports() {
       </div>
 
       {/* Filter Parameters Form */}
-      <form onSubmit={handleFetchReport} className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 text-xs items-end">
+      <form
+        onSubmit={handleFetchReport}
+        className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 text-xs items-end"
+      >
         <div>
           <label className="font-bold text-slate-600 uppercase tracking-wider block mb-1.5">From Date</label>
           <input
@@ -224,7 +244,7 @@ export default function AttendanceReports() {
           <div className="py-20 text-center px-4">
             <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />
             <p className="text-sm font-semibold text-slate-700">No attendance data available</p>
-            <p className="text-xs text-slate-400 mt-0.5">Please select a valid date range and click 'Generate Report'.</p>
+            <p className="text-xs text-slate-400 mt-0.5">Please select a valid date range and click &apos;Generate Report&apos;.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -244,17 +264,18 @@ export default function AttendanceReports() {
                 {reportData.map((item) => (
                   <tr
                     key={item.id}
-                    className="hover:bg-indigo-50/60 hover:shadow-2xs transition-all duration-200 group cursor-pointer"
+                    className="hover:bg-indigo-50/40 hover:shadow-2xs transition-all duration-200 group cursor-pointer"
                   >
-                    <td className="py-4 px-6 font-mono text-xs font-bold text-indigo-600">
-                      <span className="bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100 group-hover:bg-indigo-100 transition-colors">
+                    <td className="py-4 px-6 font-mono text-xs font-bold text-indigo-700 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        <IdCard size={12} />
                         {item.userId}
                       </span>
                     </td>
 
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px] flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        <div className="w-7 h-7 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px] flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors font-mono">
                           {item.userName ? item.userName.charAt(0).toUpperCase() : 'U'}
                         </div>
                         <span className="font-bold text-slate-900 text-xs sm:text-sm tracking-tight group-hover:text-indigo-900 transition-colors">
@@ -263,18 +284,20 @@ export default function AttendanceReports() {
                       </div>
                     </td>
 
-                    <td className="py-4 px-6 text-slate-600 text-xs font-medium">{item.date}</td>
-                    <td className="py-4 px-6 font-mono text-xs text-slate-600">{item.checkIn}</td>
-                    <td className="py-4 px-6 font-mono text-xs text-slate-600">{item.checkOut}</td>
-                    <td className="py-4 px-6 font-mono text-xs font-medium text-slate-600">{item.hours}</td>
+                    <td className="py-4 px-6 text-slate-600 text-xs font-medium whitespace-nowrap font-mono">{item.date}</td>
+                    <td className="py-4 px-6 font-mono text-xs text-slate-600 whitespace-nowrap">{item.checkIn}</td>
+                    <td className="py-4 px-6 font-mono text-xs text-slate-600 whitespace-nowrap">{item.checkOut}</td>
+                    <td className="py-4 px-6 font-mono text-xs font-bold text-slate-700 whitespace-nowrap">{item.hours}</td>
 
-                    <td className="py-4 px-6">
-                      <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold capitalize border ${item.status?.toLowerCase() === 'present'
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        : item.status?.toLowerCase() === 'absent'
-                          ? 'bg-rose-50 text-rose-700 border-rose-200'
-                          : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}>
+                    <td className="py-4 px-6 whitespace-nowrap">
+                      <span
+                        className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold capitalize border ${item.status?.toLowerCase() === 'present'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : item.status?.toLowerCase() === 'absent'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}
+                      >
                         {item.status}
                       </span>
                     </td>

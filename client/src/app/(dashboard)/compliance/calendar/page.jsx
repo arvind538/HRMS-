@@ -1,9 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Loader2, Calendar, AlertTriangle, Clock, CalendarDays } from "lucide-react";
+import { Loader2, Calendar, AlertTriangle, Clock, CalendarDays, ArrowRight, ShieldCheck, FileText } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
 import Badge from "@/components/ui/Badge";
+import Modal from "@/components/ui/Modal";
+import Button from "@/components/ui/Button";
 
 const TYPE_LABELS = {
   pf: "Provident Fund (PF)",
@@ -17,20 +19,16 @@ export default function ComplianceCalendarPage() {
   const [upcoming, setUpcoming] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // States for viewing individual compliance details in a modal
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+
   useEffect(() => {
     api.get("/compliance/calendar")
       .then(({ data }) => setUpcoming(Array.isArray(data) ? data : []))
       .catch((err) => toast.error(err.response?.data?.message || "Failed to load compliance calendar."))
       .finally(() => setLoading(false));
   }, []);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px] w-full">
-        <Loader2 className="animate-spin text-indigo-600 w-8 h-8" />
-      </div>
-    );
-  }
 
   const getDaysLeft = (dueDate) => {
     const today = new Date();
@@ -42,11 +40,24 @@ export default function ComplianceCalendarPage() {
     return diffDays;
   };
 
+  const handleItemClick = (item) => {
+    setSelectedItem(item);
+    setDetailsModalOpen(true);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px] w-full">
+        <Loader2 className="animate-spin text-indigo-600 w-8 h-8" />
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div className="w-full max-w-4xl mx-auto px-4 sm:px-3 lg:px-4 py-3 space-y-3">
 
       {/* Header Section */}
-      <div className="border-b border-slate-200 pb-5">
+      <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl shadow-inner">
             <CalendarDays size={24} />
@@ -79,7 +90,8 @@ export default function ComplianceCalendarPage() {
             return (
               <div
                 key={r._id}
-                className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 transition-colors hover:bg-slate-50/80"
+                onClick={() => handleItemClick(r)}
+                className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 transition-all hover:bg-slate-50/80 cursor-pointer group"
               >
                 {/* Left Information */}
                 <div className="flex items-center gap-4">
@@ -98,7 +110,7 @@ export default function ComplianceCalendarPage() {
                   </div>
 
                   <div className="space-y-1">
-                    <p className="text-sm sm:text-base font-bold text-slate-800">
+                    <p className="text-sm sm:text-base font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">
                       {TYPE_LABELS[r.type] || r.type}
                     </p>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium">
@@ -114,26 +126,84 @@ export default function ComplianceCalendarPage() {
                   </div>
                 </div>
 
-                {/* Right Badge Status */}
-                {isUrgent && (
-                  <div className="self-start sm:self-center">
+                {/* Right Badge Status & Arrow */}
+                <div className="flex items-center gap-3 self-start sm:self-center">
+                  {isUrgent && (
                     <Badge variant="danger" className="flex items-center gap-1.5 px-3 py-1 text-xs">
                       <AlertTriangle size={12} /> Urgent Deadline
                     </Badge>
-                  </div>
-                )}
-                {isOverdue && (
-                  <div className="self-start sm:self-center">
+                  )}
+                  {isOverdue && (
                     <Badge variant="warning" className="flex items-center gap-1.5 px-3 py-1 text-xs">
                       <AlertTriangle size={12} /> Overdue
                     </Badge>
-                  </div>
-                )}
+                  )}
+                  <ArrowRight size={16} className="text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all hidden sm:block" />
+                </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {/* Compliance Details Modal */}
+      <Modal isOpen={detailsModalOpen} onClose={() => setDetailsModalOpen(false)} title="Compliance Details">
+        {selectedItem && (
+          <div className="space-y-5">
+            <div className="flex items-center gap-3 p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100">
+              <div className="p-3 bg-indigo-600 text-white rounded-xl">
+                <ShieldCheck size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">
+                  {TYPE_LABELS[selectedItem.type] || selectedItem.type}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">Record ID: {selectedItem._id}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+                <span className="text-xs font-semibold text-slate-400 block">Due Date</span>
+                <span className="text-sm font-bold text-slate-800 mt-1 flex items-center gap-1.5">
+                  <Calendar size={14} className="text-indigo-500" />
+                  {new Date(selectedItem.dueDate).toLocaleDateString()}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-white">
+                <span className="text-xs font-semibold text-slate-400 block">Total Amount</span>
+                <span className="text-sm font-bold text-emerald-600 mt-1 block">
+                  ₹{selectedItem.totalAmount?.toLocaleString() || 0}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+              <div className="flex justify-between text-xs text-slate-500">
+                <span className="font-semibold">Status / Timeline:</span>
+                <span className="font-bold text-slate-700">
+                  {getDaysLeft(selectedItem.dueDate) < 0
+                    ? `${Math.abs(getDaysLeft(selectedItem.dueDate))} Days Overdue`
+                    : `${getDaysLeft(selectedItem.dueDate)} Days Remaining`}
+                </span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-500">
+                <span className="font-semibold">Compliance Type:</span>
+                <span className="font-bold uppercase text-indigo-600">{selectedItem.type}</span>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <Button
+                onClick={() => setDetailsModalOpen(false)}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-2.5 rounded-xl transition-all"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
     </div>
   );

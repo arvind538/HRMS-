@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search,
   ChevronLeft,
@@ -8,13 +8,41 @@ import {
   AlertCircle,
   RefreshCw,
   Loader2,
+  ShieldAlert,
 } from 'lucide-react';
+import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
-const PRIVILEGED_ROLES = ["admin", "hr"];
+// Explicit privileged roles including manager variations
+const PRIVILEGED_ROLES = ["admin", "hr", "manager", "team_lead", "lead"];
+
+function AccessDeniedScreen({ role, router }) {
+  return (
+    <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-4 px-4 text-center">
+      <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center">
+        <ShieldAlert className="w-8 h-8 text-rose-500" />
+      </div>
+      <div className="space-y-1">
+        <h2 className="text-lg font-bold text-slate-900 tracking-tight">Access Denied</h2>
+        <p className="text-xs sm:text-sm font-medium text-slate-500 max-w-xs">
+          Your role ({role || "employee"}) does not have permission to access the monthly attendance register.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => router.push("/dashboard")}
+        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-xs transition-all duration-200 hover:shadow-md active:scale-95 cursor-pointer"
+      >
+        Back to Dashboard
+      </button>
+    </div>
+  );
+}
 
 export default function MonthlyAttendance() {
+  const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -26,9 +54,22 @@ export default function MonthlyAttendance() {
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-  const role = user?.role?.toLowerCase() || null;
+  // Safe normalized role extraction (string, nested object, or array)
+  const currentRole = useMemo(() => {
+    if (!user) return null;
+    const rawRole = user.role || user.userRole || user.type;
+    if (typeof rawRole === "string") return rawRole.toLowerCase().trim();
+    if (typeof rawRole === "object" && rawRole !== null) {
+      return (rawRole.name || rawRole.title || "").toLowerCase().trim();
+    }
+    if (Array.isArray(user.roles) && user.roles.length > 0) {
+      return String(user.roles[0]).toLowerCase().trim();
+    }
+    return null;
+  }, [user]);
+
   const roleChecked = !authLoading;
-  const isPrivileged = role && PRIVILEGED_ROLES.includes(role);
+  const isPrivileged = Boolean(currentRole && PRIVILEGED_ROLES.includes(currentRole));
 
   const fetchMonthlyData = useCallback(async () => {
     try {
@@ -39,7 +80,7 @@ export default function MonthlyAttendance() {
         params: { month: selectedMonth, year: selectedYear },
       });
 
-      const records = Array.isArray(data) ? data : [];
+      const records = Array.isArray(data) ? data : (data?.data || data?.records || []);
       const employeeMap = {};
 
       records.forEach((rec) => {
@@ -48,7 +89,6 @@ export default function MonthlyAttendance() {
         if (!empId) return;
 
         if (!employeeMap[empId]) {
-          // Safe extraction for employee code/ID with multiple fallbacks
           const resolvedCode = empObj?.employeeId || empObj?.empId || empObj?.code || (typeof empId === 'string' ? empId.slice(-6) : "—");
 
           employeeMap[empId] = {
@@ -80,13 +120,13 @@ export default function MonthlyAttendance() {
     } catch (err) {
       console.error("Fetch monthly attendance error:", err);
       if (err.response?.status === 401) {
-        setErrorMsg("Session expire ho gaya hai — dobara login karo.");
+        setErrorMsg("Session expired. Please log in again.");
       } else if (err.response?.status === 403) {
-        setErrorMsg("Aapke role ko ye data dekhne ki permission nahi hai.");
+        setErrorMsg("Your manager/staff profile is not authorized to view this data on the backend.");
       } else if (!err.response) {
-        setErrorMsg("Backend server tak pahunch nahi paaye — check karo backend chal raha hai ya nahi.");
+        setErrorMsg("Unable to reach backend server. Please check your network or server status.");
       } else {
-        setErrorMsg(err.response?.data?.message || "Kuch galat ho gaya, dobara try karo.");
+        setErrorMsg(err.response?.data?.message || "Failed to fetch attendance data.");
       }
     } finally {
       setLoading(false);
@@ -155,53 +195,53 @@ export default function MonthlyAttendance() {
     return name.includes(q) || empCode.includes(q);
   });
 
-  if (roleChecked && !isPrivileged) {
+  if (!roleChecked) {
     return (
-      <div className="w-full flex flex-col items-center justify-center py-24 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-rose-50 flex items-center justify-center mb-4">
-          <AlertCircle className="w-7 h-7 text-rose-500" />
-        </div>
-        <h2 className="text-lg font-bold text-slate-900">Access Denied</h2>
-        <p className="text-sm text-slate-500 mt-1 max-w-xs m-5">
-          Your role ({role}) does not have permission to access this page.
+      <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
+        <Loader2 size={36} className="animate-spin text-indigo-600" />
+        <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
+          Verifying permissions...
         </p>
-
-        <button
-          type="button"
-          onClick={() => router.push("/dashboard")}
-          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-bold shadow-sm shadow-indigo-200 transition-all duration-200 hover:shadow-md hover:shadow-indigo-300 active:scale-95"
-        >
-          Back to Dashboard
-        </button>
       </div>
     );
+  }
+
+  if (!isPrivileged) {
+    return <AccessDeniedScreen role={currentRole} router={router} />;
   }
 
   return (
     <div className="w-full space-y-5 animate-in fade-in duration-300 pb-12 font-sans">
 
+      {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Monthly Attendance Sheet</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Monthly Attendance Sheet</h1>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase tracking-wider">
+              {currentRole}
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">Comprehensive monthly presence sheet, late marks, and leaves.</p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-1 shadow-2xs">
-            <button onClick={handlePrevMonth} className="p-1.5 hover:bg-white hover:text-indigo-600 rounded-lg text-slate-600 transition" title="Previous Month">
+            <button onClick={handlePrevMonth} className="p-1.5 hover:bg-white hover:text-indigo-600 rounded-lg text-slate-600 transition cursor-pointer" title="Previous Month">
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span className="px-3 text-xs sm:text-sm font-bold text-slate-800 min-w-[130px] text-center">
               {monthNames[selectedMonth - 1]} {selectedYear}
             </span>
-            <button onClick={handleNextMonth} className="p-1.5 hover:bg-white hover:text-indigo-600 rounded-lg text-slate-600 transition" title="Next Month">
+            <button onClick={handleNextMonth} className="p-1.5 hover:bg-white hover:text-indigo-600 rounded-lg text-slate-600 transition cursor-pointer" title="Next Month">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
           <button
             onClick={fetchMonthlyData}
-            className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:bg-slate-100 active:scale-95 transition shadow-2xs cursor-pointer"
+            disabled={loading}
+            className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:text-indigo-600 hover:bg-slate-100 active:scale-95 transition shadow-2xs cursor-pointer disabled:opacity-50"
             title="Refresh Sheet"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
@@ -209,6 +249,7 @@ export default function MonthlyAttendance() {
         </div>
       </div>
 
+      {/* Filter and Legend Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
@@ -245,6 +286,7 @@ export default function MonthlyAttendance() {
         </div>
       )}
 
+      {/* Table Container */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-600 border-collapse">
@@ -275,11 +317,11 @@ export default function MonthlyAttendance() {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {(!roleChecked || loading) ? (
+              {loading ? (
                 <tr>
                   <td colSpan={daysInMonth + 4} className="py-16 text-center text-slate-400">
                     <Loader2 className="w-7 h-7 animate-spin mx-auto text-indigo-600 mb-2" />
-                    {!roleChecked ? "Verifying access..." : "Fetching monthly records from backend..."}
+                    Fetching monthly records from backend...
                   </td>
                 </tr>
               ) : visibleList.length === 0 ? (
@@ -291,7 +333,6 @@ export default function MonthlyAttendance() {
               ) : (
                 visibleList.map((item) => {
                   const empName = item.employee?.name || item.employee?.username || "Staff Member";
-                  // Multiple fallbacks to pick up employee code/ID correctly
                   const empId = item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?._id?.slice(-6) || "—";
 
                   return (

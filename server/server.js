@@ -43,13 +43,12 @@ const holidayRoutes = require("./routes/holidayRoutes");
 const app = express();
 connectDB();
 
-
 app.use(
     cors({
         origin: [
-            "https://hrms-theta-beryl.vercel.app", // Aapka live Vercel link
-            "http://localhost:3000",
-            "http://localhost:5173"
+            "https://arvind-hrms-portal.vercel.app", // Aapka naya domain yahan
+            "https://hrms-theta-beryl.vercel.app",   // Purana backup ke liye rakh sakte hain
+            "http://localhost:3000"
         ],
         credentials: true,
     })

@@ -46,9 +46,10 @@ connectDB();
 app.use(
     cors({
         origin: [
-            "https://arvind-hrms-portal.vercel.app", // Aapka naya domain yahan
-            "https://hrms-theta-beryl.vercel.app",   // Purana backup ke liye rakh sakte hain
-            "http://localhost:3000"
+            "https://hrms-system-live.vercel.app",
+            "https://hrms-theta-beryl.vercel.app",
+            "http://localhost:3000",
+            "http://localhost:5173"
         ],
         credentials: true,
     })

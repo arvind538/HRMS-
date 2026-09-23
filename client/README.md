@@ -358,8 +358,12 @@ export const menuConfig = [
 
 
 
+frontend_url=https://hrms-6j2j-git-main-arvindk27747-1094s-projects.vercel.app/login
 
-
-
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://hrms-theta-beryl.vercel.app",
+  "https://hrms-6j2j-git-main-arvindk27747-1094s-projects.vercel.app"
+];
 
  

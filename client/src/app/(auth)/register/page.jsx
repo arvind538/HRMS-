@@ -79,7 +79,7 @@ export default function RegisterPage() {
                     </div>
 
                     <h2 className="text-xl font-bold text-slate-900 mb-0.5">Create your account</h2>
-                    <p className="text-sm text-slate-500 mb-6">Employee onboarding sirf 1 minute mein</p>
+                    <p className="text-sm text-slate-500 mb-6">Complete employee onboarding in only 1 minute.</p>
 
                     {error && (
                         <div className="bg-red-50 border border-red-100 text-red-600 text-sm px-3.5 py-2.5 rounded-xl mb-4">

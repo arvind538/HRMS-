@@ -43,11 +43,24 @@ const holidayRoutes = require("./routes/holidayRoutes");
 const app = express();
 connectDB();
 
-app.use(cors({
-    origin: process.env.FRONTEND_URL,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    optionsSuccessStatus: 200,
-}));
+import cors from "cors";
+
+app.use(
+    cors({
+        origin: [
+            "https://hrms-theta-beryl.vercel.app", // Aapka live Vercel link
+            "http://localhost:3000",
+            "http://localhost:5173"
+        ],
+        credentials: true,
+    })
+);
+
+// app.use(cors({
+//     origin: process.env.FRONTEND_URL,
+//     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+//     optionsSuccessStatus: 200,
+// }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

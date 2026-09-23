@@ -54,7 +54,7 @@ export default function LoginPage() {
                         </div>
                         <span className="text-xl font-bold text-slate-900 tracking-tight">HRMS Portal</span>
                     </div>
-                    <h2 className="text-xl font-bold text-slate-900 mb-1">Welcome back</h2>
+                    <h2 className="text-xl font-bold text-slate-900 mb-1">Welcome to back</h2>
                     <p className="text-sm text-slate-500 mb-6">Log in to access your dashboard.</p>
 
                     <form onSubmit={handleSubmit} className="space-y-4" noValidate>

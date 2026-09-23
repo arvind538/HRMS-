@@ -43,7 +43,6 @@ const holidayRoutes = require("./routes/holidayRoutes");
 const app = express();
 connectDB();
 
-import cors from "cors";
 
 app.use(
     cors({

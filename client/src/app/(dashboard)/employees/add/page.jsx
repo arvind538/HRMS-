@@ -22,7 +22,7 @@ import { toast } from "react-toastify";
 function EmployeeFormContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const editId = searchParams.get("id"); // URL se employee ID lena (e.g. /employees/add?id=12345)
+    const editId = searchParams.get("id");
 
     const [form, setForm] = useState({
         name: "",
@@ -38,11 +38,12 @@ function EmployeeFormContent() {
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(false);
 
-    // Agar editId mojood hai, toh purana data fetch karke form mein pre-fill karein
+    // If editId is provided, fetch existing employee profile to pre-fill the form
     useEffect(() => {
         if (editId) {
             setFetching(true);
-            api.get(`/employees/${editId}`)
+            api
+                .get(`/employees/${editId}`)
                 .then((res) => {
                     const emp = res?.data;
                     if (emp) {
@@ -52,20 +53,23 @@ function EmployeeFormContent() {
                             phone: emp.phone || "",
                             designation: emp.designation || "",
                             branch: emp.branch || emp.department || "",
-                            dateOfJoining: emp.dateOfJoining ? emp.dateOfJoining.split("T")[0] : "",
+                            dateOfJoining: emp.dateOfJoining
+                                ? emp.dateOfJoining.split("T")[0]
+                                : "",
                             salary: emp.salary || "",
                         });
                     }
                 })
                 .catch((err) => {
                     console.error("Failed to fetch employee details:", err);
-                    setError("Employee ki details load nahi ho payi.");
+                    setError("Failed to load employee details. Please refresh the page.");
                 })
                 .finally(() => setFetching(false));
         }
     }, [editId]);
 
-    const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+    const handleChange = (e) =>
+        setForm({ ...form, [e.target.name]: e.target.value });
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -74,13 +78,11 @@ function EmployeeFormContent() {
 
         try {
             if (editId) {
-                // Agar ID hai toh Update (PUT request) karein
                 await api.put(`/employees/${editId}`, form);
-                toast.success("Employee Updated Successfully!");
+                toast.success("Employee record updated successfully!");
             } else {
-                // Agar ID nahi hai toh Naya Register (POST request) karein
                 await api.post("/employees", form);
-                toast.success("Submitted Data Successfully!");
+                toast.success("Employee registered successfully!");
             }
             router.push("/employees");
         } catch (err) {
@@ -88,7 +90,7 @@ function EmployeeFormContent() {
             setError(
                 err.response?.data?.message ||
                 err.response?.data?.error ||
-                "Failed to save employee record. Please try again."
+                "Failed to save employee record. Please verify the details and try again."
             );
         } finally {
             setLoading(false);
@@ -97,142 +99,149 @@ function EmployeeFormContent() {
 
     if (fetching) {
         return (
-            <div className="w-full py-28 flex flex-col items-center justify-center gap-3 text-slate-400">
-                <Loader2 size={32} className="animate-spin text-indigo-600" />
-                <p className="text-xs font-bold uppercase tracking-wider">Loading employee profile...</p>
+            <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
+                <Loader2 size={36} className="animate-spin text-indigo-600" />
+                <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
+                    Loading Employee Profile...
+                </p>
             </div>
         );
     }
 
     return (
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 antialiased">
+        <div className="max-w-4xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
             {/* Header & Back Action */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
                 <div className="flex items-center gap-3.5">
                     <button
                         type="button"
                         onClick={() => router.back()}
-                        className="p-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-xs transition-all active:scale-95 shrink-0 cursor-pointer"
+                        className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-2xs transition-all active:scale-95 shrink-0 cursor-pointer"
                         title="Go back"
                     >
                         <ArrowLeft size={18} />
                     </button>
                     <div>
-                        <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">
+                        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                             {editId ? "Update Employee Details" : "Register New Employee"}
                         </h1>
-                        <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-0.5">
+                        <p className="text-xs sm:text-sm font-medium text-slate-500 mt-0.5">
                             {editId
-                                ? "Modify existing credentials and organizational parameters."
-                                : "Fill out the credentials and organizational allocation to onboard team personnel."}
+                                ? "Modify existing staff credentials and organizational parameters."
+                                : "Fill in the required information to onboard team personnel."}
                         </p>
                     </div>
                 </div>
             </div>
 
             {/* Main Form Container */}
-            <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-xs transition-all duration-200">
+            <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 p-5 sm:p-8 shadow-xs transition-all duration-200">
                 {error && (
-                    <div className="flex items-center gap-2.5 bg-rose-50 border border-rose-200/80 text-rose-700 text-xs sm:text-sm px-4 py-3 rounded-2xl mb-6 shadow-xs">
+                    <div className="flex items-center gap-2.5 bg-rose-50 border border-rose-200/80 text-rose-700 text-xs sm:text-sm px-4 py-3 rounded-2xl mb-6 shadow-2xs">
                         <AlertCircle size={16} className="shrink-0 text-rose-500" />
                         <span className="font-semibold">{error}</span>
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                         {/* Full Name */}
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <User size={13} className="text-indigo-600" /> Full Name <span className="text-rose-500">*</span>
+                                <User size={13} className="text-indigo-600 shrink-0" /> Full Name{" "}
+                                <span className="text-rose-500">*</span>
                             </label>
                             <input
+                                type="text"
                                 name="name"
                                 required
-                                placeholder="e.g. Rahul Sharma"
+                                placeholder="e.g. John Doe"
                                 value={form.name}
                                 onChange={handleChange}
-                                className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-xs"
+                                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs"
                             />
                         </div>
 
                         {/* Work Email */}
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <Mail size={13} className="text-indigo-600" /> Work Email <span className="text-rose-500">*</span>
+                                <Mail size={13} className="text-indigo-600 shrink-0" /> Work Email{" "}
+                                <span className="text-rose-500">*</span>
                             </label>
                             <input
                                 type="email"
                                 name="email"
                                 required
-                                placeholder="rahul.sharma@company.com"
+                                placeholder="john.doe@company.com"
                                 value={form.email}
                                 onChange={handleChange}
-                                className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-xs"
+                                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs"
                             />
                         </div>
 
                         {/* Phone Number */}
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <Phone size={13} className="text-indigo-600" /> Phone Number
+                                <Phone size={13} className="text-indigo-600 shrink-0" /> Phone Number
                             </label>
                             <input
                                 type="tel"
                                 name="phone"
-                                placeholder="+91 98765 43210"
+                                placeholder="+1 555-0199"
                                 value={form.phone}
                                 onChange={handleChange}
-                                className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-xs font-mono"
+                                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs font-mono"
                             />
                         </div>
 
                         {/* Designation */}
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <Briefcase size={13} className="text-indigo-600" /> Designation
+                                <Briefcase size={13} className="text-indigo-600 shrink-0" /> Designation
                             </label>
                             <input
+                                type="text"
                                 name="designation"
                                 placeholder="e.g. Senior Software Engineer"
                                 value={form.designation}
                                 onChange={handleChange}
-                                className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-xs"
+                                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs"
                             />
                         </div>
 
-                        {/* Branch / Office */}
+                        {/* Branch / Department */}
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <Building2 size={13} className="text-indigo-600" /> Branch / Department
+                                <Building2 size={13} className="text-indigo-600 shrink-0" /> Department / Branch
                             </label>
                             <input
+                                type="text"
                                 name="branch"
-                                placeholder="e.g. Engineering / Jaipur HQ"
+                                placeholder="e.g. Engineering / HQ"
                                 value={form.branch}
                                 onChange={handleChange}
-                                className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-xs"
+                                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs"
                             />
                         </div>
 
                         {/* Date of Joining */}
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <Calendar size={13} className="text-indigo-600" /> Date of Joining
+                                <Calendar size={13} className="text-indigo-600 shrink-0" /> Date of Joining
                             </label>
                             <input
                                 type="date"
                                 name="dateOfJoining"
                                 value={form.dateOfJoining}
                                 onChange={handleChange}
-                                className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-xs"
+                                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs"
                             />
                         </div>
 
-                        {/* Monthly Salary */}
+                        {/* Monthly Compensation */}
                         <div className="space-y-1.5 sm:col-span-2">
                             <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                <IndianRupee size={13} className="text-indigo-600" /> Monthly Compensation (₹)
+                                <IndianRupee size={13} className="text-indigo-600 shrink-0" /> Monthly Compensation (₹)
                             </label>
                             <input
                                 type="number"
@@ -240,38 +249,38 @@ function EmployeeFormContent() {
                                 placeholder="e.g. 75000"
                                 value={form.salary}
                                 onChange={handleChange}
-                                className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-xs font-mono"
+                                className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs font-mono"
                             />
                         </div>
                     </div>
 
-                    {/* Footer Actions */}
-                    <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                    {/* Footer Action Buttons */}
+                    <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5 sm:gap-3 pt-4 border-t border-slate-100">
                         <button
                             type="button"
                             onClick={() => router.back()}
-                            className="w-full sm:w-auto px-5 py-3 rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs sm:text-sm font-bold transition-all active:scale-95 cursor-pointer"
+                            className="w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs sm:text-sm font-bold transition-all active:scale-95 cursor-pointer"
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-sm shadow-indigo-600/20 disabled:opacity-60 transition-all active:scale-95 cursor-pointer"
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-sm shadow-indigo-600/20 disabled:opacity-60 transition-all active:scale-95 cursor-pointer"
                         >
                             {loading ? (
                                 <>
-                                    <Loader2 size={16} className="animate-spin" />
+                                    <Loader2 size={16} className="animate-spin shrink-0" />
                                     <span>Saving Profile...</span>
                                 </>
                             ) : editId ? (
                                 <>
-                                    <Save size={16} />
+                                    <Save size={16} className="shrink-0" />
                                     <span>Save Changes</span>
                                 </>
                             ) : (
                                 <>
-                                    <UserPlus size={16} />
+                                    <UserPlus size={16} className="shrink-0" />
                                     <span>Register Employee</span>
                                 </>
                             )}
@@ -285,12 +294,16 @@ function EmployeeFormContent() {
 
 export default function AddEmployeePage() {
     return (
-        <Suspense fallback={
-            <div className="w-full py-28 flex flex-col items-center justify-center gap-3 text-slate-400">
-                <Loader2 size={32} className="animate-spin text-indigo-600" />
-                <p className="text-xs font-bold uppercase tracking-wider">Loading form...</p>
-            </div>
-        }>
+        <Suspense
+            fallback={
+                <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
+                    <Loader2 size={36} className="animate-spin text-indigo-600" />
+                    <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
+                        Loading form...
+                    </p>
+                </div>
+            }
+        >
             <EmployeeFormContent />
         </Suspense>
     );

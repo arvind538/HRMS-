@@ -63,10 +63,10 @@ const getLastNDays = (n) => {
 const CustomAttendanceTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
         return (
-            <div className="bg-slate-900/95 backdrop-blur-md text-white p-3.5 rounded-2xl shadow-xl border border-slate-800 text-xs min-w-[150px]">
+            <div className="bg-slate-900/95 backdrop-blur-md text-white p-3 sm:p-3.5 rounded-2xl shadow-xl border border-slate-800 text-xs min-w-[140px] sm:min-w-[150px]">
                 <p className="font-bold text-slate-300 mb-2 border-b border-slate-800 pb-1.5 flex items-center justify-between">
                     <span>{label}</span>
-                    <Clock size={12} className="text-slate-500" />
+                    <Clock size={12} className="text-slate-500 shrink-0" />
                 </p>
                 <div className="space-y-1.5 font-medium">
                     <div className="flex items-center justify-between gap-4">
@@ -227,29 +227,30 @@ export default function DashboardPage() {
     }
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-3 lg:px-3 py-2 space-y-3 antialiased">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 antialiased">
             {/* Header Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 sm:p-7 rounded-2xl border border-slate-200/80 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
                 <div>
-                    <div className="flex items-center gap-2">
-                        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                             Executive Overview
                         </h1>
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/70">
-                            <Sparkles size={12} /> Real-Time
+                            <Sparkles size={12} /> Live Sync
                         </span>
                     </div>
-                    <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1 flex items-center gap-1.5">
-                        <Calendar size={14} className="text-slate-400" />
+                    <p className="text-xs sm:text-sm font-medium text-slate-500 mt-1 flex items-center gap-1.5">
+                        <Calendar size={14} className="text-slate-400 shrink-0" />
                         {getTodayFormatted()}
                     </p>
                 </div>
 
-                <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
                     <button
+                        type="button"
                         onClick={() => fetchData(true)}
                         disabled={refreshing}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-60 cursor-pointer"
+                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-60 cursor-pointer"
                         title="Refresh dashboard metrics"
                     >
                         <RefreshCw size={14} className={refreshing ? "animate-spin text-indigo-600" : ""} />
@@ -257,8 +258,9 @@ export default function DashboardPage() {
                     </button>
 
                     <button
+                        type="button"
                         onClick={handleExportAttendance}
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition-all active:scale-95 hover:shadow-md cursor-pointer"
+                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition-all active:scale-95 hover:shadow-md cursor-pointer"
                     >
                         <Download size={14} />
                         <span>Export CSV</span>
@@ -266,40 +268,48 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {/* 4 Key Stat Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-indigo-200 transition-all group cursor-pointer" onClick={() => router.push("/employees")}>
+            {/* 4 Stat Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5 sm:gap-4">
+                {/* Card 1: Total Employees */}
+                <div
+                    className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-indigo-200 transition-all group cursor-pointer"
+                    onClick={() => router.push("/employees")}
+                >
                     <div className="flex items-center justify-between">
-                        <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100/80 shadow-xs group-hover:scale-110 transition-transform">
-                            <Users size={22} />
+                        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100/80 shadow-xs group-hover:scale-105 transition-transform">
+                            <Users size={20} className="sm:w-[22px] sm:h-[22px]" />
                         </div>
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                             Workforce
                         </span>
                     </div>
                     <div className="mt-4">
-                        <h3 className="text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
+                        <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
                             {totalEmployeesCount.toLocaleString()}
                         </h3>
                         <p className="text-xs font-bold text-slate-600 mt-1">Total Employees</p>
                         <p className="text-[11px] font-semibold text-emerald-600 mt-1 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                             {activeEmployeesCount} active on roster
                         </p>
                     </div>
                 </div>
 
-                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-emerald-200 transition-all group cursor-pointer" onClick={() => router.push("/attendance")}>
+                {/* Card 2: Attendance */}
+                <div
+                    className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-emerald-200 transition-all group cursor-pointer"
+                    onClick={() => router.push("/attendance")}
+                >
                     <div className="flex items-center justify-between">
-                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/80 shadow-xs group-hover:scale-110 transition-transform">
-                            <CheckCircle2 size={22} />
+                        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/80 shadow-xs group-hover:scale-105 transition-transform">
+                            <CheckCircle2 size={20} className="sm:w-[22px] sm:h-[22px]" />
                         </div>
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            Turnout
+                            Attendance
                         </span>
                     </div>
                     <div className="mt-4">
-                        <h3 className="text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
+                        <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
                             {todayAttendanceCount.toLocaleString()}
                         </h3>
                         <p className="text-xs font-bold text-slate-600 mt-1">Present Today</p>
@@ -309,77 +319,85 @@ export default function DashboardPage() {
                     </div>
                 </div>
 
-                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-amber-200 transition-all group cursor-pointer" onClick={() => router.push("/leave")}>
+                {/* Card 3: Pending Leaves */}
+                <div
+                    className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-amber-200 transition-all group cursor-pointer"
+                    onClick={() => router.push("/leave")}
+                >
                     <div className="flex items-center justify-between">
-                        <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100/80 shadow-xs group-hover:scale-110 transition-transform">
-                            <Calendar size={22} />
+                        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100/80 shadow-xs group-hover:scale-105 transition-transform">
+                            <Calendar size={20} className="sm:w-[22px] sm:h-[22px]" />
                         </div>
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            Leaves
+                            Leave Requests
                         </span>
                     </div>
                     <div className="mt-4">
-                        <h3 className="text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
+                        <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
                             {pendingLeaves.length}
                         </h3>
-                        <p className="text-xs font-bold text-slate-600 mt-1">Pending Requests</p>
+                        <p className="text-xs font-bold text-slate-600 mt-1">Pending Approval</p>
                         <p className="text-[11px] font-semibold text-amber-600 mt-1">
-                            Awaiting administrative review
+                            Awaiting manager review
                         </p>
                     </div>
                 </div>
 
-                <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-cyan-200 transition-all group cursor-pointer" onClick={() => router.push("/recruitment")}>
+                {/* Card 4: Open Positions */}
+                <div
+                    className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:shadow-lg hover:border-cyan-200 transition-all group cursor-pointer"
+                    onClick={() => router.push("/recruitment")}
+                >
                     <div className="flex items-center justify-between">
-                        <div className="w-12 h-12 rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center border border-cyan-100/80 shadow-xs group-hover:scale-110 transition-transform">
-                            <Briefcase size={22} />
+                        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-cyan-50 text-cyan-600 flex items-center justify-center border border-cyan-100/80 shadow-xs group-hover:scale-105 transition-transform">
+                            <Briefcase size={20} className="sm:w-[22px] sm:h-[22px]" />
                         </div>
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            Talent
+                            Recruitment
                         </span>
                     </div>
                     <div className="mt-4">
-                        <h3 className="text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
+                        <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-mono">
                             {openPositionsCount}
                         </h3>
                         <p className="text-xs font-bold text-slate-600 mt-1">Open Positions</p>
                         <p className="text-[11px] font-semibold text-slate-400 mt-1">
-                            Active recruitment campaigns
+                            Active job postings
                         </p>
                     </div>
                 </div>
             </div>
 
             {/* Attendance Trend Chart */}
-            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs hover:shadow-md transition-all space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-5">
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 border border-slate-200/80 shadow-xs hover:shadow-md transition-all space-y-4 sm:space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4 sm:pb-5">
                     <div>
                         <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-bold text-slate-900 tracking-tight">
-                                7-Day Attendance Dynamic Trend
+                            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+                                7-Day Attendance Trend
                             </h2>
                             <span className="p-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100">
                                 <TrendingUp size={14} />
                             </span>
                         </div>
                         <p className="text-xs font-medium text-slate-500 mt-0.5">
-                            Comparative turnout trajectory across daily work shifts
+                            Daily turnout comparison across active working shifts
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-4 text-xs font-bold text-slate-600">
-                        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/60">
+                    <div className="flex items-center gap-3 sm:gap-4 text-xs font-bold text-slate-600 self-start sm:self-auto">
+                        <div className="flex items-center gap-2 bg-slate-50 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200/60">
                             <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 ring-2 ring-indigo-500/20" />
                             <span>Present</span>
                         </div>
-                        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/60">
+                        <div className="flex items-center gap-2 bg-slate-50 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200/60">
                             <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-500/20" />
                             <span>Absent</span>
                         </div>
                     </div>
                 </div>
 
-                <div className="h-72 w-full select-none pt-2">
+                <div className="h-64 sm:h-72 w-full select-none pt-2">
                     <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={attendanceTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                             <defs>
@@ -396,43 +414,43 @@ export default function DashboardPage() {
                             <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b", fontWeight: 600 }} dy={10} />
                             <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#94a3b8", fontWeight: 500 }} />
                             <Tooltip content={<CustomAttendanceTooltip />} />
-                            <Area type="monotone" dataKey="present" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#presentGradient)" activeDot={{ r: 6, stroke: "#6366f1", strokeWidth: 2.5, fill: "#ffffff" }} />
-                            <Area type="monotone" dataKey="absent" stroke="#f43f5e" strokeWidth={3} fillOpacity={1} fill="url(#absentGradient)" activeDot={{ r: 6, stroke: "#f43f5e", strokeWidth: 2.5, fill: "#ffffff" }} />
+                            <Area type="monotone" dataKey="present" stroke="#6366f1" strokeWidth={2.5} fillOpacity={1} fill="url(#presentGradient)" activeDot={{ r: 5, stroke: "#6366f1", strokeWidth: 2, fill: "#ffffff" }} />
+                            <Area type="monotone" dataKey="absent" stroke="#f43f5e" strokeWidth={2.5} fillOpacity={1} fill="url(#absentGradient)" activeDot={{ r: 5, stroke: "#f43f5e", strokeWidth: 2, fill: "#ffffff" }} />
                         </AreaChart>
                     </ResponsiveContainer>
                 </div>
             </div>
 
-            {/* Leave Distribution & Department Headcount Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Grid: Leave Distribution & Department Breakdown */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
                 {/* Leave Distribution */}
-                <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-5">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-5">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                         <div>
                             <h2 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
                                 <PieChartIcon size={17} className="text-indigo-600" />
-                                Leave Distribution Overview
+                                Leave Breakdown
                             </h2>
                             <p className="text-xs font-medium text-slate-500 mt-0.5">
-                                Year-to-date utilization • {totalLeaveCount} total registered leaves
+                                Annual overview • {totalLeaveCount} total days requested
                             </p>
                         </div>
                     </div>
 
                     {leaveDistribution.length === 0 ? (
-                        <div className="py-16 text-center text-xs font-medium text-slate-400">
-                            No leave records registered for analysis.
+                        <div className="py-12 sm:py-16 text-center text-xs font-medium text-slate-400">
+                            No leave records found for the selected period.
                         </div>
                     ) : (
                         <div className="space-y-4">
                             <div className="py-2 flex items-center justify-center">
-                                <div className="h-44 w-44 relative flex items-center justify-center">
+                                <div className="h-40 w-40 sm:h-44 sm:w-44 relative flex items-center justify-center">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <PieChart>
                                             <Pie
                                                 data={leaveDistribution}
-                                                innerRadius={52}
-                                                outerRadius={74}
+                                                innerRadius={48}
+                                                outerRadius={70}
                                                 paddingAngle={5}
                                                 dataKey="value"
                                             >
@@ -443,7 +461,7 @@ export default function DashboardPage() {
                                         </PieChart>
                                     </ResponsiveContainer>
                                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                        <span className="text-xl font-extrabold text-slate-900 font-mono">
+                                        <span className="text-lg sm:text-xl font-extrabold text-slate-900 font-mono">
                                             {totalLeaveCount}
                                         </span>
                                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -453,15 +471,15 @@ export default function DashboardPage() {
                                 </div>
                             </div>
 
-                            <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                            <div className="space-y-2 pt-2 border-t border-slate-100">
                                 {leaveDistribution.map((item) => (
                                     <div key={item.name} className="flex items-center justify-between text-xs p-1.5 rounded-xl hover:bg-slate-50 transition-colors">
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-2.5 h-2.5 rounded-full shadow-xs" style={{ backgroundColor: item.color }} />
-                                            <span className="text-slate-700 font-bold">{item.name}</span>
+                                        <div className="flex items-center gap-2 min-w-0 pr-2">
+                                            <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.color }} />
+                                            <span className="text-slate-700 font-bold truncate">{item.name}</span>
                                         </div>
-                                        <div className="flex items-center gap-3 w-36 justify-end">
-                                            <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+                                            <div className="w-16 sm:w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                                 <div
                                                     className="h-full rounded-full transition-all duration-500"
                                                     style={{
@@ -481,29 +499,29 @@ export default function DashboardPage() {
                     )}
                 </div>
 
-                {/* Department Headcount Structure */}
-                <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-indigo-200 transition-all duration-300 flex flex-col justify-between space-y-5 group/card">
+                {/* Department Headcount */}
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-indigo-200 transition-all duration-300 flex flex-col justify-between space-y-5 group/card">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                         <div>
                             <h2 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2 group-hover/card:text-indigo-600 transition-colors">
                                 <Building2 size={17} className="text-indigo-600 group-hover/card:scale-110 transition-transform" />
-                                Department Headcount Structure
+                                Department Headcount
                             </h2>
                             <p className="text-xs font-medium text-slate-500 mt-0.5">
-                                Staff distribution across {departmentData.length} operating divisions
+                                Staff distribution across {departmentData.length} departments
                             </p>
                         </div>
-                        <span className="text-[11px] font-bold text-slate-600 bg-slate-50 px-3 py-1 rounded-xl border border-slate-200/60 font-mono shadow-2xs">
+                        <span className="text-[11px] font-bold text-slate-600 bg-slate-50 px-2.5 sm:px-3 py-1 rounded-xl border border-slate-200/60 font-mono shadow-2xs shrink-0">
                             {totalEmployeesCount} Total Staff
                         </span>
                     </div>
 
                     {departmentData.length === 0 ? (
-                        <div className="py-16 text-center text-xs font-medium text-slate-400">
-                            No departmental allocations found. Please assign departments to your employees.
+                        <div className="py-12 sm:py-16 text-center text-xs font-medium text-slate-400">
+                            No department assignments found. Please assign departments to employees.
                         </div>
                     ) : (
-                        <div className="space-y-4 pt-1">
+                        <div className="space-y-3 sm:space-y-3.5 pt-1">
                             {departmentData.map((dept) => {
                                 const percentage = Math.round((dept.count / Math.max(totalEmployeesCount, 1)) * 100);
 
@@ -514,20 +532,20 @@ export default function DashboardPage() {
                                         className="p-3 rounded-2xl bg-slate-50/60 hover:bg-indigo-50/50 border border-slate-200/60 hover:border-indigo-300 transition-all duration-300 cursor-pointer group/item shadow-2xs hover:shadow-md"
                                     >
                                         <div className="flex items-center justify-between text-xs mb-2">
-                                            <span className="text-slate-800 font-bold group-hover/item:text-indigo-600 transition-colors flex items-center gap-1.5">
-                                                <span className="w-2 h-2 rounded-full bg-indigo-500 ring-2 ring-indigo-500/20 group-hover/item:scale-125 transition-transform" />
-                                                {dept.name}
+                                            <span className="text-slate-800 font-bold group-hover/item:text-indigo-600 transition-colors flex items-center gap-1.5 truncate pr-2">
+                                                <span className="w-2 h-2 rounded-full bg-indigo-500 ring-2 ring-indigo-500/20 group-hover/item:scale-125 transition-transform shrink-0" />
+                                                <span className="truncate">{dept.name}</span>
                                             </span>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-semibold text-slate-400 font-mono">
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <span className="text-[10px] font-semibold text-slate-400 font-mono hidden sm:inline-block">
                                                     {percentage}% of total
                                                 </span>
-                                                <span className="text-slate-900 font-extrabold font-mono bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs group-hover/item:bg-indigo-600 group-hover:item:text-white transition-colors">
+                                                <span className="text-slate-900 font-extrabold font-mono bg-white px-2 py-0.5 rounded-lg border border-slate-200 text-[11px] shadow-2xs group-hover/item:bg-indigo-600 group-hover:text-white transition-colors">
                                                     {dept.count} {dept.count === 1 ? "Employee" : "Employees"}
                                                 </span>
                                             </div>
                                         </div>
-                                        <div className="w-full h-3 bg-slate-200/70 rounded-lg overflow-hidden p-0.5 border border-slate-200/40">
+                                        <div className="w-full h-2.5 sm:h-3 bg-slate-200/70 rounded-lg overflow-hidden p-0.5 border border-slate-200/40">
                                             <div
                                                 className="h-full bg-gradient-to-r from-indigo-500 via-indigo-600 to-violet-600 rounded-md transition-all duration-700 ease-out shadow-xs group-hover/item:brightness-110"
                                                 style={{ width: `${(dept.count / maxDeptCount) * 100}%` }}
@@ -541,20 +559,21 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {/* Pending Leave Requests Section - Fully Clickable with Hover Effects */}
-            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all space-y-5">
+            {/* Pending Leave Requests Section */}
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all space-y-4 sm:space-y-5">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                     <div>
                         <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                            Pending Leave Requisitions
+                            Pending Leave Requests
                         </h2>
                         <p className="text-xs font-medium text-slate-500 mt-0.5">
-                            {pendingLeaves.length} requests awaiting managerial endorsement
+                            {pendingLeaves.length} requests awaiting managerial approval
                         </p>
                     </div>
                     <button
+                        type="button"
                         onClick={() => router.push("/leave")}
-                        className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-bold transition-colors bg-indigo-50 px-3.5 py-2 rounded-xl border border-indigo-100 hover:bg-indigo-100 cursor-pointer"
+                        className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-700 font-bold transition-colors bg-indigo-50 px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl border border-indigo-100 hover:bg-indigo-100 cursor-pointer shrink-0"
                     >
                         <span>Review All</span>
                         <ArrowUpRight size={14} />
@@ -562,15 +581,15 @@ export default function DashboardPage() {
                 </div>
 
                 {pendingLeaves.length === 0 ? (
-                    <div className="text-center py-12 text-slate-400 space-y-2">
+                    <div className="text-center py-10 sm:py-12 text-slate-400 space-y-2">
                         <Calendar size={36} className="mx-auto text-slate-300 stroke-[1.5]" />
-                        <p className="text-xs font-bold text-slate-600">All leave requests processed successfully</p>
+                        <p className="text-xs font-bold text-slate-600">All leave requests have been resolved</p>
                         <p className="text-[11px] text-slate-400">
-                            There are no pending requisitions currently in the queue.
+                            There are currently no requests pending review.
                         </p>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-3.5">
                         {pendingLeaves.slice(0, 6).map((req) => {
                             const employeeName = req.employee?.name || "Unknown Employee";
                             const departmentName = req.employee?.department?.name || req.department || "General Division";
@@ -579,10 +598,10 @@ export default function DashboardPage() {
                                 <div
                                     key={req._id}
                                     onClick={() => router.push("/leave")}
-                                    className="flex items-center justify-between p-4 rounded-2xl bg-slate-50/70 hover:bg-indigo-50/40 border border-slate-200/70 hover:border-indigo-300/80 transition-all group cursor-pointer shadow-2xs hover:shadow-md"
+                                    className="flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-slate-50/70 hover:bg-indigo-50/40 border border-slate-200/70 hover:border-indigo-300/80 transition-all group cursor-pointer shadow-2xs hover:shadow-md"
                                 >
-                                    <div className="flex items-center gap-3.5 min-w-0">
-                                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-xs border border-indigo-200 group-hover:scale-105 transition-transform">
+                                    <div className="flex items-center gap-3 min-w-0 pr-2">
+                                        <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-xs border border-indigo-200 group-hover:scale-105 transition-transform">
                                             {getInitials(employeeName)}
                                         </div>
                                         <div className="min-w-0">

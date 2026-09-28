@@ -18,6 +18,13 @@ import {
     Filter,
     Sparkles,
     Plus,
+    Briefcase,
+    Calendar,
+    Cake,
+    MapPin,
+    UserCheck,
+    UserMinus,
+    UserX,
 } from "lucide-react";
 import api from "@/lib/api";
 
@@ -32,6 +39,8 @@ const getInitials = (name) => {
 export default function EmployeeDirectoryPage() {
     const router = useRouter();
     const [employees, setEmployees] = useState([]);
+    const [departmentsList, setDepartmentsList] = useState([]);
+    const [designationsList, setDesignationsList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [viewMode, setViewMode] = useState("grid");
@@ -47,7 +56,33 @@ export default function EmployeeDirectoryPage() {
     const deptRef = useRef(null);
     const statusRef = useRef(null);
 
-    // Debounce search input for responsive filtering
+    // 1. Fetch organizational lookups (Department & Designation names)
+    useEffect(() => {
+        async function loadLookups() {
+            try {
+                const [deptRes, desigRes] = await Promise.allSettled([
+                    api.get("/organization/departments"),
+                    api.get("/organization/designations"),
+                ]);
+
+                if (deptRes.status === "fulfilled") {
+                    const raw = deptRes.value?.data;
+                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.departments || [];
+                    setDepartmentsList(list);
+                }
+                if (desigRes.status === "fulfilled") {
+                    const raw = desigRes.value?.data;
+                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.designations || [];
+                    setDesignationsList(list);
+                }
+            } catch (err) {
+                console.error("Organization lookups failed:", err);
+            }
+        }
+        loadLookups();
+    }, []);
+
+    // 2. Debounce search input
     useEffect(() => {
         const timer = setTimeout(() => {
             setSearchTerm(searchInput);
@@ -55,7 +90,7 @@ export default function EmployeeDirectoryPage() {
         return () => clearTimeout(timer);
     }, [searchInput]);
 
-    // Close dropdowns on click outside
+    // 3. Dropdown outside click handler
     useEffect(() => {
         const handleClickOutside = (e) => {
             if (deptRef.current && !deptRef.current.contains(e.target)) {
@@ -69,6 +104,7 @@ export default function EmployeeDirectoryPage() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    // 4. Fetch employee roster
     const fetchEmployees = useCallback(async (isManual = false) => {
         if (isManual) setRefreshing(true);
         else setLoading(true);
@@ -79,7 +115,9 @@ export default function EmployeeDirectoryPage() {
                 ? res.data
                 : Array.isArray(res?.data?.employees)
                     ? res.data.employees
-                    : [];
+                    : Array.isArray(res?.data?.data)
+                        ? res.data.data
+                        : [];
             setEmployees(data);
         } catch (err) {
             console.error("Employee directory fetch error:", err);
@@ -94,20 +132,87 @@ export default function EmployeeDirectoryPage() {
         fetchEmployees();
     }, [fetchEmployees]);
 
-    // Extract unique department values
+    // Data normalizers
+    const resolveDepartmentName = (emp) => {
+        if (!emp) return "General Department";
+        const dept = emp.department;
+
+        if (typeof dept === "object" && dept !== null) {
+            return dept.name || dept.title || "General Department";
+        }
+        if (typeof dept === "string") {
+            const val = dept.trim();
+            if (/^[0-9a-fA-F]{24}$/.test(val)) {
+                const matched = departmentsList.find((d) => String(d._id || d.id) === val);
+                if (matched) return matched.name || matched.title;
+            }
+            return val || "General Department";
+        }
+        return emp.branch || "General Department";
+    };
+
+    const resolveBranchName = (emp) => {
+        if (!emp) return "Main Campus";
+        if (typeof emp.branch === "object" && emp.branch !== null) {
+            return emp.branch.name || emp.branch.location || "Main Campus";
+        }
+        if (emp?.branch && typeof emp.branch === "string" && emp.branch.trim() !== "") {
+            return emp.branch;
+        }
+        if (emp?.residentialAddress?.city || emp?.city) {
+            return emp.residentialAddress?.city || emp.city;
+        }
+        return "Main Campus";
+    };
+
+    const resolveDesignationName = (emp) => {
+        if (!emp) return "Staff Member";
+        const desig = emp.designation;
+
+        if (typeof desig === "object" && desig !== null) {
+            return desig.title || desig.name || "Staff Member";
+        }
+        if (typeof desig === "string" && desig.trim() !== "") {
+            const val = desig.trim();
+            if (/^[0-9a-fA-F]{24}$/.test(val)) {
+                const matched = designationsList.find((d) => String(d._id || d.id) === val);
+                if (matched) return matched.title || matched.name;
+            }
+            return val;
+        }
+        return emp.role || "Staff Member";
+    };
+
+    const resolveDateOfBirth = (emp) => {
+        const rawDate = emp?.dateOfBirth || emp?.dob;
+        if (!rawDate) return null;
+        try {
+            const d = new Date(rawDate);
+            return isNaN(d.getTime())
+                ? null
+                : d.toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                });
+        } catch {
+            return null;
+        }
+    };
+
     const departments = useMemo(() => {
         const depts = new Set();
         employees.forEach((emp) => {
-            const name =
-                typeof emp.department === "object"
-                    ? emp.department?.name
-                    : emp.department || emp.branch;
+            const name = resolveDepartmentName(emp);
             if (name && typeof name === "string") depts.add(name.trim());
         });
+        departmentsList.forEach((d) => {
+            const title = d.name || d.title;
+            if (title) depts.add(title.trim());
+        });
         return Array.from(depts);
-    }, [employees]);
+    }, [employees, departmentsList]);
 
-    // Filter roster by search string, department, and status
     const filteredEmployees = useMemo(() => {
         const cleanQuery = searchTerm.trim().toLowerCase();
         const cleanDept = selectedDept.toLowerCase();
@@ -117,47 +222,61 @@ export default function EmployeeDirectoryPage() {
             const fullName = String(
                 emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`
             ).toLowerCase();
+            const empId = String(emp.employeeId || "").toLowerCase();
             const email = String(emp.email || "").toLowerCase();
-            const designation = String(
-                (typeof emp.designation === "object"
-                    ? emp.designation?.name
-                    : emp.designation) ||
-                emp.role ||
-                ""
-            ).toLowerCase();
-
-            const dept = String(
-                (typeof emp.department === "object"
-                    ? emp.department?.name
-                    : emp.department) ||
-                emp.branch ||
-                ""
-            ).toLowerCase();
-
-            const status = String(emp.status || "active").toLowerCase();
+            const designation = resolveDesignationName(emp).toLowerCase();
+            const dept = resolveDepartmentName(emp).toLowerCase();
+            const branch = resolveBranchName(emp).toLowerCase();
+            const rawStatus = String(emp.employeeStatus || emp.status || "active").toLowerCase();
 
             const matchesSearch =
                 !cleanQuery ||
                 fullName.includes(cleanQuery) ||
+                empId.includes(cleanQuery) ||
                 email.includes(cleanQuery) ||
-                designation.includes(cleanQuery);
+                designation.includes(cleanQuery) ||
+                branch.includes(cleanQuery);
 
             const matchesDept = cleanDept === "all" || dept === cleanDept;
-            const matchesStatus = cleanStatus === "all" || status === cleanStatus;
+            const matchesStatus = cleanStatus === "all" || rawStatus === cleanStatus;
 
             return matchesSearch && matchesDept && matchesStatus;
         });
-    }, [employees, searchTerm, selectedDept, selectedStatus]);
+    }, [employees, searchTerm, selectedDept, selectedStatus, departmentsList, designationsList]);
+
+    const getStatusTheme = (statusStr) => {
+        const s = String(statusStr || "active").toLowerCase();
+        if (s === "inactive") {
+            return {
+                badge: "bg-amber-50 text-amber-700 border-amber-200/80 ring-1 ring-amber-500/10",
+                dot: "bg-amber-500",
+                label: "Inactive",
+            };
+        }
+        if (s === "exit") {
+            return {
+                badge: "bg-rose-50 text-rose-700 border-rose-200/80 ring-1 ring-rose-500/10",
+                dot: "bg-rose-500",
+                label: "Exited",
+            };
+        }
+        return {
+            badge: "bg-emerald-50 text-emerald-700 border-emerald-200/80 ring-1 ring-emerald-500/10",
+            dot: "bg-emerald-500 animate-pulse",
+            label: "Active",
+        };
+    };
 
     const statusOptions = [
         { value: "all", label: "All Statuses", dot: "bg-slate-400" },
         { value: "active", label: "Active", dot: "bg-emerald-500" },
+        { value: "inactive", label: "Inactive", dot: "bg-amber-500" },
         { value: "exit", label: "Exited", dot: "bg-rose-500" },
     ];
 
     return (
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
-            {/* Header Section */}
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-6 space-y-3.5 sm:space-y-6 antialiased font-sans text-slate-900">
+            {/* Header / Metric Banner */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
                 <div>
                     <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
@@ -170,7 +289,7 @@ export default function EmployeeDirectoryPage() {
                         </span>
                     </div>
                     <p className="text-xs sm:text-sm font-medium text-slate-500 mt-1 max-w-2xl">
-                        Access team profiles, operational assignments, contact information, and account standings.
+                        Explore verified corporate profiles, branches, personal birthdays, and assigned departments.
                     </p>
                 </div>
 
@@ -193,9 +312,7 @@ export default function EmployeeDirectoryPage() {
                     >
                         <RefreshCw
                             size={14}
-                            className={
-                                refreshing ? "animate-spin text-indigo-600 shrink-0" : "shrink-0"
-                            }
+                            className={refreshing ? "animate-spin text-indigo-600 shrink-0" : "shrink-0"}
                         />
                     </button>
 
@@ -207,7 +324,7 @@ export default function EmployeeDirectoryPage() {
                                 ? "bg-white text-indigo-600 shadow-xs"
                                 : "text-slate-500 hover:text-slate-900"
                                 }`}
-                            title="Grid View"
+                            title="Card Grid View"
                         >
                             <LayoutGrid size={15} />
                         </button>
@@ -218,7 +335,7 @@ export default function EmployeeDirectoryPage() {
                                 ? "bg-white text-indigo-600 shadow-xs"
                                 : "text-slate-500 hover:text-slate-900"
                                 }`}
-                            title="List View"
+                            title="Table List View"
                         >
                             <List size={15} />
                         </button>
@@ -235,7 +352,7 @@ export default function EmployeeDirectoryPage() {
                     />
                     <input
                         type="text"
-                        placeholder="Search by name, role, or work email..."
+                        placeholder="Search by name, ID, role, branch, or email..."
                         value={searchInput}
                         onChange={(e) => setSearchInput(e.target.value)}
                         className="w-full pl-10 pr-9 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs"
@@ -284,10 +401,6 @@ export default function EmployeeDirectoryPage() {
                                 : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
                                 }`}
                         >
-                            <div className="px-3.5 py-1.5 text-[10px] font-bold tracking-wider uppercase text-slate-400 border-b border-slate-100">
-                                Department
-                            </div>
-
                             <button
                                 type="button"
                                 onClick={() => {
@@ -300,9 +413,7 @@ export default function EmployeeDirectoryPage() {
                                     }`}
                             >
                                 <span>All Departments</span>
-                                {selectedDept === "all" && (
-                                    <Check size={14} className="text-indigo-600" />
-                                )}
+                                {selectedDept === "all" && <Check size={14} className="text-indigo-600" />}
                             </button>
 
                             {departments.map((dept) => (
@@ -320,10 +431,7 @@ export default function EmployeeDirectoryPage() {
                                 >
                                     <span className="truncate">{dept}</span>
                                     {selectedDept === dept && (
-                                        <Check
-                                            size={14}
-                                            className="text-indigo-600 shrink-0 ml-2"
-                                        />
+                                        <Check size={14} className="text-indigo-600 shrink-0 ml-2" />
                                     )}
                                 </button>
                             ))}
@@ -345,13 +453,13 @@ export default function EmployeeDirectoryPage() {
                         >
                             <div className="flex items-center gap-2 truncate">
                                 <span
-                                    className={`w-2 h-2 rounded-full shrink-0 ${statusOptions.find((o) => o.value === selectedStatus)
-                                        ?.dot || "bg-slate-400"
+                                    className={`w-2 h-2 rounded-full shrink-0 ${statusOptions.find((o) => o.value === selectedStatus)?.dot ||
+                                        "bg-slate-400"
                                         }`}
                                 />
                                 <span className="truncate">
-                                    {statusOptions.find((o) => o.value === selectedStatus)
-                                        ?.label || "All Statuses"}
+                                    {statusOptions.find((o) => o.value === selectedStatus)?.label ||
+                                        "All Statuses"}
                                 </span>
                             </div>
                             <ChevronDown
@@ -367,10 +475,6 @@ export default function EmployeeDirectoryPage() {
                                 : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
                                 }`}
                         >
-                            <div className="px-3.5 py-1.5 text-[10px] font-bold tracking-wider uppercase text-slate-400 border-b border-slate-100">
-                                Account Status
-                            </div>
-
                             {statusOptions.map((opt) => (
                                 <button
                                     key={opt.value}
@@ -405,7 +509,7 @@ export default function EmployeeDirectoryPage() {
                 </div>
             </div>
 
-            {/* Main Content Area */}
+            {/* Content Body */}
             {loading ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4 animate-pulse">
                     {[...Array(8)].map((_, i) => (
@@ -421,8 +525,7 @@ export default function EmployeeDirectoryPage() {
                                 <div className="h-4 bg-slate-100 rounded-md w-3/4" />
                                 <div className="h-3 bg-slate-100 rounded-md w-1/2" />
                             </div>
-                            <div className="h-9 bg-slate-50 rounded-xl" />
-                            <div className="h-9 bg-slate-100 rounded-xl mt-4" />
+                            <div className="h-10 bg-slate-50 rounded-xl" />
                         </div>
                     ))}
                 </div>
@@ -433,10 +536,10 @@ export default function EmployeeDirectoryPage() {
                     </div>
                     <div className="space-y-1">
                         <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                            No matching employees found
+                            No matching employee profiles found
                         </h3>
                         <p className="text-xs font-medium text-slate-500 max-w-sm mx-auto">
-                            No staff profiles align with your chosen search keywords or filters.
+                            Adjust your active search query or reset the dropdown filters.
                         </p>
                     </div>
                     {(searchTerm || selectedDept !== "all" || selectedStatus !== "all") && (
@@ -455,63 +558,95 @@ export default function EmployeeDirectoryPage() {
                     )}
                 </div>
             ) : viewMode === "grid" ? (
+                /* Grid Mode Layout */
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 sm:gap-4">
                     {filteredEmployees.map((emp) => {
                         const empId = emp._id || emp.id;
                         const displayName =
                             emp.name ||
                             `${emp.firstName || ""} ${emp.lastName || ""}`.trim() ||
-                            "Unnamed Staff";
-                        const deptName =
-                            (typeof emp.department === "object"
-                                ? emp.department?.name
-                                : emp.department) ||
-                            emp.branch ||
-                            "General";
-                        const designation =
-                            (typeof emp.designation === "object"
-                                ? emp.designation?.name
-                                : emp.designation) ||
-                            emp.role ||
                             "Staff Member";
-                        const isActive =
-                            String(emp.status || "active").toLowerCase() === "active";
+                        const deptName = resolveDepartmentName(emp);
+                        const branchName = resolveBranchName(emp);
+                        const designation = resolveDesignationName(emp);
+                        const dobFormatted = resolveDateOfBirth(emp);
+                        const curStatus = emp.employeeStatus || emp.status || "active";
+                        const theme = getStatusTheme(curStatus);
+                        const formattedJoinDate = emp.dateOfJoining
+                            ? new Date(emp.dateOfJoining).toLocaleDateString("en-US", {
+                                month: "short",
+                                year: "numeric",
+                            })
+                            : null;
 
                         return (
                             <div
                                 key={empId}
                                 onClick={() => router.push(`/employees/profile?id=${empId}`)}
-                                className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 p-5 sm:p-6 shadow-xs hover:shadow-xl hover:border-indigo-500/50 transition-all duration-300 flex flex-col justify-between group cursor-pointer hover:-translate-y-1"
+                                className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-xs hover:shadow-xl hover:border-indigo-500/50 transition-all duration-300 flex flex-col justify-between group cursor-pointer hover:-translate-y-1"
                             >
                                 <div>
                                     <div className="flex items-start justify-between mb-3.5">
-                                        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-black text-xs sm:text-sm shadow-xs border border-indigo-200 group-hover:scale-105 transition-transform">
-                                            {getInitials(displayName)}
-                                        </div>
-                                        <span
-                                            className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-full border capitalize ${isActive
-                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 ring-1 ring-emerald-500/10"
-                                                : "bg-slate-100 text-slate-600 border-slate-200"
-                                                }`}
-                                        >
-                                            <span
-                                                className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
-                                                    }`}
+                                        {emp.avatar || emp.photo ? (
+                                            <img
+                                                src={emp.avatar || emp.photo}
+                                                alt={displayName}
+                                                className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl object-cover border border-slate-200 shadow-2xs group-hover:scale-105 transition-transform shrink-0"
                                             />
-                                            {emp.status || "active"}
+                                        ) : (
+                                            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-black text-xs sm:text-sm shadow-xs border border-indigo-200 group-hover:scale-105 transition-transform shrink-0">
+                                                {getInitials(displayName)}
+                                            </div>
+                                        )}
+
+                                        <span
+                                            className={`inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold px-2.5 py-0.5 rounded-full border capitalize ${theme.badge}`}
+                                        >
+                                            <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`} />
+                                            {theme.label}
                                         </span>
                                     </div>
 
-                                    <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors truncate">
-                                        {displayName}
-                                    </h3>
-                                    <p className="text-xs text-slate-400 font-semibold truncate mt-0.5">
-                                        {designation}
-                                    </p>
+                                    <div className="space-y-0.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors truncate">
+                                                {displayName}
+                                            </h3>
+                                            {emp.employeeId && (
+                                                <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded uppercase">
+                                                    {emp.employeeId}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-slate-500 font-semibold truncate">
+                                            {designation}
+                                        </p>
+                                    </div>
 
-                                    <div className="flex items-center gap-2 text-xs text-slate-600 font-medium mt-3 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                                        <Building2 size={13} className="text-slate-400 shrink-0" />
-                                        <span className="truncate">{deptName}</span>
+                                    <div className="mt-3 bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 space-y-1.5">
+                                        <div className="flex items-center gap-2 text-xs text-slate-700 font-semibold">
+                                            <Building2 size={13} className="text-slate-400 shrink-0" />
+                                            <span className="truncate">{deptName}</span>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
+                                            <MapPin size={12} className="text-indigo-500 shrink-0" />
+                                            <span className="truncate">{branchName}</span>
+                                        </div>
+
+                                        {dobFormatted && (
+                                            <div className="flex items-center gap-2 text-[11px] text-rose-600 font-medium font-mono">
+                                                <Cake size={12} className="text-rose-400 shrink-0" />
+                                                <span>DOB: {dobFormatted}</span>
+                                            </div>
+                                        )}
+
+                                        {formattedJoinDate && (
+                                            <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium font-mono">
+                                                <Calendar size={12} className="text-slate-400 shrink-0" />
+                                                <span>Joined: {formattedJoinDate}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
@@ -533,7 +668,7 @@ export default function EmployeeDirectoryPage() {
                                     {emp.phone && (
                                         <a
                                             href={`tel:${emp.phone}`}
-                                            className="flex items-center gap-2 text-xs text-slate-500 hover:text-indigo-600 font-medium transition-colors truncate"
+                                            className="flex items-center gap-2 text-xs text-slate-500 hover:text-indigo-600 font-medium transition-colors truncate font-mono"
                                             title={emp.phone}
                                         >
                                             <Phone size={12} className="text-slate-400 shrink-0" />
@@ -555,105 +690,134 @@ export default function EmployeeDirectoryPage() {
                     })}
                 </div>
             ) : (
-                <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden overflow-x-auto">
-                    <table className="w-full text-left border-collapse min-w-[700px]">
-                        <thead>
-                            <tr className="bg-slate-50/75 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                                <th className="py-3.5 px-5 sm:px-6">Employee</th>
-                                <th className="py-3.5 px-5 sm:px-6">Department</th>
-                                <th className="py-3.5 px-5 sm:px-6">Work Email</th>
-                                <th className="py-3.5 px-5 sm:px-6">Phone Number</th>
-                                <th className="py-3.5 px-5 sm:px-6">Status</th>
-                                <th className="py-3.5 px-5 sm:px-6 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
-                            {filteredEmployees.map((emp) => {
-                                const empId = emp._id || emp.id;
-                                const displayName =
-                                    emp.name ||
-                                    `${emp.firstName || ""} ${emp.lastName || ""}`.trim() ||
-                                    "Unnamed Staff";
-                                const deptName =
-                                    (typeof emp.department === "object"
-                                        ? emp.department?.name
-                                        : emp.department) ||
-                                    emp.branch ||
-                                    "General";
-                                const designation =
-                                    (typeof emp.designation === "object"
-                                        ? emp.designation?.name
-                                        : emp.designation) ||
-                                    emp.role ||
-                                    "Staff Member";
-                                const isActive =
-                                    String(emp.status || "active").toLowerCase() === "active";
+                /* Corporate Table View */
+                <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse min-w-[850px]">
+                            <thead>
+                                <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
+                                    <th className="py-3.5 px-5 sm:px-6">Employee</th>
+                                    <th className="py-3.5 px-4 sm:px-6">Department</th>
+                                    <th className="py-3.5 px-4 sm:px-6">Workplace Hub</th>
+                                    <th className="py-3.5 px-4 sm:px-6">Date of Birth</th>
+                                    <th className="py-3.5 px-4 sm:px-6">Work Contact</th>
+                                    <th className="py-3.5 px-4 sm:px-6">Status</th>
+                                    <th className="py-3.5 px-5 sm:px-6 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
+                                {filteredEmployees.map((emp) => {
+                                    const empId = emp._id || emp.id;
+                                    const displayName =
+                                        emp.name ||
+                                        `${emp.firstName || ""} ${emp.lastName || ""}`.trim() ||
+                                        "Staff Member";
+                                    const deptName = resolveDepartmentName(emp);
+                                    const branchName = resolveBranchName(emp);
+                                    const designation = resolveDesignationName(emp);
+                                    const dobFormatted = resolveDateOfBirth(emp);
+                                    const curStatus = emp.employeeStatus || emp.status || "active";
+                                    const theme = getStatusTheme(curStatus);
 
-                                return (
-                                    <tr
-                                        key={empId}
-                                        onClick={() => router.push(`/employees/profile?id=${empId}`)}
-                                        className="hover:bg-indigo-50/30 transition-colors group cursor-pointer"
-                                    >
-                                        <td className="py-3.5 px-5 sm:px-6">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs border border-indigo-200 group-hover:scale-105 transition-transform">
-                                                    {getInitials(displayName)}
-                                                </div>
-                                                <div>
-                                                    <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
-                                                        {displayName}
-                                                    </p>
-                                                    <p className="text-[11px] font-normal text-slate-400">
-                                                        {designation}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="py-3.5 px-5 sm:px-6 font-semibold text-slate-700">
-                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs">
-                                                <Building2 size={12} className="text-slate-400" />
-                                                <span>{deptName}</span>
-                                            </span>
-                                        </td>
-                                        <td className="py-3.5 px-5 sm:px-6 text-slate-500 font-medium">
-                                            {emp.email || "—"}
-                                        </td>
-                                        <td className="py-3.5 px-5 sm:px-6 text-slate-500 font-medium font-mono">
-                                            {emp.phone || "—"}
-                                        </td>
-                                        <td className="py-3.5 px-5 sm:px-6">
-                                            <span
-                                                className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-full border capitalize ${isActive
-                                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 ring-1 ring-emerald-500/10"
-                                                    : "bg-slate-100 text-slate-600 border-slate-200"
-                                                    }`}
-                                            >
-                                                <span
-                                                    className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-slate-400"
-                                                        }`}
-                                                />
-                                                {emp.status || "active"}
-                                            </span>
-                                        </td>
-                                        <td
-                                            className="py-3.5 px-5 sm:px-6 text-right"
-                                            onClick={(e) => e.stopPropagation()}
+                                    return (
+                                        <tr
+                                            key={empId}
+                                            onClick={() => router.push(`/employees/profile?id=${empId}`)}
+                                            className="hover:bg-indigo-50/30 transition-colors group cursor-pointer"
                                         >
-                                            <button
-                                                type="button"
-                                                onClick={() => router.push(`/employees/profile?id=${empId}`)}
-                                                className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-100 transition-colors cursor-pointer"
+                                            <td className="py-3.5 px-5 sm:px-6">
+                                                <div className="flex items-center gap-3">
+                                                    {emp.avatar || emp.photo ? (
+                                                        <img
+                                                            src={emp.avatar || emp.photo}
+                                                            alt={displayName}
+                                                            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl object-cover border border-slate-200 shadow-2xs group-hover:scale-105 transition-transform shrink-0"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs border border-indigo-200 group-hover:scale-105 transition-transform">
+                                                            {getInitials(displayName)}
+                                                        </div>
+                                                    )}
+                                                    <div>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                                                                {displayName}
+                                                            </p>
+                                                            {emp.employeeId && (
+                                                                <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-1 py-0.5 rounded uppercase">
+                                                                    {emp.employeeId}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[11px] font-medium text-slate-400">
+                                                            {designation}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </td>
+
+                                            <td className="py-3.5 px-4 sm:px-6 font-semibold text-slate-700">
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs font-bold">
+                                                    <Building2 size={12} className="text-slate-400" />
+                                                    <span>{deptName}</span>
+                                                </span>
+                                            </td>
+
+                                            <td className="py-3.5 px-4 sm:px-6 text-slate-600">
+                                                <span className="inline-flex items-center gap-1.5 text-xs font-semibold">
+                                                    <MapPin size={12} className="text-indigo-500 shrink-0" />
+                                                    <span className="truncate max-w-[140px]">{branchName}</span>
+                                                </span>
+                                            </td>
+
+                                            <td className="py-3.5 px-4 sm:px-6 font-mono text-slate-500 text-xs">
+                                                {dobFormatted ? (
+                                                    <span className="inline-flex items-center gap-1 text-slate-700 font-semibold">
+                                                        <Cake size={12} className="text-rose-500" />
+                                                        <span>{dobFormatted}</span>
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-300">—</span>
+                                                )}
+                                            </td>
+
+                                            <td className="py-3.5 px-4 sm:px-6 text-slate-500 font-medium">
+                                                <p className="truncate max-w-[160px] font-semibold text-slate-700">
+                                                    {emp.email || "—"}
+                                                </p>
+                                                <p className="font-mono text-[11px] text-slate-400 mt-0.5">
+                                                    {emp.phone || "—"}
+                                                </p>
+                                            </td>
+
+                                            <td className="py-3.5 px-4 sm:px-6">
+                                                <span
+                                                    className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-full border capitalize ${theme.badge}`}
+                                                >
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`} />
+                                                    {theme.label}
+                                                </span>
+                                            </td>
+
+                                            <td
+                                                className="py-3.5 px-5 sm:px-6 text-right"
+                                                onClick={(e) => e.stopPropagation()}
                                             >
-                                                <span>Profile</span>
-                                                <ExternalLink size={12} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => router.push(`/employees/profile?id=${empId}`)}
+                                                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-100 transition-colors cursor-pointer"
+                                                >
+                                                    <span>Profile</span>
+                                                    <ExternalLink size={12} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             )}
         </div>

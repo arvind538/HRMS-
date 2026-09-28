@@ -61,8 +61,11 @@ app.use(
 //     optionsSuccessStatus: 200,
 // }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+// app.use(express.json());
+// app.use(express.urlencoded({ extended: true }));
 
 app.get("/api/health", (req, res) => res.json({ status: "OK" }));
 
@@ -99,6 +102,22 @@ app.use("/api/compliance", complianceRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/users", userManagementRoutes);
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+    if (err.type === "entity.too.large" || err.status === 413) {
+        return res.status(413).json({
+            success: false,
+            message: "File ka size bahut bada hai. Kripya 10MB se choti file upload karein.",
+        });
+    }
+
+    console.error("Server Error:", err);
+    res.status(err.status || 500).json({
+        success: false,
+        message: err.message || "Internal Server Error",
+    });
+});
 
 app.use(notFound);
 app.use(errorHandler);

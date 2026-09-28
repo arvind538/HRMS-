@@ -8,6 +8,7 @@ import {
     Users,
     UserCheck,
     UserX,
+    UserMinus,
     Loader2,
     Filter,
     Download,
@@ -36,6 +37,8 @@ const getInitials = (name) => {
 export default function EmployeesPage() {
     const router = useRouter();
     const [employees, setEmployees] = useState([]);
+    const [departmentsList, setDepartmentsList] = useState([]);
+    const [designationsList, setDesignationsList] = useState([]);
     const [search, setSearch] = useState("");
     const [departmentFilter, setDepartmentFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("all");
@@ -51,13 +54,44 @@ export default function EmployeesPage() {
     const deptDropdownRef = useRef(null);
     const statusDropdownRef = useRef(null);
 
+    // 1. Master lookup: Departments aur Designations list fetch karein
+    useEffect(() => {
+        async function loadLookups() {
+            try {
+                const [deptRes, desigRes] = await Promise.allSettled([
+                    api.get("/organization/departments"),
+                    api.get("/organization/designations"),
+                ]);
+
+                if (deptRes.status === "fulfilled") {
+                    const raw = deptRes.value?.data;
+                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.departments || [];
+                    setDepartmentsList(list);
+                }
+
+                if (desigRes.status === "fulfilled") {
+                    const raw = desigRes.value?.data;
+                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.designations || [];
+                    setDesignationsList(list);
+                }
+            } catch (err) {
+                console.error("Failed to load organization dropdown parameters:", err);
+            }
+        }
+        loadLookups();
+    }, []);
+
+    // 2. Employees list fetch karein
     const fetchEmployees = useCallback(async (searchTerm = "") => {
         setLoading(true);
         try {
             const { data } = await api.get("/employees", {
                 params: { search: searchTerm },
             });
-            setEmployees(Array.isArray(data) ? data : []);
+            const list = Array.isArray(data)
+                ? data
+                : data?.employees || data?.data || [];
+            setEmployees(list);
         } catch (err) {
             console.error("Failed to load employee list:", err);
         } finally {
@@ -74,18 +108,13 @@ export default function EmployeesPage() {
         return () => clearTimeout(delay);
     }, [search, fetchEmployees]);
 
+    // Click outside listener for dropdowns
     useEffect(() => {
         const handleClickOutside = (e) => {
-            if (
-                deptDropdownRef.current &&
-                !deptDropdownRef.current.contains(e.target)
-            ) {
+            if (deptDropdownRef.current && !deptDropdownRef.current.contains(e.target)) {
                 setDeptOpen(false);
             }
-            if (
-                statusDropdownRef.current &&
-                !statusDropdownRef.current.contains(e.target)
-            ) {
+            if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target)) {
                 setStatusOpen(false);
             }
             if (!e.target.closest(".row-status-dropdown-container")) {
@@ -99,6 +128,7 @@ export default function EmployeesPage() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    // Status change handler (active, inactive, exit)
     const handleStatusChange = async (employeeId, newStatus, e) => {
         e.stopPropagation();
         setActiveRowStatusDropdown(null);
@@ -113,6 +143,7 @@ export default function EmployeesPage() {
                         ? {
                             ...emp,
                             status: newStatus,
+                            employeeStatus: newStatus,
                             exitDate: exitDateValue || emp.exitDate,
                         }
                         : emp
@@ -122,16 +153,17 @@ export default function EmployeesPage() {
             if (newStatus === "exit") {
                 await api.put(`/employees/${employeeId}/exit`, {
                     status: newStatus,
+                    employeeStatus: newStatus,
                     exitDate: exitDateValue,
                 });
             } else {
-                await api.put(`/employees/${employeeId}`, { status: newStatus });
+                await api.put(`/employees/${employeeId}`, {
+                    status: newStatus,
+                    employeeStatus: newStatus,
+                });
             }
         } catch (err) {
-            console.error(
-                "Backend validation error:",
-                err.response?.data || err.message
-            );
+            console.error("Status update error:", err.response?.data || err.message);
             fetchEmployees(search);
         }
     };
@@ -140,11 +172,7 @@ export default function EmployeesPage() {
         e.stopPropagation();
         setActiveRowActionDropdown(null);
 
-        if (
-            !window.confirm(
-                "Are you sure you want to permanently delete this employee record?"
-            )
-        ) {
+        if (!window.confirm("Are you sure you want to permanently delete this employee record?")) {
             return;
         }
 
@@ -153,77 +181,131 @@ export default function EmployeesPage() {
             setEmployees((prev) => prev.filter((emp) => emp._id !== employeeId));
             await api.delete(`/employees/${employeeId}`);
         } catch (err) {
-            console.error(
-                "Failed to delete employee:",
-                err.response?.data || err.message
-            );
+            console.error("Failed to delete employee:", err.response?.data || err.message);
             fetchEmployees(search);
         } finally {
             setDeletingId(null);
         }
     };
 
+    // Helper: Hex ID ko readable Department Name me badle[cite: 4]
+    const resolveDepartmentName = (emp) => {
+        if (!emp) return "General";
+        const dept = emp.department;
+
+        // Agar populated object hai
+        if (typeof dept === "object" && dept !== null) {
+            return dept.name || dept.title || "General";
+        }
+
+        if (typeof dept === "string") {
+            const val = dept.trim();
+            // Hex ObjectId pattern check
+            if (/^[0-9a-fA-F]{24}$/.test(val)) {
+                const matched = departmentsList.find(
+                    (d) => String(d._id || d.id) === val
+                );
+                if (matched) return matched.name || matched.title;
+            }
+            return val || "General";
+        }
+
+        return emp.branch || "General";
+    };
+
+    // Helper: Hex ID ko readable Designation Title me badle
+    const resolveDesignationName = (emp) => {
+        if (!emp) return "Staff Member";
+        const desig = emp.designation;
+
+        if (typeof desig === "object" && desig !== null) {
+            return desig.title || desig.name || "Staff Member";
+        }
+
+        if (typeof desig === "string") {
+            const val = desig.trim();
+            if (/^[0-9a-fA-F]{24}$/.test(val)) {
+                const matched = designationsList.find(
+                    (d) => String(d._id || d.id) === val
+                );
+                if (matched) return matched.title || matched.name;
+            }
+            return val || "Staff Member";
+        }
+
+        return emp.role || "Staff Member";
+    };
+
     const departments = useMemo(() => {
         const set = new Set();
         employees.forEach((emp) => {
-            const d = emp.department?.name || emp.department || emp.branch;
-            if (d) set.add(d);
+            const d = resolveDepartmentName(emp);
+            if (d && d !== "General") set.add(d);
+        });
+        departmentsList.forEach((d) => {
+            const name = d.name || d.title;
+            if (name) set.add(name);
         });
         return Array.from(set);
-    }, [employees]);
+    }, [employees, departmentsList]);
 
     const filteredEmployees = useMemo(() => {
         return employees.filter((emp) => {
-            const dept =
-                emp.department?.name || emp.department || emp.branch || "";
+            const dept = resolveDepartmentName(emp);
             const matchesDept =
                 departmentFilter === "all" ||
                 dept.toLowerCase() === departmentFilter.toLowerCase();
 
-            const empStatus = (emp.status || "active").toLowerCase();
+            const rawStatus = (emp.employeeStatus || emp.status || "active").toLowerCase();
             const matchesStatus =
-                statusFilter === "all" ||
-                empStatus === statusFilter.toLowerCase();
+                statusFilter === "all" || rawStatus === statusFilter.toLowerCase();
 
             return matchesDept && matchesStatus;
         });
     }, [employees, departmentFilter, statusFilter]);
 
+    // Metric Counts
     const activeCount = useMemo(
         () =>
             employees.filter(
-                (e) => (e.status || "active").toLowerCase() === "active"
+                (e) => (e.employeeStatus || e.status || "active").toLowerCase() === "active"
+            ).length,
+        [employees]
+    );
+
+    const inactiveCount = useMemo(
+        () =>
+            employees.filter(
+                (e) => (e.employeeStatus || e.status || "").toLowerCase() === "inactive"
             ).length,
         [employees]
     );
 
     const exitedCount = useMemo(
         () =>
-            employees.filter((e) => (e.status || "").toLowerCase() === "exit")
-                .length,
+            employees.filter(
+                (e) => (e.employeeStatus || e.status || "").toLowerCase() === "exit"
+            ).length,
         [employees]
     );
 
     const handleExportCSV = () => {
-        const headers =
-            "Employee ID,Name,Email,Department,Designation,Status,Exit Date\n";
+        const headers = "Employee ID,Name,Email,Phone,Department,Designation,Status,Joining Date\n";
         const rows = filteredEmployees
-            .map(
-                (e) =>
-                    `"${e.employeeId || ""}","${e.name || ""}","${e.email || ""}","${e.department?.name || e.department || e.branch || ""
-                    }","${e.designation || ""}","${e.status || "active"}","${e.exitDate || ""
-                    }"`
-            )
+            .map((e) => {
+                const dName = resolveDepartmentName(e);
+                const desig = resolveDesignationName(e);
+                const joinDate = e.dateOfJoining ? e.dateOfJoining.split("T")[0] : "";
+                const curStatus = e.employeeStatus || e.status || "active";
+                return `"${e.employeeId || ""}","${e.name || ""}","${e.email || ""}","${e.phone || ""}","${dName}","${desig}","${curStatus}","${joinDate}"`;
+            })
             .join("\n");
 
-        const blob = new Blob([headers + rows], {
-            type: "text/csv;charset=utf-8;",
-        });
+        const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `employee-directory-${new Date().toISOString().split("T")[0]
-            }.csv`;
+        a.download = `employee-roster-${new Date().toISOString().split("T")[0]}.csv`;
         a.click();
         URL.revokeObjectURL(url);
     };
@@ -231,16 +313,41 @@ export default function EmployeesPage() {
     const statusOptions = [
         { value: "all", label: "All Statuses", color: "bg-slate-400" },
         { value: "active", label: "Active", color: "bg-emerald-500" },
+        { value: "inactive", label: "Inactive", color: "bg-amber-500" },
         { value: "exit", label: "Exited", color: "bg-rose-500" },
     ];
 
     const rowStatusChoices = [
-        { value: "active", label: "Active", color: "bg-emerald-500" },
-        { value: "exit", label: "Exited", color: "bg-rose-500" },
+        { value: "active", label: "Active", color: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200" },
+        { value: "inactive", label: "Inactive", color: "bg-amber-500", text: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200" },
+        { value: "exit", label: "Exited", color: "bg-rose-500", text: "text-rose-700", bg: "bg-rose-50", border: "border-rose-200" },
     ];
 
+    const getStatusTheme = (statusStr) => {
+        const s = (statusStr || "active").toLowerCase();
+        if (s === "inactive") {
+            return {
+                badge: "bg-amber-50 text-amber-700 border-amber-200/80 hover:bg-amber-100",
+                dot: "bg-amber-500",
+                label: "Inactive",
+            };
+        }
+        if (s === "exit") {
+            return {
+                badge: "bg-rose-50 text-rose-700 border-rose-200/80 hover:bg-rose-100",
+                dot: "bg-rose-500",
+                label: "Exited",
+            };
+        }
+        return {
+            badge: "bg-emerald-50 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100",
+            dot: "bg-emerald-500",
+            label: "Active",
+        };
+    };
+
     return (
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 font-sans antialiased text-slate-900">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-6 space-y-4 sm:space-y-6 font-sans antialiased text-slate-900">
             {/* Top Banner */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
                 <div>
@@ -262,7 +369,7 @@ export default function EmployeesPage() {
                     <button
                         type="button"
                         onClick={handleExportCSV}
-                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl sm:rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80 text-xs font-bold transition-all shadow-2xs active:scale-95 cursor-pointer hover:border-slate-300"
+                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl sm:rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/80 text-xs font-bold transition-all shadow-2xs active:scale-95 cursor-pointer"
                     >
                         <Download size={14} className="text-slate-500 shrink-0" />
                         <span>Export CSV</span>
@@ -271,7 +378,7 @@ export default function EmployeesPage() {
                     <button
                         type="button"
                         onClick={() => router.push("/employees/add")}
-                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition-all active:scale-95 hover:shadow-md cursor-pointer"
+                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer"
                     >
                         <Plus size={15} className="shrink-0" />
                         <span>Add Employee</span>
@@ -280,55 +387,60 @@ export default function EmployeesPage() {
             </div>
 
             {/* Metric Cards Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 sm:gap-4">
-                <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs flex items-center justify-between transition-all hover:shadow-md hover:border-indigo-200 group cursor-pointer">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex items-center justify-between">
                     <div>
-                        <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600 transition-colors">
+                        <span className="text-[10px] sm:text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
                             Total Roster
                         </span>
-                        <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono mt-1 tracking-tight">
+                        <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-mono mt-0.5 tracking-tight">
                             {employees.length.toLocaleString()}
                         </h3>
-                        <p className="text-[11px] font-medium text-slate-400 mt-0.5">
-                            Registered workforce profiles
-                        </p>
                     </div>
-                    <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100/80 shadow-2xs group-hover:scale-105 transition-transform">
-                        <Users size={20} className="sm:w-[22px] sm:h-[22px]" />
+                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+                        <Users size={18} />
                     </div>
                 </div>
 
-                <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs flex items-center justify-between transition-all hover:shadow-md hover:border-emerald-200 group cursor-pointer">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex items-center justify-between">
                     <div>
-                        <span className="text-[11px] font-extrabold text-emerald-600 uppercase tracking-wider">
-                            Active Employees
+                        <span className="text-[10px] sm:text-[11px] font-extrabold text-emerald-600 uppercase tracking-wider">
+                            Active
                         </span>
-                        <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono mt-1 tracking-tight">
+                        <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-mono mt-0.5 tracking-tight">
                             {activeCount.toLocaleString()}
                         </h3>
-                        <p className="text-[11px] font-medium text-slate-400 mt-0.5">
-                            Currently on active duty
-                        </p>
                     </div>
-                    <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/80 shadow-2xs group-hover:scale-105 transition-transform">
-                        <UserCheck size={20} className="sm:w-[22px] sm:h-[22px]" />
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+                        <UserCheck size={18} />
                     </div>
                 </div>
 
-                <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs flex items-center justify-between transition-all hover:shadow-md hover:border-rose-200 group cursor-pointer">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex items-center justify-between">
                     <div>
-                        <span className="text-[11px] font-extrabold text-rose-600 uppercase tracking-wider">
-                            Exited Staff
+                        <span className="text-[10px] sm:text-[11px] font-extrabold text-amber-600 uppercase tracking-wider">
+                            Inactive
                         </span>
-                        <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono mt-1 tracking-tight">
+                        <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-mono mt-0.5 tracking-tight">
+                            {inactiveCount.toLocaleString()}
+                        </h3>
+                    </div>
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
+                        <UserMinus size={18} />
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex items-center justify-between">
+                    <div>
+                        <span className="text-[10px] sm:text-[11px] font-extrabold text-rose-600 uppercase tracking-wider">
+                            Exited
+                        </span>
+                        <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 font-mono mt-0.5 tracking-tight">
                             {exitedCount.toLocaleString()}
                         </h3>
-                        <p className="text-[11px] font-medium text-slate-400 mt-0.5">
-                            Former employee records
-                        </p>
                     </div>
-                    <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100/80 shadow-2xs group-hover:scale-105 transition-transform">
-                        <UserX size={20} className="sm:w-[22px] sm:h-[22px]" />
+                    <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
+                        <UserX size={18} />
                     </div>
                 </div>
             </div>
@@ -375,9 +487,7 @@ export default function EmployeesPage() {
                             <div className="flex items-center gap-2 truncate pr-2">
                                 <Filter size={13} className="text-slate-400 shrink-0" />
                                 <span className="truncate">
-                                    {departmentFilter === "all"
-                                        ? "All Departments"
-                                        : departmentFilter}
+                                    {departmentFilter === "all" ? "All Departments" : departmentFilter}
                                 </span>
                             </div>
                             <ChevronDown
@@ -486,243 +596,348 @@ export default function EmployeesPage() {
                 </div>
             </div>
 
-            {/* Directory Table */}
-            <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-                {loading ? (
-                    <div className="py-20 flex flex-col items-center justify-center space-y-3">
-                        <Loader2 className="animate-spin text-indigo-600" size={32} />
-                        <p className="text-xs font-bold tracking-wider text-slate-500 uppercase">
-                            Fetching Employee Records...
-                        </p>
+            {/* Content Section */}
+            {loading ? (
+                <div className="py-20 flex flex-col items-center justify-center space-y-3 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
+                    <Loader2 className="animate-spin text-indigo-600" size={32} />
+                    <p className="text-xs font-bold tracking-wider text-slate-500 uppercase">
+                        Fetching Employee Records...
+                    </p>
+                </div>
+            ) : filteredEmployees.length === 0 ? (
+                <div className="py-16 text-center px-4 space-y-2.5 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 shadow-2xs">
+                        <UserX size={24} />
                     </div>
-                ) : filteredEmployees.length === 0 ? (
-                    <div className="py-16 text-center px-4 space-y-2.5">
-                        <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto border border-slate-200 shadow-2xs">
-                            <UserX size={24} />
-                        </div>
-                        <p className="text-sm sm:text-base font-bold text-slate-900">
-                            No matching employee profiles found
-                        </p>
-                        <p className="text-xs text-slate-400 font-medium">
-                            Try adjusting your search criteria or resetting filters.
-                        </p>
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse min-w-[700px]">
-                            <thead>
-                                <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                                    <th className="py-3.5 px-5 sm:px-6">Employee</th>
-                                    <th className="py-3.5 px-4">Department</th>
-                                    <th className="py-3.5 px-4">Designation</th>
-                                    <th className="py-3.5 px-4">Status</th>
-                                    <th className="py-3.5 px-5 sm:px-6 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 text-sm">
-                                {filteredEmployees.map((row) => {
-                                    const currentStatus = (row.status || "active").toLowerCase();
-                                    const isRowDropdownOpen =
-                                        activeRowStatusDropdown === row._id;
-                                    const isActionDropdownOpen =
-                                        activeRowActionDropdown === row._id;
-                                    const isDeleting = deletingId === row._id;
+                    <p className="text-sm sm:text-base font-bold text-slate-900">
+                        No matching employee profiles found
+                    </p>
+                    <p className="text-xs text-slate-400 font-medium">
+                        Try adjusting your search criteria or resetting filters.
+                    </p>
+                </div>
+            ) : (
+                <>
+                    {/* Mobile & Tablet Card Layout */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 md:hidden">
+                        {filteredEmployees.map((row) => {
+                            const curStatus = (row.employeeStatus || row.status || "active").toLowerCase();
+                            const theme = getStatusTheme(curStatus);
+                            const deptName = resolveDepartmentName(row);
+                            const desigName = resolveDesignationName(row);
+                            const isDeleting = deletingId === row._id;
+                            const empIdTag = row.employeeId || "EMP001";
+                            const dateDisplay = row.dateOfJoining
+                                ? new Date(row.dateOfJoining).toLocaleDateString("en-US")
+                                : "N/A";
 
-                                    return (
-                                        <tr
-                                            key={row._id}
-                                            className="group hover:bg-slate-50/70 transition-colors"
-                                        >
-                                            {/* Employee Info */}
-                                            <td className="py-3.5 sm:py-4 px-5 sm:px-6">
-                                                <div
-                                                    onClick={() =>
-                                                        router.push(`/employees/profile?id=${row._id}`)
-                                                    }
-                                                    className="flex items-center gap-3 cursor-pointer"
-                                                >
-                                                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-2xs border border-indigo-200/80 group-hover:scale-105 transition-transform">
-                                                        {getInitials(row.name)}
-                                                    </div>
-                                                    <div className="min-w-0">
-                                                        <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors truncate text-xs sm:text-sm">
-                                                            {row.name}
-                                                        </p>
-                                                        <p className="text-[11px] text-slate-500 font-medium flex items-center gap-1 mt-0.5 truncate">
-                                                            <Mail size={11} className="text-slate-400 shrink-0" />
-                                                            <span className="truncate">
-                                                                {row.email || "No email registered"}
-                                                            </span>
-                                                        </p>
-                                                    </div>
+                            return (
+                                <div
+                                    key={row._id}
+                                    onClick={() => router.push(`/employees/profile?id=${row._id}`)}
+                                    className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs space-y-3 cursor-pointer hover:border-indigo-300 transition-all"
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            {row.avatar || row.photo ? (
+                                                <img
+                                                    src={row.avatar || row.photo}
+                                                    alt={row.name}
+                                                    className="w-10 h-10 rounded-2xl object-cover border border-slate-200 shrink-0 shadow-2xs"
+                                                />
+                                            ) : (
+                                                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-xs flex items-center justify-center shrink-0">
+                                                    {getInitials(row.name)}
                                                 </div>
-                                            </td>
-
-                                            {/* Department */}
-                                            <td className="py-3.5 sm:py-4 px-4">
-                                                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-xl shadow-2xs">
-                                                    <Building2
-                                                        size={12}
-                                                        className="text-slate-400 shrink-0"
-                                                    />
-                                                    <span className="truncate max-w-[120px]">
-                                                        {row.department?.name ||
-                                                            row.department ||
-                                                            "General"}
+                                            )}
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <p className="font-bold text-slate-900 text-sm truncate leading-tight">
+                                                        {row.name}
+                                                    </p>
+                                                    <span className="font-mono text-[9px] font-bold bg-slate-100 text-slate-600 px-1 py-0.2 rounded border border-slate-200">
+                                                        {empIdTag}
                                                     </span>
-                                                </span>
-                                            </td>
-
-                                            {/* Designation */}
-                                            <td className="py-3.5 sm:py-4 px-4">
-                                                <p className="text-xs font-bold text-slate-800 truncate max-w-[130px]">
-                                                    {row.designation || "Staff Member"}
-                                                </p>
-                                                <p className="text-[11px] text-slate-400 capitalize font-medium">
-                                                    {row.role || "Employee"}
-                                                </p>
-                                            </td>
-
-                                            {/* Status */}
-                                            <td className="py-3.5 sm:py-4 px-4 relative">
-                                                <div className="relative row-status-dropdown-container inline-block">
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setActiveRowStatusDropdown(
-                                                                isRowDropdownOpen ? null : row._id
-                                                            );
-                                                            setActiveRowActionDropdown(null);
-                                                        }}
-                                                        className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border capitalize shadow-2xs cursor-pointer transition-all ${currentStatus === "active"
-                                                            ? "bg-emerald-50 text-emerald-700 border-emerald-200/80 hover:bg-emerald-100"
-                                                            : "bg-rose-50 text-rose-700 border-rose-200/80 hover:bg-rose-100"
-                                                            }`}
-                                                    >
-                                                        <span
-                                                            className={`w-1.5 h-1.5 rounded-full ${currentStatus === "active"
-                                                                ? "bg-emerald-500"
-                                                                : "bg-rose-500"
-                                                                }`}
-                                                        />
-                                                        <span>{currentStatus === "exit" ? "Exited" : currentStatus}</span>
-                                                        <ChevronDown size={12} className="ml-0.5 opacity-60" />
-                                                    </button>
-
-                                                    {isRowDropdownOpen && (
-                                                        <div className="absolute left-0 mt-1.5 w-32 bg-white border border-slate-200 rounded-xl shadow-xl py-1 z-50">
-                                                            {rowStatusChoices.map((choice) => (
-                                                                <button
-                                                                    key={choice.value}
-                                                                    type="button"
-                                                                    onClick={(e) =>
-                                                                        handleStatusChange(row._id, choice.value, e)
-                                                                    }
-                                                                    className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50/60 hover:text-indigo-600 transition-colors"
-                                                                >
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span
-                                                                            className={`w-1.5 h-1.5 rounded-full ${choice.color}`}
-                                                                        />
-                                                                        <span>{choice.label}</span>
-                                                                    </div>
-                                                                    {currentStatus === choice.value && (
-                                                                        <Check
-                                                                            size={12}
-                                                                            className="text-indigo-600"
-                                                                        />
-                                                                    )}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    )}
                                                 </div>
-                                                {currentStatus === "exit" && row.exitDate && (
-                                                    <div className="text-[10px] text-rose-500 font-semibold mt-0.5 flex items-center gap-1">
-                                                        <Calendar size={10} /> Exit: {row.exitDate}
-                                                    </div>
-                                                )}
-                                            </td>
+                                                <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                                    {row.email || "No email listed"}
+                                                </p>
+                                            </div>
+                                        </div>
 
-                                            {/* Action Menu */}
-                                            <td className="py-3.5 sm:py-4 px-5 sm:px-6 text-right relative">
-                                                <div className="relative row-action-dropdown-container inline-block">
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setActiveRowActionDropdown(
-                                                                isActionDropdownOpen ? null : row._id
-                                                            );
-                                                            setActiveRowStatusDropdown(null);
-                                                        }}
-                                                        disabled={isDeleting}
-                                                        className="inline-flex p-1.5 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-all cursor-pointer"
-                                                        title="More options"
+                                        <span
+                                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border shrink-0 ${theme.badge}`}
+                                        >
+                                            <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`} />
+                                            <span className="uppercase">{theme.label}</span>
+                                        </span>
+                                    </div>
+
+                                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                                        <div className="flex items-center gap-1.5 truncate text-[11px]">
+                                            <Building2 size={13} className="text-slate-400 shrink-0" />
+                                            <span className="truncate font-semibold text-slate-700">{deptName}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1 font-mono text-[11px] text-slate-400 shrink-0">
+                                            <Calendar size={12} className="text-slate-400" />
+                                            <span>{dateDisplay}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                                        <div className="text-[11px] font-semibold text-indigo-600 truncate max-w-[150px]">
+                                            {desigName}
+                                        </div>
+
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    router.push(`/employees/profile?id=${row._id}`);
+                                                }}
+                                                className="p-1.5 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition cursor-pointer"
+                                                title="View Profile"
+                                            >
+                                                <Eye size={15} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    router.push(`/employees/add?id=${row._id}`);
+                                                }}
+                                                className="p-1.5 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition cursor-pointer"
+                                                title="Edit Details"
+                                            >
+                                                <Edit3 size={15} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => handleDeleteEmployee(row._id, e)}
+                                                disabled={isDeleting}
+                                                className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                                                title="Delete Record"
+                                            >
+                                                {isDeleting ? (
+                                                    <Loader2 size={15} className="animate-spin text-rose-600" />
+                                                ) : (
+                                                    <Trash2 size={15} />
+                                                )}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Desktop Table View */}
+                    <div className="hidden md:block bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse min-w-[700px]">
+                                <thead>
+                                    <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                                        <th className="py-3.5 px-5 sm:px-6">Employee</th>
+                                        <th className="py-3.5 px-4">Department</th>
+                                        <th className="py-3.5 px-4">Designation</th>
+                                        <th className="py-3.5 px-4">Status</th>
+                                        <th className="py-3.5 px-5 sm:px-6 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-sm">
+                                    {filteredEmployees.map((row) => {
+                                        const curStatus = (row.employeeStatus || row.status || "active").toLowerCase();
+                                        const theme = getStatusTheme(curStatus);
+                                        const isRowDropdownOpen = activeRowStatusDropdown === row._id;
+                                        const isActionDropdownOpen = activeRowActionDropdown === row._id;
+                                        const isDeleting = deletingId === row._id;
+                                        const deptName = resolveDepartmentName(row);
+                                        const desigName = resolveDesignationName(row);
+                                        const empIdTag = row.employeeId || "EMP001";
+
+                                        return (
+                                            <tr
+                                                key={row._id}
+                                                className="group hover:bg-slate-50/70 transition-colors"
+                                            >
+                                                {/* Employee Info + Avatar + ID */}
+                                                <td className="py-3.5 sm:py-4 px-5 sm:px-6">
+                                                    <div
+                                                        onClick={() => router.push(`/employees/profile?id=${row._id}`)}
+                                                        className="flex items-center gap-3 cursor-pointer"
                                                     >
-                                                        {isDeleting ? (
-                                                            <Loader2
-                                                                size={15}
-                                                                className="animate-spin text-rose-600"
+                                                        {row.avatar || row.photo ? (
+                                                            <img
+                                                                src={row.avatar || row.photo}
+                                                                alt={row.name}
+                                                                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl object-cover border border-slate-200 shrink-0 shadow-2xs group-hover:scale-105 transition-transform"
                                                             />
                                                         ) : (
-                                                            <MoreVertical size={15} />
+                                                            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-2xs border border-indigo-200/80 group-hover:scale-105 transition-transform">
+                                                                {getInitials(row.name)}
+                                                            </div>
                                                         )}
-                                                    </button>
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                                <p className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors truncate text-xs sm:text-sm">
+                                                                    {row.name}
+                                                                </p>
+                                                                <span className="font-mono text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200/80">
+                                                                    {empIdTag}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-[11px] text-slate-500 font-medium flex items-center gap-1 mt-0.5 truncate">
+                                                                <Mail size={11} className="text-slate-400 shrink-0" />
+                                                                <span className="truncate">
+                                                                    {row.email || "No email registered"}
+                                                                </span>
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </td>
 
-                                                    {isActionDropdownOpen && (
-                                                        <div className="absolute right-0 mt-1.5 w-36 bg-white border border-slate-200 rounded-xl shadow-xl py-1 z-50 text-left">
-                                                            <button
-                                                                type="button"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    router.push(
-                                                                        `/employees/profile?id=${row._id}`
-                                                                    );
-                                                                }}
-                                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
-                                                            >
-                                                                <Eye size={13} className="text-slate-400" />
-                                                                <span>View Profile</span>
-                                                            </button>
+                                                {/* Resolved Department Name (Hex ID resolved to readable title) */}
+                                                <td className="py-3.5 sm:py-4 px-4">
+                                                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-xl shadow-2xs">
+                                                        <Building2 size={12} className="text-slate-400 shrink-0" />
+                                                        <span className="truncate max-w-[140px] font-bold">
+                                                            {deptName}
+                                                        </span>
+                                                    </span>
+                                                </td>
 
-                                                            <button
-                                                                type="button"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    router.push(`/employees/add?id=${row._id}`);
-                                                                }}
-                                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
-                                                            >
-                                                                <Edit3 size={13} className="text-slate-400" />
-                                                                <span>Edit Details</span>
-                                                            </button>
+                                                {/* Resolved Designation Title */}
+                                                <td className="py-3.5 sm:py-4 px-4">
+                                                    <p className="text-xs font-bold text-slate-800 truncate max-w-[160px]">
+                                                        {desigName}
+                                                    </p>
+                                                    <p className="text-[11px] text-slate-400 capitalize font-medium">
+                                                        {row.employmentType || "Full-time"}
+                                                    </p>
+                                                </td>
 
-                                                            <div className="my-1 border-t border-slate-100" />
+                                                {/* Status Dropdown (Includes Inactive, Active, Exited) */}
+                                                <td className="py-3.5 sm:py-4 px-4 relative">
+                                                    <div className="relative row-status-dropdown-container inline-block">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setActiveRowStatusDropdown(
+                                                                    isRowDropdownOpen ? null : row._id
+                                                                );
+                                                                setActiveRowActionDropdown(null);
+                                                            }}
+                                                            className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border capitalize shadow-2xs cursor-pointer transition-all ${theme.badge}`}
+                                                        >
+                                                            <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`} />
+                                                            <span>{theme.label}</span>
+                                                            <ChevronDown size={12} className="ml-0.5 opacity-60" />
+                                                        </button>
 
-                                                            <button
-                                                                type="button"
-                                                                onClick={(e) =>
-                                                                    handleDeleteEmployee(row._id, e)
-                                                                }
-                                                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                                                            >
-                                                                <Trash2 size={13} />
-                                                                <span>Delete Record</span>
-                                                            </button>
+                                                        {isRowDropdownOpen && (
+                                                            <div className="absolute left-0 mt-1.5 w-32 bg-white border border-slate-200 rounded-xl shadow-xl py-1 z-50">
+                                                                {rowStatusChoices.map((choice) => (
+                                                                    <button
+                                                                        key={choice.value}
+                                                                        type="button"
+                                                                        onClick={(e) =>
+                                                                            handleStatusChange(row._id, choice.value, e)
+                                                                        }
+                                                                        className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50/60 hover:text-indigo-600 transition-colors"
+                                                                    >
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className={`w-1.5 h-1.5 rounded-full ${choice.color}`} />
+                                                                            <span>{choice.label}</span>
+                                                                        </div>
+                                                                        {curStatus === choice.value && (
+                                                                            <Check size={12} className="text-indigo-600" />
+                                                                        )}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    {curStatus === "exit" && row.exitDate && (
+                                                        <div className="text-[10px] text-rose-500 font-semibold mt-0.5 flex items-center gap-1">
+                                                            <Calendar size={10} /> Exit: {row.exitDate}
                                                         </div>
                                                     )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                                                </td>
+
+                                                {/* Action Menu */}
+                                                <td className="py-3.5 sm:py-4 px-5 sm:px-6 text-right relative">
+                                                    <div className="relative row-action-dropdown-container inline-block">
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setActiveRowActionDropdown(
+                                                                    isActionDropdownOpen ? null : row._id
+                                                                );
+                                                                setActiveRowStatusDropdown(null);
+                                                            }}
+                                                            disabled={isDeleting}
+                                                            className="inline-flex p-1.5 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition-all cursor-pointer"
+                                                            title="More options"
+                                                        >
+                                                            {isDeleting ? (
+                                                                <Loader2 size={15} className="animate-spin text-rose-600" />
+                                                            ) : (
+                                                                <MoreVertical size={15} />
+                                                            )}
+                                                        </button>
+
+                                                        {isActionDropdownOpen && (
+                                                            <div className="absolute right-0 mt-1.5 w-36 bg-white border border-slate-200 rounded-xl shadow-xl py-1 z-50 text-left">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        router.push(`/employees/profile?id=${row._id}`);
+                                                                    }}
+                                                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
+                                                                >
+                                                                    <Eye size={13} className="text-slate-400" />
+                                                                    <span>View Profile</span>
+                                                                </button>
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        router.push(`/employees/add?id=${row._id}`);
+                                                                    }}
+                                                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
+                                                                >
+                                                                    <Edit3 size={13} className="text-slate-400" />
+                                                                    <span>Edit Details</span>
+                                                                </button>
+
+                                                                <div className="my-1 border-t border-slate-100" />
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => handleDeleteEmployee(row._id, e)}
+                                                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                                                >
+                                                                    <Trash2 size={13} />
+                                                                    <span>Delete Record</span>
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                )}
-            </div>
+                </>
+            )}
         </div>
     );
 }

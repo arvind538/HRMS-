@@ -1,29 +1,308 @@
-const Employee = require("../models/employeeModel");
+const mongoose = require("mongoose");
+const Employee = require("../models/Employee");
 const ActivityLog = require("../models/activityLogModel");
 
+// Helper: Generate next unique Employee ID if not provided
+const generateEmployeeId = async () => {
+    const count = await Employee.countDocuments();
+    let counter = count + 1;
+    let employeeId = `EMP${String(counter).padStart(4, "0")}`;
+    let exists = await Employee.findOne({ employeeId });
+    while (exists) {
+        counter++;
+        employeeId = `EMP${String(counter).padStart(4, "0")}`;
+        exists = await Employee.findOne({ employeeId });
+    }
+    return employeeId;
+};
+
+// Helper: Safely resolve reportingManager to prevent Cast to ObjectId error
+const sanitizeManager = (val) => {
+    if (!val || typeof val !== "string" || val.trim() === "") return null;
+    const str = val.trim();
+    if (mongoose.Types.ObjectId.isValid(str) && str.length === 24) {
+        return new mongoose.Types.ObjectId(str);
+    }
+    return str;
+};
+
+// Helper: Safely cast valid ObjectId or return null
+const sanitizeObjectId = (val) => {
+    if (!val || typeof val !== "string" || val.trim() === "") return null;
+    const str = val.trim();
+    return mongoose.Types.ObjectId.isValid(str) && str.length === 24 ? new mongoose.Types.ObjectId(str) : null;
+};
+
+// @route POST /api/employees
+const createEmployee = async (req, res, next) => {
+    try {
+        const body = req.body;
+
+        const employeeId = body.employeeId?.trim() || (await generateEmployeeId());
+        const email = body.email?.trim().toLowerCase();
+        const panNumber = body.panNumber?.trim().toUpperCase() || undefined;
+        const idProofNumber = body.idProofNumber?.trim() || undefined;
+
+        // 1. Check duplicate Employee ID
+        const existingEmpId = await Employee.findOne({ employeeId });
+        if (existingEmpId) {
+            return res.status(409).json({
+                message: `Employee ID "${employeeId}" already exists. Please provide a unique ID.`,
+            });
+        }
+
+        // 2. Check duplicate Email
+        const existingEmail = await Employee.findOne({ email });
+        if (existingEmail) {
+            return res.status(409).json({
+                message: `Email "${email}" is already registered with another employee.`,
+            });
+        }
+
+        // 3. Check duplicate PAN Number
+        if (panNumber) {
+            const existingPan = await Employee.findOne({ panNumber });
+            if (existingPan) {
+                return res.status(409).json({
+                    message: `PAN Number "${panNumber}" already exists in records.`,
+                });
+            }
+        }
+
+        // 4. Check duplicate Government / Identity Proof Number
+        if (idProofNumber) {
+            const existingDocId = await Employee.findOne({ idProofNumber });
+            if (existingDocId) {
+                return res.status(409).json({
+                    message: `Document ID Number "${idProofNumber}" is already registered with another employee.`,
+                });
+            }
+        }
+
+        // File upload paths (Multer vs Body fallback)
+        const avatar = req.files?.avatar ? `/uploads/${req.files.avatar[0].filename}` : body.avatar || "";
+        const resumeUrl = req.files?.resume ? `/uploads/${req.files.resume[0].filename}` : body.resumeFileData || "";
+        const resumeFileName = req.files?.resume ? req.files.resume[0].originalname : body.resumeFileName || "";
+        const idProofUrl = req.files?.idProof ? `/uploads/${req.files.idProof[0].filename}` : body.idProofFileData || "";
+        const idProofFileName = req.files?.idProof ? req.files.idProof[0].originalname : body.idProofFileName || "";
+
+        const newEmployee = new Employee({
+            employeeId,
+            name: body.name?.trim(),
+            email,
+            loginEmail: (body.loginEmail || email).trim().toLowerCase(),
+            phone: body.phone?.trim() || "",
+            gender: body.gender || "male",
+            dateOfBirth: body.dateOfBirth || null,
+            bloodGroup: body.bloodGroup || "",
+            maritalStatus: body.maritalStatus || "",
+            avatar,
+
+            designation: sanitizeObjectId(body.designation) || body.designation,
+            department: sanitizeObjectId(body.department) || body.department,
+            branch: body.branch?.trim() || "Main Campus",
+            employmentType: body.employmentType || "Full-time",
+            reportingManager: sanitizeManager(body.reportingManager),
+            dateOfJoining: body.dateOfJoining || null,
+            employeeStatus: body.employeeStatus || "Active",
+            role: body.role || "Employee",
+
+            salary: Number(body.salary) || 0,
+            bankDetails: {
+                bankName: body.bankName?.trim() || body.bankDetails?.bankName?.trim() || "",
+                accountNumber: body.accountNumber?.trim() || body.bankDetails?.accountNumber?.trim() || "",
+                ifscCode: (body.ifscCode || body.bankDetails?.ifscCode || "").trim().toUpperCase(),
+                paymentMode: body.paymentMode || body.bankDetails?.paymentMode || "Bank Transfer",
+            },
+            panNumber,
+            uanNumber: body.uanNumber?.trim() || "",
+
+            emergencyContact: {
+                name: body.emergencyContactName?.trim() || body.emergencyContact?.name?.trim() || "",
+                relation: body.emergencyContactRelation?.trim() || body.emergencyContact?.relation?.trim() || "",
+                phone: body.emergencyContactPhone?.trim() || body.emergencyContact?.phone?.trim() || "",
+            },
+
+            residentialAddress: {
+                street: body.address?.trim() || body.residentialAddress?.street?.trim() || "",
+                city: body.city?.trim() || body.residentialAddress?.city?.trim() || "",
+                state: body.state?.trim() || body.residentialAddress?.state?.trim() || "",
+                pincode: body.pincode?.trim() || body.residentialAddress?.pincode?.trim() || "",
+            },
+
+            education: {
+                highestQualification: body.highestQualification?.trim() || body.education?.highestQualification?.trim() || "",
+                instituteName: body.instituteName?.trim() || body.education?.instituteName?.trim() || "",
+                yearOfPassing: body.yearOfPassing ? Number(body.yearOfPassing) : null,
+            },
+
+            experience: {
+                previousCompany: body.previousCompany?.trim() || body.experience?.previousCompany?.trim() || "",
+                previousDesignation: body.previousDesignation?.trim() || body.experience?.previousDesignation?.trim() || "",
+                years: body.previousExperienceYears ? Number(body.previousExperienceYears) : 0,
+            },
+
+            idProofType: body.idProofType?.trim() || "",
+            idProofNumber,
+            documents: {
+                resumeUrl,
+                resumeFileName,
+                idProofUrl,
+                idProofFileName,
+            },
+        });
+
+        const saved = await newEmployee.save();
+
+        try {
+            const userId = req.user?.id || req.user?._id || null;
+            if (ActivityLog) {
+                await ActivityLog.create({
+                    user: userId,
+                    action: `Created new employee profile: ${saved.name} (${saved.employeeId})`,
+                    module: "Employee",
+                });
+            }
+        } catch (logErr) {
+            console.error("Activity log error:", logErr.message);
+        }
+
+        return res.status(201).json({
+            success: true,
+            message: "Employee registered successfully",
+            employee: saved,
+        });
+    } catch (error) {
+        console.error("Employee Creation Error:", error);
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern || {})[0] || "field";
+            return res.status(409).json({
+                message: `A record with this ${field} already exists. It must be unique.`,
+            });
+        }
+        return res.status(500).json({ message: "Internal server error. Failed to save employee." });
+    }
+};
+
+// @route PUT /api/employees/:id
+const updateEmployee = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const body = req.body;
+
+        const existing = await Employee.findById(id);
+        if (!existing) {
+            return res.status(404).json({ message: "Employee record not found." });
+        }
+
+        // Validate uniqueness on update
+        if (body.employeeId && body.employeeId !== existing.employeeId) {
+            const dup = await Employee.findOne({ employeeId: body.employeeId, _id: { $ne: id } });
+            if (dup) return res.status(409).json({ message: `Employee ID "${body.employeeId}" is already taken.` });
+        }
+
+        if (body.email && body.email.toLowerCase() !== existing.email) {
+            const dup = await Employee.findOne({ email: body.email.toLowerCase(), _id: { $ne: id } });
+            if (dup) return res.status(409).json({ message: `Email "${body.email}" is already used by another employee.` });
+        }
+
+        if (body.panNumber && body.panNumber.toUpperCase() !== existing.panNumber) {
+            const dup = await Employee.findOne({ panNumber: body.panNumber.toUpperCase(), _id: { $ne: id } });
+            if (dup) return res.status(409).json({ message: `PAN Number "${body.panNumber}" is already in use.` });
+        }
+
+        if (body.idProofNumber && body.idProofNumber !== existing.idProofNumber) {
+            const dup = await Employee.findOne({ idProofNumber: body.idProofNumber, _id: { $ne: id } });
+            if (dup) return res.status(409).json({ message: `Document ID Number "${body.idProofNumber}" is already registered.` });
+        }
+
+        const updateData = {
+            ...body,
+            reportingManager: body.reportingManager ? sanitizeManager(body.reportingManager) : existing.reportingManager,
+            department: body.department ? (sanitizeObjectId(body.department) || body.department) : existing.department,
+            designation: body.designation ? (sanitizeObjectId(body.designation) || body.designation) : existing.designation,
+        };
+
+        // Preserve and merge nested documents if files are uploaded
+        if (req.files?.avatar) updateData.avatar = `/uploads/${req.files.avatar[0].filename}`;
+        if (req.files?.resume) {
+            updateData["documents.resumeUrl"] = `/uploads/${req.files.resume[0].filename}`;
+            updateData["documents.resumeFileName"] = req.files.resume[0].originalname;
+        }
+        if (req.files?.idProof) {
+            updateData["documents.idProofUrl"] = `/uploads/${req.files.idProof[0].filename}`;
+            updateData["documents.idProofFileName"] = req.files.idProof[0].originalname;
+        }
+
+        const updated = await Employee.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true, runValidators: true }
+        )
+            .populate("department", "name")
+            .populate({
+                path: "reportingManager",
+                select: "name firstName lastName designation",
+                match: { _id: { $exists: true } },
+            })
+            .populate("designation", "title name");
+
+        try {
+            const userId = req.user?.id || req.user?._id || null;
+            if (ActivityLog) {
+                await ActivityLog.create({
+                    user: userId,
+                    action: `Updated employee profile: ${updated.name} (${updated.employeeId})`,
+                    module: "Employee",
+                });
+            }
+        } catch (logErr) {
+            console.error("Activity log error:", logErr.message);
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Employee updated successfully",
+            employee: updated,
+            data: updated,
+        });
+    } catch (error) {
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern || {})[0] || "field";
+            return res.status(409).json({ message: `${field} must be unique across all employees.` });
+        }
+        return res.status(500).json({ message: "Failed to update employee profile." });
+    }
+};
+
 // @route GET /api/employees
-exports.getEmployees = async (req, res, next) => {
+const getEmployees = async (req, res, next) => {
     try {
         const { status, department, search } = req.query;
         let filter = {};
 
-        if (status) filter.status = status;
+        if (status) filter.employeeStatus = status;
         if (department) filter.department = department;
         if (search) filter.name = { $regex: search, $options: "i" };
 
         const employees = await Employee.find(filter)
             .populate("department", "name")
-            .populate("reportingManager", "name")
+            .populate({
+                path: "reportingManager",
+                select: "name firstName lastName designation",
+                match: { _id: { $exists: true } },
+            })
+            .populate("designation", "title name")
             .sort({ createdAt: -1 });
 
-        res.json(employees);
+        return res.status(200).json(employees);
     } catch (err) {
         next(err);
     }
 };
 
 // @route GET /api/employees/profile
-exports.getMyProfile = async (req, res, next) => {
+const getMyProfile = async (req, res, next) => {
     try {
         const userId = req.user?.id || req.user?._id;
         const userEmail = req.user?.email;
@@ -31,7 +310,6 @@ exports.getMyProfile = async (req, res, next) => {
 
         let employee = null;
 
-        // 1. Pehle user ID ya email se search karein
         if (userId || userEmail) {
             employee = await Employee.findOne({
                 $or: [
@@ -40,16 +318,17 @@ exports.getMyProfile = async (req, res, next) => {
                 ]
             })
                 .populate("department", "name")
-                .populate("reportingManager", "name");
+                .populate({
+                    path: "reportingManager",
+                    select: "name firstName lastName designation",
+                    match: { _id: { $exists: true } },
+                })
+                .populate("designation", "title name");
         }
 
-        // 2. Agar profile bilkul nahi milti, tabhi create karne ki koshish karein
         if (!employee && userId) {
             try {
-                const count = await Employee.countDocuments();
-                const employeeId = `EMP${String(count + 1).padStart(4, "0")}`;
-
-                // Agar user ki apni email hai toh wo use karo, warna ek unique timestamp wali email banao
+                const employeeId = await generateEmployeeId();
                 const uniqueEmail = userEmail || `employee_${userId}_${Date.now()}@company.com`;
 
                 employee = await Employee.create({
@@ -58,11 +337,10 @@ exports.getMyProfile = async (req, res, next) => {
                     email: uniqueEmail,
                     employeeId: employeeId,
                     designation: req.user?.role || "Staff Member",
-                    status: "active",
+                    employeeStatus: "Active",
                     dateOfJoining: new Date()
                 });
             } catch (createErr) {
-                // Agar phir bhi email duplicate error aaye, toh database mein se us email wale purane record ko dhoond kar user ID update kar do
                 if (createErr.code === 11000) {
                     const fallbackEmail = userEmail || `employee_${userId}@company.com`;
                     employee = await Employee.findOneAndUpdate(
@@ -70,31 +348,10 @@ exports.getMyProfile = async (req, res, next) => {
                         { user: userId, name: userName },
                         { new: true, upsert: false }
                     );
-
-                    // Agar fir bhi na mile toh bina unique constraint ke error ko bypass karne ke liye random email use karo
-                    if (!employee) {
-                        const count = await Employee.countDocuments();
-                        employee = await Employee.create({
-                            user: userId,
-                            name: userName,
-                            email: `emp_${Date.now()}_${Math.floor(Math.random() * 1000)}@company.com`,
-                            employeeId: `EMP${String(count + 10).padStart(4, "0")}`,
-                            designation: "Staff Member",
-                            status: "active",
-                            dateOfJoining: new Date()
-                        });
-                    }
                 } else {
                     throw createErr;
                 }
             }
-        }
-
-        // 3. Populate department & manager fields
-        if (employee && !employee.populated("department")) {
-            employee = await Employee.findById(employee._id)
-                .populate("department", "name")
-                .populate("reportingManager", "name");
         }
 
         if (!employee) {
@@ -103,112 +360,40 @@ exports.getMyProfile = async (req, res, next) => {
             });
         }
 
-        res.json(employee);
+        return res.status(200).json(employee);
     } catch (err) {
         next(err);
     }
 };
+
 // @route GET /api/employees/:id
-exports.getEmployee = async (req, res, next) => {
+const getEmployeeById = async (req, res, next) => {
     try {
         const employee = await Employee.findById(req.params.id)
             .populate("department", "name")
-            .populate("reportingManager", "name");
+            .populate({
+                path: "reportingManager",
+                select: "name firstName lastName designation",
+                match: { _id: { $exists: true } },
+            })
+            .populate("designation", "title name");
 
         if (!employee) {
             return res.status(404).json({ message: "Employee not found" });
         }
-        res.json(employee);
-    } catch (err) {
-        next(err);
-    }
-};
 
-// @route POST /api/employees
-exports.createEmployee = async (req, res, next) => {
-    try {
-        let employeeId = req.body.employeeId;
-
-        // Agar frontend se employeeId nahi aayi hai, toh safe tarike se next ID generate karein
-        if (!employeeId || employeeId.trim() === "") {
-            const lastEmployee = await Employee.findOne({ employeeId: { $regex: /^EMP/ } }).sort({ createdAt: -1 });
-
-            let nextNumber = 1;
-            if (lastEmployee && lastEmployee.employeeId) {
-                const numericPart = parseInt(lastEmployee.employeeId.replace("EMP", ""), 10);
-                if (!isNaN(numericPart)) {
-                    nextNumber = numericPart + 1;
-                }
-            } else {
-                // Fallback agar koi EMP format ka ID na mile toh total count le lo
-                const count = await Employee.countDocuments();
-                nextNumber = count + 1;
-            }
-
-            employeeId = `EMP${String(nextNumber).padStart(4, "0")}`;
-
-            // Double check loop taaki agar race condition mein bhi duplicate ho toh next number le le
-            let existing = await Employee.findOne({ employeeId });
-            while (existing) {
-                nextNumber++;
-                employeeId = `EMP${String(nextNumber).padStart(4, "0")}`;
-                existing = await Employee.findOne({ employeeId });
-            }
-        }
-
-        const employee = await Employee.create({ ...req.body, employeeId });
-
-        // ✅ Safe Activity Log Saving
-        try {
-            const userId = req.user?.id || req.body.userId || null;
-
-            await ActivityLog.create({
-                user: userId,
-                action: `Created new employee profile: ${employee.name} (${employee.employeeId})`,
-                module: "Employee",
-            });
-            console.log("Activity log saved successfully!");
-        } catch (logErr) {
-            console.error("❌ ACTIVITY LOG SAVE ERROR:", logErr.message);
-        }
-
-        res.status(201).json(employee);
-    } catch (err) {
-        next(err);
-    }
-};
-
-// @route PUT /api/employees/:id
-exports.updateEmployee = async (req, res, next) => {
-    try {
-        const employee = await Employee.findByIdAndUpdate(req.params.id, req.body, {
-            new: true,
-            runValidators: true,
+        return res.status(200).json({
+            success: true,
+            data: employee,
+            employee: employee,
         });
-
-        if (!employee) {
-            return res.status(404).json({ message: "Employee not found" });
-        }
-
-        // ✅ Safe Activity Log Saving
-        try {
-            await ActivityLog.create({
-                user: req.user?.id || null,
-                action: `Updated employee record: ${employee.name}`,
-                module: "Employee",
-            });
-        } catch (logErr) {
-            console.error("Failed to save activity log:", logErr.message);
-        }
-
-        res.json(employee);
-    } catch (err) {
-        next(err);
+    } catch (error) {
+        next(error);
     }
 };
 
 // @route DELETE /api/employees/:id
-exports.deleteEmployee = async (req, res, next) => {
+const deleteEmployee = async (req, res, next) => {
     try {
         const employee = await Employee.findByIdAndDelete(req.params.id);
 
@@ -216,29 +401,31 @@ exports.deleteEmployee = async (req, res, next) => {
             return res.status(404).json({ message: "Employee not found" });
         }
 
-        // ✅ Safe Activity Log Saving
         try {
-            await ActivityLog.create({
-                user: req.user?.id || null,
-                action: `Deleted employee profile: ${employee.name}`,
-                module: "Employee",
-            });
+            const userId = req.user?.id || req.user?._id || null;
+            if (ActivityLog) {
+                await ActivityLog.create({
+                    user: userId,
+                    action: `Deleted employee profile: ${employee.name}`,
+                    module: "Employee",
+                });
+            }
         } catch (logErr) {
-            console.error("Failed to save activity log:", logErr.message);
+            console.error("Activity log error:", logErr.message);
         }
 
-        res.json({ message: "Employee removed" });
+        return res.status(200).json({ message: "Employee removed successfully" });
     } catch (err) {
         next(err);
     }
 };
 
 // @route PUT /api/employees/:id/exit
-exports.exitEmployee = async (req, res, next) => {
+const exitEmployee = async (req, res, next) => {
     try {
         const employee = await Employee.findByIdAndUpdate(
             req.params.id,
-            { status: "exit", exitDate: req.body.exitDate || new Date() },
+            { employeeStatus: "Exit", exitDate: req.body.exitDate || new Date() },
             { new: true }
         );
 
@@ -246,24 +433,35 @@ exports.exitEmployee = async (req, res, next) => {
             return res.status(404).json({ message: "Employee not found" });
         }
 
-        // ✅ Safe Activity Log Saving
         try {
-            await ActivityLog.create({
-                user: req.user?.id || null,
-                action: `Processed exit for employee: ${employee.name}`,
-                module: "Employee",
-            });
+            const userId = req.user?.id || req.user?._id || null;
+            if (ActivityLog) {
+                await ActivityLog.create({
+                    user: userId,
+                    action: `Processed exit for employee: ${employee.name}`,
+                    module: "Employee",
+                });
+            }
         } catch (logErr) {
-            console.error("Failed to save activity log:", logErr.message);
+            console.error("Activity log error:", logErr.message);
         }
 
-        res.json(employee);
+        return res.status(200).json(employee);
     } catch (err) {
         next(err);
     }
 };
 
-
+module.exports = {
+    getEmployees,
+    getMyProfile,
+    getEmployeeById,
+    getEmployee: getEmployeeById,
+    createEmployee,
+    updateEmployee,
+    deleteEmployee,
+    exitEmployee,
+};
 
 
 

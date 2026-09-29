@@ -423,11 +423,21 @@ const deleteEmployee = async (req, res, next) => {
 // @route PUT /api/employees/:id/exit
 const exitEmployee = async (req, res, next) => {
     try {
+        const exitDate = req.body.exitDate || new Date();
+        const exitReason = req.body.exitReason || req.body.reason || "Separated from organization";
+
         const employee = await Employee.findByIdAndUpdate(
             req.params.id,
-            { employeeStatus: "Exit", exitDate: req.body.exitDate || new Date() },
-            { new: true }
-        );
+            {
+                status: "Exited",               // Frontend aur general queries ke liye
+                employeeStatus: "Exited",       // Legacy schema ke liye
+                isActive: false,              // Status flag
+                isExited: true,               // Boolean flag
+                exitDate: exitDate,
+                exitReason: exitReason,
+            },
+            { returnDocument: "after" }       // Deprecation warning fix
+        ).populate("department designation");
 
         if (!employee) {
             return res.status(404).json({ message: "Employee not found" });
@@ -435,10 +445,10 @@ const exitEmployee = async (req, res, next) => {
 
         try {
             const userId = req.user?.id || req.user?._id || null;
-            if (ActivityLog) {
+            if (typeof ActivityLog !== "undefined" && ActivityLog) {
                 await ActivityLog.create({
                     user: userId,
-                    action: `Processed exit for employee: ${employee.name}`,
+                    action: `Processed exit for employee: ${employee.name || employee.firstName || "Staff Member"}`,
                     module: "Employee",
                 });
             }

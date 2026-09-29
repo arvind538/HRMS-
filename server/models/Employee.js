@@ -159,5 +159,4 @@ const employeeSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// ✅ Fix: Use existing model if already initialized
 module.exports = mongoose.models.Employee || mongoose.model("Employee", employeeSchema);

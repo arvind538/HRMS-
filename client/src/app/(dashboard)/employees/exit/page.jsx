@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
     UserX,
@@ -15,9 +15,13 @@ import {
     AlertCircle,
     Eye,
     ChevronRight,
+    Search,
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
+
+const isHexObjectId = (str) =>
+    typeof str === "string" && /^[0-9a-fA-F]{24}$/.test(str.trim());
 
 const getInitials = (name) => {
     if (!name) return "U";
@@ -30,34 +34,113 @@ const getInitials = (name) => {
 export default function ExitEmployeesPage() {
     const router = useRouter();
     const [exitedStaff, setExitedStaff] = useState([]);
+    const [departmentsMap, setDepartmentsMap] = useState({});
+    const [designationsMap, setDesignationsMap] = useState({});
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [deletingId, setDeletingId] = useState(null);
     const [selectedStaff, setSelectedStaff] = useState(null);
+    const [searchQuery, setSearchQuery] = useState("");
+
+    const fetchLookupData = async () => {
+        try {
+            const [deptRes, desigRes] = await Promise.allSettled([
+                api.get("/departments"),
+                api.get("/designations"),
+            ]);
+
+            if (deptRes.status === "fulfilled") {
+                const dData = Array.isArray(deptRes.value?.data)
+                    ? deptRes.value.data
+                    : deptRes.value?.data?.departments || deptRes.value?.data?.data || [];
+                const dMap = {};
+                dData.forEach((item) => {
+                    const id = String(item._id || item.id || "");
+                    if (id) dMap[id] = item.name || item.title || item.departmentName;
+                });
+                setDepartmentsMap(dMap);
+            }
+
+            if (desigRes.status === "fulfilled") {
+                const desData = Array.isArray(desigRes.value?.data)
+                    ? desigRes.value.data
+                    : desigRes.value?.data?.designations || desigRes.value?.data?.data || [];
+                const desMap = {};
+                desData.forEach((item) => {
+                    const id = String(item._id || item.id || "");
+                    if (id) desMap[id] = item.name || item.title || item.designationName;
+                });
+                setDesignationsMap(desMap);
+            }
+        } catch {
+            // Lookup error handled safely
+        }
+    };
 
     const fetchExited = async (isManual = false) => {
         if (isManual) setRefreshing(true);
         else setLoading(true);
 
         try {
+            await fetchLookupData();
+
+            // Core endpoint fetch (Avoid /employees/exit to prevent CastError)
             const res = await api.get("/employees");
             const dataList = Array.isArray(res?.data)
                 ? res.data
                 : res?.data?.employees || res?.data?.data || [];
 
-            const filtered = dataList.filter((e) => {
-                const status = (e.status || "").toLowerCase();
-                return (
-                    status === "exit" ||
-                    status === "exited" ||
-                    status === "inactive" ||
-                    status === "resigned" ||
-                    status === "terminated"
+            // Local storage avatars cache merge
+            let storedAvatars = {};
+            try {
+                storedAvatars = JSON.parse(
+                    localStorage.getItem("4ps_emp_avatars") || "{}"
                 );
+            } catch { }
+
+            const prepared = dataList.map((emp) => {
+                const id = String(emp._id || emp.id || "");
+                if (storedAvatars[id] && !emp.avatar) {
+                    return { ...emp, avatar: storedAvatars[id] };
+                }
+                return emp;
+            });
+
+            // KEY FIX: Har tarah ke exit fields ko check karein (employeeStatus, status, isExited, exitDate)
+            const exitKeywords = [
+                "exit",
+                "exited",
+                "resigned",
+                "resignation",
+                "terminated",
+                "termination",
+                "inactive",
+                "left",
+                "separated",
+                "relieved",
+            ];
+
+            const filtered = prepared.filter((e) => {
+                const empStatus = String(e.employeeStatus || "").toLowerCase().trim();
+                const status = String(e.status || "").toLowerCase().trim();
+                const resStatus = String(e.resignationStatus || "").toLowerCase().trim();
+
+                const isMarkedExit =
+                    exitKeywords.some((k) => empStatus.includes(k)) ||
+                    exitKeywords.some((k) => status.includes(k)) ||
+                    exitKeywords.some((k) => resStatus.includes(k));
+
+                const hasExitFlags =
+                    e.isExited === true ||
+                    e.isActive === false ||
+                    Boolean(e.exitDate && !["active", "probation"].includes(status));
+
+                return isMarkedExit || hasExitFlags;
             });
 
             setExitedStaff(filtered);
         } catch (err) {
+            console.error("Failed to load exit employee list:", err);
             toast.error("Unable to load departed employee records");
             setExitedStaff([]);
         } finally {
@@ -70,85 +153,205 @@ export default function ExitEmployeesPage() {
         fetchExited();
     }, []);
 
+    const getEmpName = (emp) =>
+        emp?.name ||
+        `${emp?.firstName || ""} ${emp?.lastName || ""}`.trim() ||
+        "Unnamed Staff";
+
+    const getDepartment = (emp) => {
+        if (!emp) return "General";
+        const depVal = emp.department;
+
+        if (typeof depVal === "object" && depVal !== null) {
+            return depVal.name || depVal.title || depVal.departmentName || "General";
+        }
+
+        if (typeof depVal === "string") {
+            const trimmed = depVal.trim();
+            if (departmentsMap[trimmed]) return departmentsMap[trimmed];
+            if (isHexObjectId(trimmed)) return "Operations";
+            return trimmed || "General";
+        }
+
+        return "General";
+    };
+
+    const getDesignation = (emp) => {
+        if (!emp) return "Staff Member";
+        const desVal = emp.designation;
+
+        if (typeof desVal === "object" && desVal !== null) {
+            return desVal.name || desVal.title || desVal.designationName || "Staff Member";
+        }
+
+        if (typeof desVal === "string") {
+            const trimmed = desVal.trim();
+            if (designationsMap[trimmed]) return designationsMap[trimmed];
+            if (isHexObjectId(trimmed)) return emp.role || "Executive";
+            return trimmed || emp.role || "Staff Member";
+        }
+
+        return emp.role || "Staff Member";
+    };
+
+    const getCleanEmpId = (emp, index) => {
+        const rawId = emp.employeeId || emp.empId || emp.code;
+        if (rawId && !isHexObjectId(String(rawId))) {
+            return String(rawId).toUpperCase();
+        }
+        const suffix = emp._id
+            ? String(emp._id).slice(-4).toUpperCase()
+            : `${index + 1}`.padStart(4, "0");
+        return `EMP${suffix}`;
+    };
+
     const handleDeleteEmployee = async (empId, e) => {
         e.stopPropagation();
-        if (!window.confirm("Are you sure you want to permanently delete this record?")) {
+        if (!window.confirm("Are you sure you want to permanently delete this alumni record?")) {
             return;
         }
 
         setDeletingId(empId);
         try {
-            setExitedStaff((prev) => prev.filter((emp) => (emp._id || emp.id) !== empId));
+            setExitedStaff((prev) =>
+                prev.filter((emp) => String(emp._id || emp.id) !== String(empId))
+            );
             await api.delete(`/employees/${empId}`);
             toast.success("Employee record deleted permanently.");
-            if (selectedStaff && (selectedStaff._id || selectedStaff.id) === empId) {
+            if (selectedStaff && String(selectedStaff._id || selectedStaff.id) === String(empId)) {
                 setSelectedStaff(null);
             }
         } catch (err) {
             console.error("Failed to delete employee:", err.response?.data || err.message);
-            toast.error("Failed to delete record.");
+            toast.error("Failed to delete record from server.");
             fetchExited();
         } finally {
             setDeletingId(null);
         }
     };
 
+    const filteredStaff = useMemo(() => {
+        if (!searchQuery.trim()) return exitedStaff;
+        const q = searchQuery.toLowerCase().trim();
+
+        return exitedStaff.filter((emp, index) => {
+            const name = getEmpName(emp).toLowerCase();
+            const email = String(emp.email || "").toLowerCase();
+            const dept = getDepartment(emp).toLowerCase();
+            const designation = getDesignation(emp).toLowerCase();
+            const code = getCleanEmpId(emp, index).toLowerCase();
+
+            return (
+                name.includes(q) ||
+                email.includes(q) ||
+                dept.includes(q) ||
+                designation.includes(q) ||
+                code.includes(q)
+            );
+        });
+    }, [exitedStaff, searchQuery, departmentsMap, designationsMap]);
+
     if (loading) {
         return (
             <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-2 text-slate-400">
-                <Loader2 size={32} className="animate-spin text-indigo-600" />
-                <p className="text-xs font-semibold">Loading alumni records...</p>
+                <Loader2 size={32} className="animate-spin text-rose-600" />
+                <p className="text-xs font-semibold tracking-wide text-slate-600">
+                    Loading separated employee ledger...
+                </p>
             </div>
         );
     }
 
     return (
-        <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 pb-12 transition-all duration-300 font-sans antialiased text-slate-900 px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6">
+        <div className="w-full space-y-4 sm:space-y-6 pb-12 font-sans antialiased text-slate-900">
             {/* Top Header Card */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/90 shadow-xs">
                 <div>
-                    <div className="flex items-center gap-2.5">
-                        <span className="p-2.5 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100 shadow-2xs">
-                            <UserX size={20} />
+                    <div className="flex items-center gap-3">
+                        <span className="p-2.5 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100 shadow-2xs shrink-0">
+                            <UserX size={22} />
                         </span>
-                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-                            Departed Staff & Alumni ({exitedStaff.length})
-                        </h1>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+                                    Departed Staff & Alumni
+                                </h1>
+                                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                    {exitedStaff.length} Records
+                                </span>
+                            </div>
+                            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                                Archived records of separated team members, completed contracts, and resignations.
+                            </p>
+                        </div>
                     </div>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-1 pl-11">
-                        Historical records of separated team members, completed contracts, and resignations.
-                    </p>
                 </div>
 
-                <button
-                    onClick={() => fetchExited(true)}
-                    disabled={refreshing}
-                    aria-label="Refresh list"
-                    className="p-2.5 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-200 rounded-xl text-slate-600 active:scale-95 transition-all disabled:opacity-50 shadow-2xs cursor-pointer self-start sm:self-auto"
-                >
-                    <RefreshCw size={16} className={refreshing ? "animate-spin text-indigo-600" : ""} />
-                </button>
+                <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                    <div className="relative flex-1 sm:w-72">
+                        <Search
+                            size={15}
+                            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                        />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Search alumni by name, ID, or dept..."
+                            className="w-full pl-9 pr-9 py-2.5 bg-slate-50 hover:bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-rose-500/10 focus:border-rose-400 transition-all shadow-2xs"
+                        />
+                        {searchQuery && (
+                            <button
+                                type="button"
+                                onClick={() => setSearchQuery("")}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+
+                    <button
+                        onClick={() => fetchExited(true)}
+                        disabled={refreshing}
+                        aria-label="Refresh list"
+                        className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-600 hover:text-rose-600 active:scale-95 transition-all disabled:opacity-50 shadow-2xs cursor-pointer shrink-0"
+                        title="Refresh Directory"
+                    >
+                        <RefreshCw
+                            size={16}
+                            className={refreshing ? "animate-spin text-rose-600" : ""}
+                        />
+                    </button>
+                </div>
             </div>
 
-            {/* Empty State */}
-            {exitedStaff.length === 0 ? (
-                <div className="bg-white p-12 sm:p-16 text-center rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs text-slate-400">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto text-slate-400 mb-3 shadow-2xs">
+            {/* Main Content Area */}
+            {filteredStaff.length === 0 ? (
+                <div className="bg-white p-12 sm:p-16 text-center rounded-2xl border border-slate-200 shadow-xs text-slate-400 space-y-2.5">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto text-slate-400 shadow-2xs">
                         <UserX size={22} />
                     </div>
-                    <p className="text-sm font-bold text-slate-700">No separated employee records found</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Employees marked as exited or inactive will appear here.</p>
+                    <p className="text-sm font-bold text-slate-800">No separated employee records found</p>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                        {searchQuery
+                            ? `No alumni match "${searchQuery}". Check your search filter.`
+                            : "Employees marked as exited, resigned, or inactive will be listed here automatically."}
+                    </p>
                 </div>
             ) : (
                 <>
                     {/* Mobile & Tablet Card Layout */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 md:hidden">
-                        {exitedStaff.map((emp) => {
+                        {filteredStaff.map((emp, index) => {
                             const empId = emp._id || emp.id;
-                            const empName = emp.name || emp.fullName || "Unnamed Staff";
-                            const dept = emp.department?.name || emp.department || emp.branch || "General";
-                            const status = emp.status || "Exit";
+                            const empName = getEmpName(emp);
+                            const dept = getDepartment(emp);
+                            const designation = getDesignation(emp);
+                            const token = getCleanEmpId(emp, index);
+                            const status = emp.employeeStatus || emp.status || "Exited";
                             const isDeleting = deletingId === empId;
+                            const avatarSrc = emp.avatar || emp.photo;
                             const formattedDate = emp.exitDate
                                 ? new Date(emp.exitDate).toLocaleDateString()
                                 : emp.updatedAt
@@ -159,19 +362,31 @@ export default function ExitEmployeesPage() {
                                 <div
                                     key={empId}
                                     onClick={() => setSelectedStaff(emp)}
-                                    className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-3 cursor-pointer hover:border-rose-300 transition-all"
+                                    className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/90 hover:border-rose-300 hover:shadow-md shadow-xs space-y-3 cursor-pointer transition-all"
                                 >
                                     <div className="flex items-start justify-between gap-2">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center font-extrabold text-xs shrink-0 shadow-2xs">
-                                                {getInitials(empName)}
+                                            <div className="w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                                                {avatarSrc ? (
+                                                    <img
+                                                        src={avatarSrc}
+                                                        alt={empName}
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                ) : (
+                                                    <span className="font-extrabold text-rose-600 text-xs">
+                                                        {getInitials(empName)}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="min-w-0">
                                                 <p className="font-bold text-slate-900 text-sm truncate">{empName}</p>
-                                                <p className="text-[11px] text-slate-400 truncate">{emp.email || "No email"}</p>
+                                                <p className="text-[11px] text-slate-400 font-mono">
+                                                    {token} • {designation}
+                                                </p>
                                             </div>
                                         </div>
-                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase">
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase shrink-0">
                                             <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                                             {status}
                                         </span>
@@ -195,7 +410,7 @@ export default function ExitEmployeesPage() {
                                                 e.stopPropagation();
                                                 setSelectedStaff(emp);
                                             }}
-                                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold"
+                                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 text-xs font-semibold transition-colors"
                                         >
                                             <Eye size={13} />
                                             <span>Details</span>
@@ -220,57 +435,86 @@ export default function ExitEmployeesPage() {
                     </div>
 
                     {/* Desktop Table View */}
-                    <div className="hidden md:block bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
+                    <div className="hidden md:block bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse min-w-[750px]">
+                            <table className="w-full text-left border-collapse min-w-[850px]">
                                 <thead>
-                                    <tr className="bg-slate-50/75 border-b border-slate-200/70 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                                        <th className="py-4 px-6">Employee</th>
-                                        <th className="py-4 px-6">Department</th>
-                                        <th className="py-4 px-6">Exit Date</th>
-                                        <th className="py-4 px-6">Status</th>
-                                        <th className="py-4 px-6 text-right">Action</th>
+                                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                        <th className="py-4 px-6 min-w-[260px]">Employee</th>
+                                        <th className="py-4 px-5 w-36">Employee ID</th>
+                                        <th className="py-4 px-5 min-w-[180px]">Department</th>
+                                        <th className="py-4 px-5 min-w-[140px]">Exit Date</th>
+                                        <th className="py-4 px-5 min-w-[130px]">Status</th>
+                                        <th className="py-4 px-6 text-right w-40">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                                    {exitedStaff.map((emp) => {
+                                <tbody className="divide-y divide-slate-100 text-xs sm:text-sm font-medium text-slate-700">
+                                    {filteredStaff.map((emp, index) => {
                                         const empId = emp._id || emp.id;
-                                        const empName = emp.name || emp.fullName || "Unnamed Staff";
-                                        const dept = emp.department?.name || emp.department || emp.branch || "General";
-                                        const status = emp.status || "Exit";
+                                        const empName = getEmpName(emp);
+                                        const dept = getDepartment(emp);
+                                        const designation = getDesignation(emp);
+                                        const token = getCleanEmpId(emp, index);
+                                        const status = emp.employeeStatus || emp.status || "Exited";
                                         const isDeleting = deletingId === empId;
+                                        const avatarSrc = emp.avatar || emp.photo;
 
                                         return (
                                             <tr
                                                 key={empId}
                                                 onClick={() => setSelectedStaff(emp)}
-                                                className="hover:bg-rose-50/30 transition-all duration-150 group cursor-pointer"
+                                                className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
                                             >
-                                                <td className="py-4 px-6 whitespace-nowrap">
-                                                    <div className="flex items-center gap-3.5">
-                                                        <div className="w-10 h-10 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center font-extrabold text-xs shrink-0 shadow-2xs group-hover:scale-105 group-hover:bg-rose-600 group-hover:text-white transition-all">
-                                                            {getInitials(empName)}
+                                                {/* Employee with Real Avatar */}
+                                                <td className="py-3.5 px-6 whitespace-nowrap">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs group-hover:border-rose-300 transition-colors">
+                                                            {avatarSrc ? (
+                                                                <img
+                                                                    src={avatarSrc}
+                                                                    alt={empName}
+                                                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                                                />
+                                                            ) : (
+                                                                <span className="font-extrabold text-rose-600 text-xs">
+                                                                    {getInitials(empName)}
+                                                                </span>
+                                                            )}
                                                         </div>
-                                                        <div>
-                                                            <p className="font-bold text-slate-900 group-hover:text-rose-600 transition-colors">
+                                                        <div className="min-w-0">
+                                                            <p className="font-bold text-slate-900 group-hover:text-rose-600 transition-colors truncate">
                                                                 {empName}
                                                             </p>
-                                                            <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5 font-mono">
-                                                                <Mail size={11} className="text-slate-400" />
-                                                                {emp.email || "No email provided"}
+                                                            <p className="text-[11px] text-slate-400 flex items-center gap-1 font-mono truncate">
+                                                                <Mail size={11} className="text-slate-400 shrink-0" />
+                                                                {emp.email || "No email"}
                                                             </p>
                                                         </div>
                                                     </div>
                                                 </td>
 
-                                                <td className="py-4 px-6 whitespace-nowrap">
-                                                    <span className="inline-flex items-center gap-1.5 text-slate-700 font-semibold bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-200/70">
-                                                        <Building2 size={13} className="text-slate-400" />
-                                                        {dept}
+                                                {/* Clean Employee ID */}
+                                                <td className="py-3.5 px-5">
+                                                    <span className="inline-block px-2.5 py-1 bg-slate-100 text-slate-700 font-mono font-bold text-xs rounded-lg border border-slate-200">
+                                                        {token}
                                                     </span>
                                                 </td>
 
-                                                <td className="py-4 px-6 text-slate-500 whitespace-nowrap">
+                                                {/* Department Name */}
+                                                <td className="py-3.5 px-5 whitespace-nowrap">
+                                                    <div>
+                                                        <span className="inline-flex items-center gap-1.5 text-slate-800 font-semibold">
+                                                            <Building2 size={13} className="text-slate-400" />
+                                                            {dept}
+                                                        </span>
+                                                        <span className="text-[11px] text-slate-400 block font-normal">
+                                                            {designation}
+                                                        </span>
+                                                    </div>
+                                                </td>
+
+                                                {/* Separation Date */}
+                                                <td className="py-3.5 px-5 text-slate-500 whitespace-nowrap">
                                                     <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold text-slate-600">
                                                         <Calendar size={13} className="text-slate-400" />
                                                         {emp.exitDate
@@ -281,14 +525,16 @@ export default function ExitEmployeesPage() {
                                                     </span>
                                                 </td>
 
-                                                <td className="py-4 px-6 whitespace-nowrap">
+                                                {/* Status Badge */}
+                                                <td className="py-3.5 px-5 whitespace-nowrap">
                                                     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase tracking-wide">
                                                         <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                                                         {status}
                                                     </span>
                                                 </td>
 
-                                                <td className="py-4 px-6 text-right whitespace-nowrap">
+                                                {/* Action buttons */}
+                                                <td className="py-3.5 px-6 text-right whitespace-nowrap">
                                                     <div className="inline-flex items-center gap-2">
                                                         <button
                                                             type="button"
@@ -328,7 +574,7 @@ export default function ExitEmployeesPage() {
                 </>
             )}
 
-            {/* Details Modal */}
+            {/* Details Inspection Modal */}
             {selectedStaff && (
                 <div
                     className="fixed inset-0 z-50 flex items-center justify-center p-3.5 sm:p-6 bg-slate-900/50 backdrop-blur-xs transition-all duration-200"
@@ -340,21 +586,31 @@ export default function ExitEmployeesPage() {
                     >
                         {/* Modal Header */}
                         <div className="flex items-center justify-between px-5 sm:px-6 py-4 sm:py-5 border-b border-slate-100 bg-slate-50/50">
-                            <div className="flex items-center gap-3">
-                                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center font-bold text-sm shadow-2xs shrink-0">
-                                    {getInitials(selectedStaff.name || selectedStaff.fullName)}
+                            <div className="flex items-center gap-3.5">
+                                <div className="w-12 h-12 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                                    {selectedStaff.avatar || selectedStaff.photo ? (
+                                        <img
+                                            src={selectedStaff.avatar || selectedStaff.photo}
+                                            alt={getEmpName(selectedStaff)}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    ) : (
+                                        <span className="font-extrabold text-rose-600 text-sm">
+                                            {getInitials(getEmpName(selectedStaff))}
+                                        </span>
+                                    )}
                                 </div>
                                 <div>
                                     <div className="flex items-center gap-2">
                                         <h3 className="text-base font-bold text-slate-900">
-                                            {selectedStaff.name || selectedStaff.fullName}
+                                            {getEmpName(selectedStaff)}
                                         </h3>
                                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 uppercase font-mono">
-                                            {selectedStaff.status || "EXITED"}
+                                            {selectedStaff.employeeStatus || selectedStaff.status || "EXITED"}
                                         </span>
                                     </div>
                                     <p className="text-xs text-slate-500 font-mono mt-0.5">
-                                        ID: {selectedStaff.employeeId || (selectedStaff._id ? `EMP${String(selectedStaff._id).slice(-4).toUpperCase()}` : "EMP-ALUMNI")}
+                                        ID: {getCleanEmpId(selectedStaff, 0)}
                                     </p>
                                 </div>
                             </div>
@@ -370,7 +626,6 @@ export default function ExitEmployeesPage() {
 
                         {/* Modal Body */}
                         <div className="p-5 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5">
-                            {/* Row 1: Contact Information */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                                 <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200/70">
                                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">
@@ -397,8 +652,7 @@ export default function ExitEmployeesPage() {
                                 </div>
                             </div>
 
-                            {/* Row 2: Employment Details */}
-                            <div className="p-4 sm:p-4.5 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-3">
+                            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/70 space-y-3">
                                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
                                     Separation & Corporate Overview
                                 </span>
@@ -407,14 +661,14 @@ export default function ExitEmployeesPage() {
                                     <div>
                                         <span className="text-[10px] text-slate-400 block">Designation</span>
                                         <p className="text-xs font-bold text-slate-900 mt-0.5">
-                                            {selectedStaff.designation || "Staff Associate"}
+                                            {getDesignation(selectedStaff)}
                                         </p>
                                     </div>
 
                                     <div>
                                         <span className="text-[10px] text-slate-400 block">Department</span>
                                         <p className="text-xs font-bold text-slate-900 mt-0.5">
-                                            {selectedStaff.department?.name || selectedStaff.department || selectedStaff.branch || "General"}
+                                            {getDepartment(selectedStaff)}
                                         </p>
                                     </div>
 
@@ -431,14 +685,16 @@ export default function ExitEmployeesPage() {
                                 </div>
                             </div>
 
-                            {/* Row 3: Reason for Separation */}
                             <div className="p-4 rounded-2xl bg-rose-50/40 border border-rose-100 space-y-1.5">
                                 <div className="flex items-center gap-1.5 text-rose-700">
                                     <AlertCircle size={15} />
                                     <span className="text-xs font-bold">Reason for Separation</span>
                                 </div>
                                 <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                                    {selectedStaff.exitReason || selectedStaff.resignationReason || selectedStaff.remarks || "Standard separation process completed. Access rights revoked."}
+                                    {selectedStaff.exitReason ||
+                                        selectedStaff.resignationReason ||
+                                        selectedStaff.remarks ||
+                                        "Standard separation process completed. Corporate access credentials revoked."}
                                 </p>
                             </div>
                         </div>

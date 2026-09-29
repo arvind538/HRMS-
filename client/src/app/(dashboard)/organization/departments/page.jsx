@@ -13,8 +13,12 @@ import {
     Calendar,
     Building2,
     Loader2,
-    User,
 } from "lucide-react";
+import api from "@/lib/api";
+
+// Paths tried in order by this page's own fetch/delete calls.
+// (EntityManager gets only "departments" - see the endpoint prop below.)
+const DEPT_PATHS = ["/organization/departments", "/departments"];
 
 export default function DepartmentsPage() {
     const [departments, setDepartments] = useState([]);
@@ -26,22 +30,17 @@ export default function DepartmentsPage() {
     async function fetchDepartmentsMetrics() {
         try {
             setLoading(true);
-            const baseUrl =
-                process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-            const res = await fetch(
-                `${baseUrl.replace(/\/$/, "")}/organization/departments`,
-                {
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                }
-            );
-            if (res.ok) {
-                const json =
-                    typeof res.json === "function" ? await res.json() : res;
+            let res = null;
+            for (const path of DEPT_PATHS) {
+                res = await api.get(path).catch(() => null);
+                if (res && res.data) break;
+            }
+
+            if (res && res.data) {
+                const json = res.data;
                 const dataList = Array.isArray(json)
                     ? json
-                    : json.data || json.result || json.items || [];
+                    : json.departments || json.data || json.result || json.items || [];
                 setDepartments(dataList);
             }
         } catch (error) {
@@ -67,44 +66,59 @@ export default function DepartmentsPage() {
         0
     );
 
+    // Safe helper to extract head name without undefined crashes
+    const resolveHeadName = (headVal) => {
+        if (!headVal) return "Not Assigned";
+        if (typeof headVal === "object") {
+            return (
+                headVal.name ||
+                `${headVal.firstName || ""} ${headVal.lastName || ""}`.trim() ||
+                headVal.fullName ||
+                headVal.email ||
+                "Not Assigned"
+            );
+        }
+        if (typeof headVal === "string") {
+            const trimmed = headVal.trim();
+            return trimmed.length > 0 ? trimmed : "Not Assigned";
+        }
+        return "Not Assigned";
+    };
+
     const filteredDepartments = useMemo(() => {
         if (!searchQuery.trim()) return departments;
         const q = searchQuery.toLowerCase().trim();
         return departments.filter((d) => {
-            const name = (d.name || "").toLowerCase();
-            const code = (d.code || "").toLowerCase();
-            const head =
-                typeof d.head === "object"
-                    ? (d.head?.name || "").toLowerCase()
-                    : String(d.head || "").toLowerCase();
+            const name = String(d.name || "").toLowerCase();
+            const code = String(d.code || "").toLowerCase();
+            const head = resolveHeadName(d.head).toLowerCase();
             return name.includes(q) || code.includes(q) || head.includes(q);
         });
     }, [departments, searchQuery]);
 
     const handleDeleteDepartment = async (id, e) => {
         e?.stopPropagation();
-        if (
-            !window.confirm("Are you sure you want to delete this department?")
-        )
+        if (!window.confirm("Are you sure you want to delete this department?"))
             return;
 
         setDeletingId(id);
         try {
-            const baseUrl =
-                process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-            const res = await fetch(
-                `${baseUrl.replace(/\/$/, "")}/organization/departments/${id}`,
-                {
-                    method: "DELETE",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
+            let deleted = false;
+            let lastErr = null;
+            for (const path of DEPT_PATHS) {
+                try {
+                    await api.delete(`${path}/${id}`);
+                    deleted = true;
+                    break;
+                } catch (err) {
+                    lastErr = err;
                 }
-            );
-            if (res.ok) {
-                setDepartments((prev) =>
-                    prev.filter((d) => (d._id || d.id) !== id)
-                );
+            }
+            if (!deleted) throw lastErr;
+
+            setDepartments((prev) => prev.filter((d) => (d._id || d.id) !== id));
+            if (selectedDept && (selectedDept._id || selectedDept.id) === id) {
+                setSelectedDept(null);
             }
         } catch (err) {
             console.error("Failed to delete department:", err);
@@ -114,11 +128,11 @@ export default function DepartmentsPage() {
     };
 
     const getDeptInitials = (code, name) => {
-        if (code) {
+        if (code && typeof code === "string") {
             const clean = code.replace(/[^a-zA-Z]/g, "").slice(0, 2);
             if (clean) return clean.toUpperCase();
         }
-        if (name) {
+        if (name && typeof name === "string") {
             const parts = name.trim().split(" ").filter(Boolean);
             return parts.length > 1
                 ? (parts[0][0] + parts[1][0]).toUpperCase()
@@ -191,7 +205,7 @@ export default function DepartmentsPage() {
                 </div>
             </div>
 
-            {/* MOBILE & TABLET CARD VIEW (Exact Screenshot Layout) */}
+            {/* MOBILE & TABLET CARD VIEW */}
             <div className="block md:hidden space-y-3">
                 {/* Search bar on mobile */}
                 <div className="relative w-full">
@@ -232,16 +246,12 @@ export default function DepartmentsPage() {
                         const id = dept._id || dept.id;
                         const code = dept.code || "";
                         const name = dept.name || "Department";
-                        const headName =
-                            typeof dept.head === "object"
-                                ? dept.head?.name
-                                : dept.head || "Head Not Assigned";
-                        const memberCount = dept.employeeCount || 0;
+                        const headName = resolveHeadName(dept.head);
                         const dateStr = dept.createdAt
                             ? new Date(dept.createdAt).toLocaleDateString("en-US")
                             : dept.updatedAt
                                 ? new Date(dept.updatedAt).toLocaleDateString("en-US")
-                                : "09/24/2026";
+                                : "—";
                         const isDeleting = deletingId === id;
                         const isActive =
                             dept.isActive === true ||
@@ -255,7 +265,7 @@ export default function DepartmentsPage() {
                                 onClick={() => setSelectedDept(dept)}
                                 className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs space-y-3 cursor-pointer hover:border-indigo-300 transition-all"
                             >
-                                {/* Top Row: Avatar + Title + Status Pill */}
+                                {/* Top Row */}
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="flex items-center gap-3 min-w-0">
                                         <div className="w-10 h-10 rounded-2xl bg-rose-50/80 border border-rose-100 text-rose-600 font-extrabold text-xs flex items-center justify-center shrink-0">
@@ -285,7 +295,7 @@ export default function DepartmentsPage() {
                                     </span>
                                 </div>
 
-                                {/* Middle Row: Code + Date/Members */}
+                                {/* Middle Row */}
                                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                                     <div className="flex items-center gap-1.5 truncate text-[11px]">
                                         <Building2 size={13} className="text-slate-400 shrink-0" />
@@ -297,7 +307,7 @@ export default function DepartmentsPage() {
                                     </div>
                                 </div>
 
-                                {/* Bottom Action Bar: Details + Delete */}
+                                {/* Bottom Action Bar */}
                                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                                     <button
                                         type="button"
@@ -305,7 +315,7 @@ export default function DepartmentsPage() {
                                             e.stopPropagation();
                                             setSelectedDept(dept);
                                         }}
-                                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-indigo-50 hover:text-indigo-600 transition"
+                                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-indigo-50 hover:text-indigo-600 transition cursor-pointer"
                                     >
                                         <Eye size={13} />
                                         <span>Details</span>
@@ -339,7 +349,7 @@ export default function DepartmentsPage() {
                 <EntityManager
                     title="Department Directory"
                     subtitle="Manage corporate units, departmental codes, and team leads efficiently."
-                    endpoint="departments"
+                    endpoint="departments"   // FIXED: was "organization/departments" (double prefix -> 404)
                     primaryKey="_id"
                     layout="table"
                     hoverEffect={true}
@@ -370,16 +380,16 @@ export default function DepartmentsPage() {
                             key: "head",
                             label: "Department Head",
                             render: (val, row) => {
-                                const headName =
-                                    typeof row?.head === "object"
-                                        ? row?.head?.name
-                                        : val?.name || "Not Assigned";
+                                const headName = resolveHeadName(row?.head || val);
+                                const hasAssignedHead = headName && headName !== "Not Assigned";
+                                const initialChar = hasAssignedHead
+                                    ? String(headName).trim().charAt(0).toUpperCase()
+                                    : "?";
+
                                 return (
                                     <div className="flex items-center gap-2">
-                                        <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shadow-2xs">
-                                            {headName !== "Not Assigned"
-                                                ? headName.charAt(0).toUpperCase()
-                                                : "?"}
+                                        <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shadow-2xs shrink-0">
+                                            {initialChar}
                                         </div>
                                         <span className="text-slate-700 font-medium text-sm">
                                             {headName}
@@ -519,9 +529,7 @@ export default function DepartmentsPage() {
                                     Department Head
                                 </span>
                                 <p className="font-semibold text-slate-800 mt-0.5">
-                                    {typeof selectedDept.head === "object"
-                                        ? selectedDept.head?.name
-                                        : selectedDept.head || "Not Assigned"}
+                                    {resolveHeadName(selectedDept.head)}
                                 </p>
                             </div>
 

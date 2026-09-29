@@ -19,13 +19,32 @@ import {
 } from "lucide-react";
 import api from "@/lib/api";
 
+// Backend kabhi single root deta hai, kabhi array. Dono ko ek tree me convert karo.
+function normalizeOrgData(raw) {
+    if (!raw) return null;
+    if (Array.isArray(raw)) {
+        if (raw.length === 0) return null;
+        if (raw.length === 1) return raw[0];
+        return {
+            id: "virtual-root",
+            isVirtual: true,
+            name: "Organization",
+            role: "All Teams",
+            department: "Company",
+            children: raw,
+        };
+    }
+    return raw;
+}
+
 function filterOrgData(node, term) {
     if (!node) return null;
     if (!term) return node;
+    const t = term.toLowerCase();
     const matches =
-        node.name?.toLowerCase().includes(term.toLowerCase()) ||
-        node.role?.toLowerCase().includes(term.toLowerCase()) ||
-        node.department?.toLowerCase().includes(term.toLowerCase());
+        node.name?.toLowerCase().includes(t) ||
+        node.role?.toLowerCase().includes(t) ||
+        node.department?.toLowerCase().includes(t);
 
     let filteredChildren = [];
     if (node.children && node.children.length > 0) {
@@ -191,12 +210,20 @@ export default function OrgChartPage() {
         try {
             const res = await api.get("/organization/chart");
             const json = res.data;
-            setOrgData(json.data || json);
+            setOrgData(normalizeOrgData(json?.data ?? json));
         } catch (err) {
-            setError(
-                err.response?.data?.message ||
-                "Failed to load organization hierarchy from server."
-            );
+            // 404 = backend ke paas chart banane layak employees nahi mile.
+            // Ye "server error" nahi hai, empty state hai.
+            if (err.response?.status === 404) {
+                setOrgData(null);
+                setError("");
+            } else {
+                setOrgData(null);
+                setError(
+                    err.response?.data?.message ||
+                    "Failed to load organization hierarchy from server."
+                );
+            }
         } finally {
             setLoading(false);
         }
@@ -209,7 +236,7 @@ export default function OrgChartPage() {
 
     const countTotalNodes = (node) => {
         if (!node) return 0;
-        let count = 1;
+        let count = node.isVirtual ? 0 : 1;
         if (node.children && node.children.length > 0) {
             node.children.forEach((child) => {
                 count += countTotalNodes(child);
@@ -294,8 +321,21 @@ export default function OrgChartPage() {
                         <p className="text-[10px] sm:text-[11px] font-extrabold tracking-wider text-emerald-600 uppercase">
                             Chart Status
                         </p>
-                        <h3 className="text-sm sm:text-base font-extrabold text-emerald-600 mt-1 sm:mt-2">
-                            Synchronized & Active
+                        <h3
+                            className={`text-sm sm:text-base font-extrabold mt-1 sm:mt-2 ${error
+                                ? "text-rose-600"
+                                : orgData
+                                    ? "text-emerald-600"
+                                    : "text-amber-600"
+                                }`}
+                        >
+                            {loading
+                                ? "Loading..."
+                                : error
+                                    ? "Sync Failed"
+                                    : orgData
+                                        ? "Synchronized & Active"
+                                        : "No Data Yet"}
                         </h3>
                     </div>
                     <div className="p-2.5 sm:p-3 bg-emerald-50 text-emerald-600 rounded-xl sm:rounded-2xl border border-emerald-100/80 shadow-2xs transition-transform duration-300 group-hover:scale-105 shrink-0">
@@ -318,10 +358,17 @@ export default function OrgChartPage() {
                 </div>
             </div>
 
-            {/* Error Alert */}
+            {/* Error Alert (sirf real errors ke liye) */}
             {error && (
-                <div className="p-3.5 sm:p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs sm:text-sm font-semibold shadow-2xs">
-                    {error}
+                <div className="p-3.5 sm:p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl text-xs sm:text-sm font-semibold shadow-2xs flex items-center justify-between gap-3">
+                    <span>{error}</span>
+                    <button
+                        type="button"
+                        onClick={fetchOrgChart}
+                        className="px-3 py-1 bg-rose-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-rose-700 transition-colors shrink-0"
+                    >
+                        Retry
+                    </button>
                 </div>
             )}
 
@@ -383,11 +430,22 @@ export default function OrgChartPage() {
                         </div>
                     )
                 ) : (
-                    <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                    <div className="flex flex-col items-center justify-center py-20 text-slate-400 text-center px-4">
                         <Users size={40} className="mb-2 opacity-30 text-indigo-500" />
-                        <p className="text-xs sm:text-sm font-semibold text-slate-600">
-                            No personnel match your search criteria: &ldquo;{searchTerm}&rdquo;
-                        </p>
+                        {searchTerm ? (
+                            <p className="text-xs sm:text-sm font-semibold text-slate-600">
+                                No personnel match your search: &ldquo;{searchTerm}&rdquo;
+                            </p>
+                        ) : (
+                            <>
+                                <p className="text-xs sm:text-sm font-semibold text-slate-600">
+                                    Abhi koi hierarchy data available nahi hai.
+                                </p>
+                                <p className="text-[11px] sm:text-xs text-slate-400 mt-1 max-w-sm">
+                                    Active employees add karo aur unko reporting manager assign karo, chart apne aap ban jayega.
+                                </p>
+                            </>
+                        )}
                     </div>
                 )}
             </div>

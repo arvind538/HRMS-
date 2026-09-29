@@ -25,6 +25,10 @@ import {
     Eye,
 } from "lucide-react";
 import api from "@/lib/api";
+import { toast } from "react-toastify";
+
+const isHexObjectId = (str) =>
+    typeof str === "string" && /^[0-9a-fA-F]{24}$/.test(str.trim());
 
 const getInitials = (name) => {
     if (!name) return "U";
@@ -59,23 +63,27 @@ export default function EmployeesPage() {
         async function loadLookups() {
             try {
                 const [deptRes, desigRes] = await Promise.allSettled([
-                    api.get("/organization/departments"),
-                    api.get("/organization/designations"),
+                    api.get("/departments"),
+                    api.get("/designations"),
                 ]);
 
                 if (deptRes.status === "fulfilled") {
                     const raw = deptRes.value?.data;
-                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.departments || [];
+                    const list = Array.isArray(raw)
+                        ? raw
+                        : raw?.data || raw?.departments || [];
                     setDepartmentsList(list);
                 }
 
                 if (desigRes.status === "fulfilled") {
                     const raw = desigRes.value?.data;
-                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.designations || [];
+                    const list = Array.isArray(raw)
+                        ? raw
+                        : raw?.data || raw?.designations || [];
                     setDesignationsList(list);
                 }
             } catch (err) {
-                console.error("Failed to load organization dropdown parameters:", err);
+                console.error("Lookup dropdown error:", err);
             }
         }
         loadLookups();
@@ -111,10 +119,16 @@ export default function EmployeesPage() {
     // Click outside listener for dropdowns
     useEffect(() => {
         const handleClickOutside = (e) => {
-            if (deptDropdownRef.current && !deptDropdownRef.current.contains(e.target)) {
+            if (
+                deptDropdownRef.current &&
+                !deptDropdownRef.current.contains(e.target)
+            ) {
                 setDeptOpen(false);
             }
-            if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target)) {
+            if (
+                statusDropdownRef.current &&
+                !statusDropdownRef.current.contains(e.target)
+            ) {
                 setStatusOpen(false);
             }
             if (!e.target.closest(".row-status-dropdown-container")) {
@@ -128,42 +142,63 @@ export default function EmployeesPage() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // Status change handler (active, inactive, exit)
+    // Status change handler (Fixed: Automatic active hone se bachane ke liye)
     const handleStatusChange = async (employeeId, newStatus, e) => {
         e.stopPropagation();
         setActiveRowStatusDropdown(null);
 
+        const isExit = newStatus.toLowerCase() === "exit";
+        const exitDateValue = isExit ? new Date().toISOString() : null;
+
+        // Capitalize format for mongoose schema matching
+        const formattedStatus = isExit
+            ? "Exit"
+            : newStatus.charAt(0).toUpperCase() + newStatus.slice(1).toLowerCase();
+
+        // 1. Optimistic UI update
+        setEmployees((prev) =>
+            prev.map((emp) =>
+                emp._id === employeeId
+                    ? {
+                        ...emp,
+                        status: formattedStatus,
+                        employeeStatus: formattedStatus,
+                        isActive: !isExit && formattedStatus !== "Inactive",
+                        isExited: isExit,
+                        exitDate: exitDateValue || emp.exitDate,
+                    }
+                    : emp
+            )
+        );
+
+        // 2. Multi-strategy API update
+        const payload = {
+            status: formattedStatus,
+            employeeStatus: formattedStatus,
+            isActive: !isExit && formattedStatus !== "Inactive",
+            isExited: isExit,
+            exitDate: exitDateValue,
+            exitReason: isExit ? "Administrative separation update" : undefined,
+        };
+
         try {
-            const exitDateValue =
-                newStatus === "exit" ? new Date().toISOString().split("T")[0] : null;
-
-            setEmployees((prev) =>
-                prev.map((emp) =>
-                    emp._id === employeeId
-                        ? {
-                            ...emp,
-                            status: newStatus,
-                            employeeStatus: newStatus,
-                            exitDate: exitDateValue || emp.exitDate,
-                        }
-                        : emp
-                )
-            );
-
-            if (newStatus === "exit") {
-                await api.put(`/employees/${employeeId}/exit`, {
-                    status: newStatus,
-                    employeeStatus: newStatus,
-                    exitDate: exitDateValue,
-                });
+            if (isExit) {
+                // Try exit route first, fallback to standard update if 404
+                try {
+                    await api.put(`/employees/${employeeId}/exit`, payload);
+                } catch (exitErr) {
+                    console.warn("Dedicated exit endpoint failed, using standard update:", exitErr);
+                    await api.put(`/employees/${employeeId}`, payload);
+                }
             } else {
-                await api.put(`/employees/${employeeId}`, {
-                    status: newStatus,
-                    employeeStatus: newStatus,
-                });
+                await api.put(`/employees/${employeeId}`, payload);
             }
+
+            toast.success(`Employee marked as ${formattedStatus}`);
         } catch (err) {
-            console.error("Status update error:", err.response?.data || err.message);
+            console.error("Status update error on server:", err.response?.data || err.message);
+            toast.error("Failed to update status on server.");
+            // Rollback to original server data only on failure
             fetchEmployees(search);
         }
     };
@@ -172,7 +207,11 @@ export default function EmployeesPage() {
         e.stopPropagation();
         setActiveRowActionDropdown(null);
 
-        if (!window.confirm("Are you sure you want to permanently delete this employee record?")) {
+        if (
+            !window.confirm(
+                "Are you sure you want to permanently delete this employee record?"
+            )
+        ) {
             return;
         }
 
@@ -180,27 +219,27 @@ export default function EmployeesPage() {
         try {
             setEmployees((prev) => prev.filter((emp) => emp._id !== employeeId));
             await api.delete(`/employees/${employeeId}`);
+            toast.success("Employee record deleted permanently.");
         } catch (err) {
             console.error("Failed to delete employee:", err.response?.data || err.message);
+            toast.error("Failed to delete employee record.");
             fetchEmployees(search);
         } finally {
             setDeletingId(null);
         }
     };
 
-    // Helper: Hex ID ko readable Department Name me badle[cite: 4]
+    // Helper: Hex ID ko readable Department Name me badle
     const resolveDepartmentName = (emp) => {
         if (!emp) return "General";
         const dept = emp.department;
 
-        // Agar populated object hai
         if (typeof dept === "object" && dept !== null) {
             return dept.name || dept.title || "General";
         }
 
         if (typeof dept === "string") {
             const val = dept.trim();
-            // Hex ObjectId pattern check
             if (/^[0-9a-fA-F]{24}$/.test(val)) {
                 const matched = departmentsList.find(
                     (d) => String(d._id || d.id) === val
@@ -249,6 +288,30 @@ export default function EmployeesPage() {
         return Array.from(set);
     }, [employees, departmentsList]);
 
+    // Robust status normalizer
+    const getNormalizedStatus = (emp) => {
+        const empStatus = String(emp.employeeStatus || "").toLowerCase();
+        const status = String(emp.status || "").toLowerCase();
+
+        if (
+            empStatus === "exit" ||
+            empStatus === "exited" ||
+            status === "exit" ||
+            status === "exited" ||
+            emp.isExited === true
+        ) {
+            return "exit";
+        }
+        if (
+            empStatus === "inactive" ||
+            status === "inactive" ||
+            emp.isActive === false
+        ) {
+            return "inactive";
+        }
+        return "active";
+    };
+
     const filteredEmployees = useMemo(() => {
         return employees.filter((emp) => {
             const dept = resolveDepartmentName(emp);
@@ -256,9 +319,9 @@ export default function EmployeesPage() {
                 departmentFilter === "all" ||
                 dept.toLowerCase() === departmentFilter.toLowerCase();
 
-            const rawStatus = (emp.employeeStatus || emp.status || "active").toLowerCase();
+            const normalizedStatus = getNormalizedStatus(emp);
             const matchesStatus =
-                statusFilter === "all" || rawStatus === statusFilter.toLowerCase();
+                statusFilter === "all" || normalizedStatus === statusFilter.toLowerCase();
 
             return matchesDept && matchesStatus;
         });
@@ -266,42 +329,36 @@ export default function EmployeesPage() {
 
     // Metric Counts
     const activeCount = useMemo(
-        () =>
-            employees.filter(
-                (e) => (e.employeeStatus || e.status || "active").toLowerCase() === "active"
-            ).length,
+        () => employees.filter((e) => getNormalizedStatus(e) === "active").length,
         [employees]
     );
 
     const inactiveCount = useMemo(
-        () =>
-            employees.filter(
-                (e) => (e.employeeStatus || e.status || "").toLowerCase() === "inactive"
-            ).length,
+        () => employees.filter((e) => getNormalizedStatus(e) === "inactive").length,
         [employees]
     );
 
     const exitedCount = useMemo(
-        () =>
-            employees.filter(
-                (e) => (e.employeeStatus || e.status || "").toLowerCase() === "exit"
-            ).length,
+        () => employees.filter((e) => getNormalizedStatus(e) === "exit").length,
         [employees]
     );
 
     const handleExportCSV = () => {
-        const headers = "Employee ID,Name,Email,Phone,Department,Designation,Status,Joining Date\n";
+        const headers =
+            "Employee ID,Name,Email,Phone,Department,Designation,Status,Joining Date\n";
         const rows = filteredEmployees
             .map((e) => {
                 const dName = resolveDepartmentName(e);
                 const desig = resolveDesignationName(e);
                 const joinDate = e.dateOfJoining ? e.dateOfJoining.split("T")[0] : "";
-                const curStatus = e.employeeStatus || e.status || "active";
+                const curStatus = getNormalizedStatus(e);
                 return `"${e.employeeId || ""}","${e.name || ""}","${e.email || ""}","${e.phone || ""}","${dName}","${desig}","${curStatus}","${joinDate}"`;
             })
             .join("\n");
 
-        const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+        const blob = new Blob([headers + rows], {
+            type: "text/csv;charset=utf-8;",
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -318,9 +375,21 @@ export default function EmployeesPage() {
     ];
 
     const rowStatusChoices = [
-        { value: "active", label: "Active", color: "bg-emerald-500", text: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200" },
-        { value: "inactive", label: "Inactive", color: "bg-amber-500", text: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200" },
-        { value: "exit", label: "Exited", color: "bg-rose-500", text: "text-rose-700", bg: "bg-rose-50", border: "border-rose-200" },
+        {
+            value: "active",
+            label: "Active",
+            color: "bg-emerald-500",
+        },
+        {
+            value: "inactive",
+            label: "Inactive",
+            color: "bg-amber-500",
+        },
+        {
+            value: "exit",
+            label: "Exited",
+            color: "bg-rose-500",
+        },
     ];
 
     const getStatusTheme = (statusStr) => {
@@ -332,7 +401,7 @@ export default function EmployeesPage() {
                 label: "Inactive",
             };
         }
-        if (s === "exit") {
+        if (s === "exit" || s === "exited") {
             return {
                 badge: "bg-rose-50 text-rose-700 border-rose-200/80 hover:bg-rose-100",
                 dot: "bg-rose-500",
@@ -487,7 +556,9 @@ export default function EmployeesPage() {
                             <div className="flex items-center gap-2 truncate pr-2">
                                 <Filter size={13} className="text-slate-400 shrink-0" />
                                 <span className="truncate">
-                                    {departmentFilter === "all" ? "All Departments" : departmentFilter}
+                                    {departmentFilter === "all"
+                                        ? "All Departments"
+                                        : departmentFilter}
                                 </span>
                             </div>
                             <ChevronDown
@@ -621,7 +692,7 @@ export default function EmployeesPage() {
                     {/* Mobile & Tablet Card Layout */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 md:hidden">
                         {filteredEmployees.map((row) => {
-                            const curStatus = (row.employeeStatus || row.status || "active").toLowerCase();
+                            const curStatus = getNormalizedStatus(row);
                             const theme = getStatusTheme(curStatus);
                             const deptName = resolveDepartmentName(row);
                             const desigName = resolveDesignationName(row);
@@ -676,7 +747,9 @@ export default function EmployeesPage() {
                                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                                         <div className="flex items-center gap-1.5 truncate text-[11px]">
                                             <Building2 size={13} className="text-slate-400 shrink-0" />
-                                            <span className="truncate font-semibold text-slate-700">{deptName}</span>
+                                            <span className="truncate font-semibold text-slate-700">
+                                                {deptName}
+                                            </span>
                                         </div>
                                         <div className="flex items-center gap-1 font-mono text-[11px] text-slate-400 shrink-0">
                                             <Calendar size={12} className="text-slate-400" />
@@ -747,10 +820,12 @@ export default function EmployeesPage() {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-sm">
                                     {filteredEmployees.map((row) => {
-                                        const curStatus = (row.employeeStatus || row.status || "active").toLowerCase();
+                                        const curStatus = getNormalizedStatus(row);
                                         const theme = getStatusTheme(curStatus);
-                                        const isRowDropdownOpen = activeRowStatusDropdown === row._id;
-                                        const isActionDropdownOpen = activeRowActionDropdown === row._id;
+                                        const isRowDropdownOpen =
+                                            activeRowStatusDropdown === row._id;
+                                        const isActionDropdownOpen =
+                                            activeRowActionDropdown === row._id;
                                         const isDeleting = deletingId === row._id;
                                         const deptName = resolveDepartmentName(row);
                                         const desigName = resolveDesignationName(row);
@@ -764,7 +839,9 @@ export default function EmployeesPage() {
                                                 {/* Employee Info + Avatar + ID */}
                                                 <td className="py-3.5 sm:py-4 px-5 sm:px-6">
                                                     <div
-                                                        onClick={() => router.push(`/employees/profile?id=${row._id}`)}
+                                                        onClick={() =>
+                                                            router.push(`/employees/profile?id=${row._id}`)
+                                                        }
                                                         className="flex items-center gap-3 cursor-pointer"
                                                     >
                                                         {row.avatar || row.photo ? (
@@ -788,7 +865,10 @@ export default function EmployeesPage() {
                                                                 </span>
                                                             </div>
                                                             <p className="text-[11px] text-slate-500 font-medium flex items-center gap-1 mt-0.5 truncate">
-                                                                <Mail size={11} className="text-slate-400 shrink-0" />
+                                                                <Mail
+                                                                    size={11}
+                                                                    className="text-slate-400 shrink-0"
+                                                                />
                                                                 <span className="truncate">
                                                                     {row.email || "No email registered"}
                                                                 </span>
@@ -797,10 +877,13 @@ export default function EmployeesPage() {
                                                     </div>
                                                 </td>
 
-                                                {/* Resolved Department Name (Hex ID resolved to readable title) */}
+                                                {/* Resolved Department Name */}
                                                 <td className="py-3.5 sm:py-4 px-4">
                                                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-xl shadow-2xs">
-                                                        <Building2 size={12} className="text-slate-400 shrink-0" />
+                                                        <Building2
+                                                            size={12}
+                                                            className="text-slate-400 shrink-0"
+                                                        />
                                                         <span className="truncate max-w-[140px] font-bold">
                                                             {deptName}
                                                         </span>
@@ -831,9 +914,14 @@ export default function EmployeesPage() {
                                                             }}
                                                             className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border capitalize shadow-2xs cursor-pointer transition-all ${theme.badge}`}
                                                         >
-                                                            <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`} />
+                                                            <span
+                                                                className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}
+                                                            />
                                                             <span>{theme.label}</span>
-                                                            <ChevronDown size={12} className="ml-0.5 opacity-60" />
+                                                            <ChevronDown
+                                                                size={12}
+                                                                className="ml-0.5 opacity-60"
+                                                            />
                                                         </button>
 
                                                         {isRowDropdownOpen && (
@@ -843,16 +931,25 @@ export default function EmployeesPage() {
                                                                         key={choice.value}
                                                                         type="button"
                                                                         onClick={(e) =>
-                                                                            handleStatusChange(row._id, choice.value, e)
+                                                                            handleStatusChange(
+                                                                                row._id,
+                                                                                choice.value,
+                                                                                e
+                                                                            )
                                                                         }
                                                                         className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50/60 hover:text-indigo-600 transition-colors"
                                                                     >
                                                                         <div className="flex items-center gap-2">
-                                                                            <span className={`w-1.5 h-1.5 rounded-full ${choice.color}`} />
+                                                                            <span
+                                                                                className={`w-1.5 h-1.5 rounded-full ${choice.color}`}
+                                                                            />
                                                                             <span>{choice.label}</span>
                                                                         </div>
                                                                         {curStatus === choice.value && (
-                                                                            <Check size={12} className="text-indigo-600" />
+                                                                            <Check
+                                                                                size={12}
+                                                                                className="text-indigo-600"
+                                                                            />
                                                                         )}
                                                                     </button>
                                                                 ))}
@@ -861,7 +958,8 @@ export default function EmployeesPage() {
                                                     </div>
                                                     {curStatus === "exit" && row.exitDate && (
                                                         <div className="text-[10px] text-rose-500 font-semibold mt-0.5 flex items-center gap-1">
-                                                            <Calendar size={10} /> Exit: {row.exitDate}
+                                                            <Calendar size={10} /> Exit:{" "}
+                                                            {String(row.exitDate).split("T")[0]}
                                                         </div>
                                                     )}
                                                 </td>
@@ -883,7 +981,10 @@ export default function EmployeesPage() {
                                                             title="More options"
                                                         >
                                                             {isDeleting ? (
-                                                                <Loader2 size={15} className="animate-spin text-rose-600" />
+                                                                <Loader2
+                                                                    size={15}
+                                                                    className="animate-spin text-rose-600"
+                                                                />
                                                             ) : (
                                                                 <MoreVertical size={15} />
                                                             )}
@@ -895,7 +996,9 @@ export default function EmployeesPage() {
                                                                     type="button"
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
-                                                                        router.push(`/employees/profile?id=${row._id}`);
+                                                                        router.push(
+                                                                            `/employees/profile?id=${row._id}`
+                                                                        );
                                                                     }}
                                                                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
                                                                 >
@@ -907,7 +1010,9 @@ export default function EmployeesPage() {
                                                                     type="button"
                                                                     onClick={(e) => {
                                                                         e.stopPropagation();
-                                                                        router.push(`/employees/add?id=${row._id}`);
+                                                                        router.push(
+                                                                            `/employees/add?id=${row._id}`
+                                                                        );
                                                                     }}
                                                                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors cursor-pointer"
                                                                 >
@@ -919,7 +1024,9 @@ export default function EmployeesPage() {
 
                                                                 <button
                                                                     type="button"
-                                                                    onClick={(e) => handleDeleteEmployee(row._id, e)}
+                                                                    onClick={(e) =>
+                                                                        handleDeleteEmployee(row._id, e)
+                                                                    }
                                                                     className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                                                                 >
                                                                     <Trash2 size={13} />

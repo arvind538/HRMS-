@@ -305,44 +305,49 @@ export default function HRAnalyticsPage() {
 
     return (
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
-            {/* Executive Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
-                <div>
-                    <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            {/* Executive Header Banner */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 sm:p-6 lg:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-xs">
+                {/* Left Info Section */}
+                <div className="space-y-1 sm:space-y-1.5 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                        <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900 truncate">
                             Workforce Intelligence
                         </h1>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60 shadow-2xs">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60 shadow-2xs whitespace-nowrap">
                             <Activity size={13} className="animate-pulse text-indigo-600 shrink-0" />
                             Live Telemetry
                         </span>
                     </div>
-                    <p className="text-xs sm:text-sm font-medium text-slate-500 mt-1 max-w-2xl">
+                    <p className="text-xs sm:text-sm font-medium text-slate-500 leading-relaxed max-w-2xl">
                         Real-time organizational analytics, active staffing distribution, stability ratios, and fiscal payroll expenditure.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                {/* Right Action Buttons */}
+                <div className="flex items-center gap-2.5 sm:gap-3 w-full md:w-auto shrink-0 pt-1 md:pt-0">
+                    {/* Sync Button (Single Line Fixed) */}
                     <button
                         type="button"
                         onClick={() => fetchAnalytics(true)}
                         disabled={refreshing}
-                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl sm:rounded-2xl border border-slate-200 text-slate-700 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 text-xs font-bold transition-all shadow-2xs active:scale-95 disabled:opacity-50 cursor-pointer"
+                        className="flex-1 md:flex-initial h-10 sm:h-11 inline-flex items-center justify-center gap-2 px-4 sm:px-4.5 rounded-xl sm:rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 text-xs sm:text-sm font-bold transition-all shadow-xs active:scale-95 disabled:opacity-60 whitespace-nowrap cursor-pointer"
+                        title="Synchronize latest records"
                     >
                         <RefreshCw
-                            size={14}
-                            className={refreshing ? "animate-spin text-indigo-600 shrink-0" : "shrink-0"}
+                            size={15}
+                            className={refreshing ? "animate-spin text-indigo-600 shrink-0" : "text-slate-500 shrink-0"}
                         />
-                        <span>Sync Data</span>
+                        <span className="whitespace-nowrap">{refreshing ? "Syncing..." : "Sync Data"}</span>
                     </button>
 
+                    {/* Export Button */}
                     <button
                         type="button"
                         onClick={exportSummaryReport}
-                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-100 transition-all hover:shadow-md active:scale-95 cursor-pointer"
+                        className="flex-1 md:flex-initial h-10 sm:h-11 inline-flex items-center justify-center gap-2 px-4.5 sm:px-5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-sm shadow-indigo-600/20 hover:shadow-md transition-all active:scale-95 whitespace-nowrap cursor-pointer"
                     >
-                        <Download size={14} className="shrink-0" />
-                        <span>Export Snapshot</span>
+                        <Download size={15} className="shrink-0" />
+                        <span className="whitespace-nowrap">Export Snapshot</span>
                     </button>
                 </div>
             </div>

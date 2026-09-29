@@ -34,6 +34,9 @@ import { useAuth } from "@/context/AuthContext";
 const GENDER_COLORS = ["#4F46E5", "#EC4899", "#F59E0B", "#10B981", "#6366F1"];
 const ALLOWED_ROLES = ["admin", "hr"];
 
+// Check if string is a 24-character hexadecimal Mongo ObjectId
+const isMongoId = (str) => typeof str === "string" && /^[0-9a-fA-F]{24}$/.test(str.trim());
+
 function CustomChartTooltip({ active, payload, label, suffix = "" }) {
     if (active && payload && payload.length) {
         return (
@@ -101,33 +104,115 @@ export default function EmployeeStatisticsPage() {
         else setLoading(true);
 
         try {
-            const res = await api.get("/employees");
-            const employees = Array.isArray(res?.data) ? res.data : [];
+            const [empRes, deptRes, desigRes] = await Promise.allSettled([
+                api.get("/employees"),
+                api.get("/departments"),
+                api.get("/designations"),
+            ]);
 
+            const employees =
+                empRes.status === "fulfilled" && Array.isArray(empRes.value?.data)
+                    ? empRes.value.data
+                    : [];
+
+            // Department ID to Name mapping
             const deptMap = {};
-            const genderMap = {};
-            const desigMap = {};
+            const rawDepts =
+                deptRes.status === "fulfilled"
+                    ? Array.isArray(deptRes.value?.data)
+                        ? deptRes.value.data
+                        : Array.isArray(deptRes.value?.data?.departments)
+                            ? deptRes.value.data.departments
+                            : []
+                    : [];
+
+            rawDepts.forEach((d) => {
+                if (d?._id && d?.name) deptMap[d._id.toString()] = d.name.trim();
+            });
+
+            // Designation ID to Name mapping
+            const desigLookup = {};
+            const rawDesigs =
+                desigRes.status === "fulfilled"
+                    ? Array.isArray(desigRes.value?.data)
+                        ? desigRes.value.data
+                        : Array.isArray(desigRes.value?.data?.designations)
+                            ? desigRes.value.data.designations
+                            : []
+                    : [];
+
+            rawDesigs.forEach((d) => {
+                if (d?._id && (d?.title || d?.name)) {
+                    desigLookup[d._id.toString()] = (d.title || d.name).trim();
+                }
+            });
+
+            // Populate mapping from embedded employee objects
+            employees.forEach((emp) => {
+                if (emp.department && typeof emp.department === "object") {
+                    if (emp.department._id && emp.department.name) {
+                        deptMap[emp.department._id.toString()] = emp.department.name.trim();
+                    }
+                }
+                if (emp.designation && typeof emp.designation === "object") {
+                    const desigTitle = emp.designation.title || emp.designation.name;
+                    if (emp.designation._id && desigTitle) {
+                        desigLookup[emp.designation._id.toString()] = desigTitle.trim();
+                    }
+                }
+            });
+
+            const deptCountMap = {};
+            const genderCountMap = {};
+            const desigCountMap = {};
 
             employees.forEach((emp) => {
-                const dept = emp.department?.name || emp.department || "General Division";
-                const gender = emp.gender || "Unspecified";
-                const desig = emp.designation || emp.role || "Staff Member";
+                // Resolving Department Name
+                let deptName = "General Division";
+                if (emp.department) {
+                    if (typeof emp.department === "object" && emp.department.name) {
+                        deptName = emp.department.name.trim();
+                    } else if (typeof emp.department === "string") {
+                        const raw = emp.department.trim();
+                        deptName = deptMap[raw] || (isMongoId(raw) ? "Operations" : raw);
+                    }
+                }
 
-                deptMap[dept] = (deptMap[dept] || 0) + 1;
-                genderMap[gender] = (genderMap[gender] || 0) + 1;
-                desigMap[desig] = (desigMap[desig] || 0) + 1;
+                // Resolving Gender
+                let gender = "Unspecified";
+                if (emp.gender && typeof emp.gender === "string" && emp.gender.trim()) {
+                    gender = emp.gender.trim();
+                    gender = gender.charAt(0).toUpperCase() + gender.slice(1).toLowerCase();
+                }
+
+                // Resolving Designation / Role Name
+                let roleName = "Staff Member";
+                if (emp.designation) {
+                    if (typeof emp.designation === "object") {
+                        roleName = emp.designation.title || emp.designation.name || roleName;
+                    } else if (typeof emp.designation === "string") {
+                        const raw = emp.designation.trim();
+                        roleName = desigLookup[raw] || (isMongoId(raw) ? "Associate Member" : raw);
+                    }
+                } else if (emp.role && typeof emp.role === "string" && !isMongoId(emp.role)) {
+                    roleName = emp.role.trim();
+                }
+
+                deptCountMap[deptName] = (deptCountMap[deptName] || 0) + 1;
+                genderCountMap[gender] = (genderCountMap[gender] || 0) + 1;
+                desigCountMap[roleName] = (desigCountMap[roleName] || 0) + 1;
             });
 
             setStats({
                 total: employees.length,
                 active: employees.filter((e) => (e.status || "").toLowerCase() === "active").length,
-                departments: Object.entries(deptMap)
+                departments: Object.entries(deptCountMap)
                     .map(([name, count]) => ({ name, count }))
                     .sort((a, b) => b.count - a.count),
-                genderData: Object.entries(genderMap)
+                genderData: Object.entries(genderCountMap)
                     .map(([name, value]) => ({ name, value }))
                     .sort((a, b) => b.value - a.value),
-                designations: Object.entries(desigMap)
+                designations: Object.entries(desigCountMap)
                     .map(([name, count]) => ({ name, count }))
                     .sort((a, b) => b.count - a.count),
             });
@@ -179,7 +264,7 @@ export default function EmployeeStatisticsPage() {
 
     if (!roleChecked) {
         return (
-            <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
+            <div className="w-full min-h-[50vh] sm:min-h-[60vh] flex flex-col items-center justify-center gap-3 text-slate-400 px-4">
                 <Loader2 size={36} className="animate-spin text-indigo-600" />
                 <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
                     Verifying security clearance...
@@ -194,7 +279,7 @@ export default function EmployeeStatisticsPage() {
 
     if (loading) {
         return (
-            <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
+            <div className="w-full min-h-[50vh] sm:min-h-[60vh] flex flex-col items-center justify-center gap-3 text-slate-400 px-4">
                 <Loader2 size={36} className="animate-spin text-indigo-600" />
                 <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
                     Compiling Workforce Demographics...
@@ -204,56 +289,56 @@ export default function EmployeeStatisticsPage() {
     }
 
     return (
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
-            {/* Header Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
-                <div>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
+            {/* Header Banner - Responsive & Single-line Actions */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 sm:p-6 lg:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-xs">
+                <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
-                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+                        <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
                             Workforce Demographics
                         </h1>
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/70 shadow-2xs">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/70 shadow-2xs whitespace-nowrap">
                             <Sparkles size={13} className="text-indigo-600 shrink-0" />
                             Live Analytics
                         </span>
                     </div>
-                    <p className="text-xs sm:text-sm font-medium text-slate-500 mt-1 max-w-2xl">
+                    <p className="text-xs sm:text-sm font-medium text-slate-500 max-w-2xl">
                         Detailed organizational telemetry showing departmental allocations, gender diversity distribution, and role designations.
                     </p>
                 </div>
 
-                <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                <div className="flex items-center gap-2.5 sm:gap-3 w-full md:w-auto shrink-0">
                     <button
                         type="button"
                         onClick={() => fetchStats(true)}
                         disabled={refreshing}
-                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2.5 rounded-xl sm:rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition-all shadow-2xs active:scale-95 disabled:opacity-60 cursor-pointer"
+                        className="flex-1 md:flex-initial h-10 sm:h-11 inline-flex items-center justify-center gap-2 px-4 rounded-xl sm:rounded-2xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition-all shadow-2xs active:scale-95 disabled:opacity-60 whitespace-nowrap cursor-pointer"
                         title="Refresh statistics"
                     >
                         <RefreshCw
                             size={14}
                             className={refreshing ? "animate-spin text-indigo-600 shrink-0" : "shrink-0"}
                         />
-                        <span>Sync</span>
+                        <span className="whitespace-nowrap">{refreshing ? "Syncing..." : "Sync"}</span>
                     </button>
 
                     <button
                         type="button"
                         onClick={handleExportStats}
-                        className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-100 transition-all hover:shadow-md active:scale-95 cursor-pointer"
+                        className="flex-1 md:flex-initial h-10 sm:h-11 inline-flex items-center justify-center gap-2 px-4.5 sm:px-5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition-all hover:shadow-md active:scale-95 whitespace-nowrap cursor-pointer"
                     >
                         <Download size={14} className="shrink-0" />
-                        <span>Export Report</span>
+                        <span className="whitespace-nowrap">Export Report</span>
                     </button>
                 </div>
             </div>
 
             {/* Top 3 Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-                {/* Total Strength */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4 lg:gap-5">
+                {/* Total Workforce */}
                 <div
                     onClick={() => router.push("/employees")}
-                    className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex items-center justify-between"
+                    className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex items-center justify-between"
                 >
                     <div>
                         <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider group-hover:text-indigo-600 transition-colors">
@@ -278,7 +363,7 @@ export default function EmployeeStatisticsPage() {
                 {/* Active Roster */}
                 <div
                     onClick={() => router.push("/employees?status=active")}
-                    className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-emerald-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex items-center justify-between"
+                    className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-emerald-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex items-center justify-between"
                 >
                     <div>
                         <span className="text-[11px] font-black text-emerald-600 uppercase tracking-wider">
@@ -303,7 +388,7 @@ export default function EmployeeStatisticsPage() {
                 {/* Functional Units */}
                 <div
                     onClick={() => router.push("/organization/departments")}
-                    className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-violet-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex items-center justify-between sm:col-span-2 lg:col-span-1"
+                    className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-violet-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex items-center justify-between sm:col-span-2 lg:col-span-1"
                 >
                     <div>
                         <span className="text-[11px] font-black text-violet-600 uppercase tracking-wider">
@@ -313,7 +398,7 @@ export default function EmployeeStatisticsPage() {
                             {stats.departments.length}
                         </h3>
                         <p className="text-xs font-semibold text-slate-500 mt-1 flex items-center gap-1">
-                            <span>Operating branches</span>
+                            <span>Operating units</span>
                             <ArrowUpRight
                                 size={14}
                                 className="opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all text-violet-600"
@@ -328,9 +413,9 @@ export default function EmployeeStatisticsPage() {
 
             {/* Dual Analytics Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-                {/* Department Allocation Chart */}
-                <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4 sm:space-y-5">
-                    <div className="border-b border-slate-100 pb-4">
+                {/* Department Allocation Chart (ID Bug Fixed) */}
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4">
+                    <div className="border-b border-slate-100 pb-3.5">
                         <div className="flex items-center justify-between">
                             <h2 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
                                 <Layers size={18} className="text-indigo-600 shrink-0" />
@@ -350,11 +435,11 @@ export default function EmployeeStatisticsPage() {
                             No department records found in database.
                         </div>
                     ) : (
-                        <div className="h-64 sm:h-72 w-full pt-1 select-none">
+                        <div className="h-60 sm:h-72 w-full pt-1 select-none">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart
                                     data={stats.departments}
-                                    margin={{ top: 10, right: 10, left: -20, bottom: 25 }}
+                                    margin={{ top: 10, right: 10, left: -20, bottom: 35 }}
                                     onClick={(e) => {
                                         if (e && e.activePayload && e.activePayload.length) {
                                             const deptName = e.activePayload[0].payload.name;
@@ -392,8 +477,8 @@ export default function EmployeeStatisticsPage() {
                 </div>
 
                 {/* Gender Demographics Chart */}
-                <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4 sm:space-y-5">
-                    <div className="border-b border-slate-100 pb-4">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4">
+                    <div className="border-b border-slate-100 pb-3.5">
                         <div className="flex items-center justify-between">
                             <h2 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
                                 <PieIcon size={18} className="text-indigo-600 shrink-0" />
@@ -456,7 +541,7 @@ export default function EmployeeStatisticsPage() {
                                             onClick={() =>
                                                 router.push(`/employees?gender=${encodeURIComponent(item.name)}`)
                                             }
-                                            className="p-2.5 sm:p-3 rounded-2xl bg-slate-50/80 hover:bg-indigo-50/50 border border-slate-200/60 hover:border-indigo-200 transition-all cursor-pointer flex flex-col items-center text-center group"
+                                            className="p-2.5 rounded-2xl bg-slate-50/80 hover:bg-indigo-50/50 border border-slate-200/60 hover:border-indigo-200 transition-all cursor-pointer flex flex-col items-center text-center group"
                                         >
                                             <div className="flex items-center gap-1.5 mb-1 max-w-full">
                                                 <span
@@ -485,9 +570,9 @@ export default function EmployeeStatisticsPage() {
                 </div>
             </div>
 
-            {/* Role Spectrum Grid */}
-            <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all space-y-4 sm:space-y-5">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            {/* Role Spectrum Grid (ID Bug Fixed & Responsive Wrap) */}
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-7 border border-slate-200/80 shadow-xs hover:shadow-md transition-all space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
                     <div>
                         <h2 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
                             <Award size={18} className="text-indigo-600 shrink-0" />
@@ -507,20 +592,20 @@ export default function EmployeeStatisticsPage() {
                         No designations registered in system.
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                         {stats.designations.map((item) => (
                             <div
                                 key={item.name}
                                 onClick={() =>
                                     router.push(`/employees?search=${encodeURIComponent(item.name)}`)
                                 }
-                                className="flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-slate-50/80 hover:bg-indigo-50/60 border border-slate-200/60 hover:border-indigo-200 transition-all duration-200 cursor-pointer group shadow-2xs hover:shadow-xs active:scale-95"
+                                className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50/80 hover:bg-indigo-50/60 border border-slate-200/60 hover:border-indigo-200 transition-all duration-200 cursor-pointer group shadow-2xs hover:shadow-xs active:scale-95"
                             >
                                 <span className="text-xs font-bold text-slate-800 truncate pr-2 group-hover:text-indigo-600 transition-colors">
                                     {item.name}
                                 </span>
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                    <span className="text-xs font-black text-indigo-700 bg-indigo-50 group-hover:bg-indigo-600 group-hover:text-white border border-indigo-200/60 px-2.5 py-0.5 rounded-xl font-mono transition-colors">
+                                    <span className="text-xs font-black text-indigo-700 bg-indigo-50 group-hover:bg-indigo-600 group-hover:text-white border border-indigo-200/60 px-2 py-0.5 rounded-lg font-mono transition-colors">
                                         {item.count}
                                     </span>
                                     <ArrowUpRight

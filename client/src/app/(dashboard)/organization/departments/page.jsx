@@ -16,28 +16,62 @@ import {
 } from "lucide-react";
 import api from "@/lib/api";
 
-// Paths tried in order by this page's own fetch/delete calls.
-// (EntityManager gets only "departments" - see the endpoint prop below.)
 const DEPT_PATHS = ["/organization/departments", "/departments"];
+const isMongoId = (str) => typeof str === "string" && /^[0-9a-fA-F]{24}$/.test(str.trim());
 
 export default function DepartmentsPage() {
     const [departments, setDepartments] = useState([]);
+    const [employees, setEmployees] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedDept, setSelectedDept] = useState(null);
     const [deletingId, setDeletingId] = useState(null);
 
+    // Employee map by ID and department role matching
+    const employeeMap = useMemo(() => {
+        const map = {};
+        employees.forEach((emp) => {
+            const id = (emp._id || emp.id)?.toString();
+            const fullName =
+                emp.name ||
+                `${emp.firstName || ""} ${emp.lastName || ""}`.trim() ||
+                emp.fullName ||
+                emp.email ||
+                "Staff Member";
+            if (id) {
+                map[id] = fullName;
+            }
+        });
+        return map;
+    }, [employees]);
+
     async function fetchDepartmentsMetrics() {
         try {
             setLoading(true);
-            let res = null;
-            for (const path of DEPT_PATHS) {
-                res = await api.get(path).catch(() => null);
-                if (res && res.data) break;
-            }
 
-            if (res && res.data) {
-                const json = res.data;
+            const [deptRes, empRes] = await Promise.allSettled([
+                (async () => {
+                    for (const path of DEPT_PATHS) {
+                        try {
+                            const res = await api.get(path);
+                            if (res && res.data) return res;
+                        } catch {
+                            // try next path
+                        }
+                    }
+                    return null;
+                })(),
+                api.get("/employees").catch(() => ({ data: [] })),
+            ]);
+
+            const empList =
+                empRes.status === "fulfilled" && Array.isArray(empRes.value?.data)
+                    ? empRes.value.data
+                    : empRes.value?.data?.employees || [];
+            setEmployees(empList);
+
+            if (deptRes.status === "fulfilled" && deptRes.value?.data) {
+                const json = deptRes.value.data;
                 const dataList = Array.isArray(json)
                     ? json
                     : json.departments || json.data || json.result || json.items || [];
@@ -61,29 +95,104 @@ export default function DepartmentsPage() {
             d.isActive === "Active" ||
             d.status === "active"
     ).length;
-    const totalMembers = departments.reduce(
-        (acc, curr) => acc + (Number(curr.employeeCount) || 0),
-        0
-    );
 
-    // Safe helper to extract head name without undefined crashes
-    const resolveHeadName = (headVal) => {
-        if (!headVal) return "Not Assigned";
-        if (typeof headVal === "object") {
+    // Resolve Department Head with cross-referencing
+    const resolveHeadName = (dept) => {
+        if (!dept) return "Not Assigned";
+
+        // 1. Check all standard head/manager properties on department object
+        const rawHead =
+            dept.head ||
+            dept.departmentHead ||
+            dept.manager ||
+            dept.lead ||
+            dept.headOfDepartment;
+
+        if (rawHead) {
+            if (typeof rawHead === "object") {
+                const name =
+                    rawHead.name ||
+                    `${rawHead.firstName || ""} ${rawHead.lastName || ""}`.trim() ||
+                    rawHead.fullName ||
+                    rawHead.email;
+                if (name && !isMongoId(name)) return name;
+                if (rawHead._id && employeeMap[rawHead._id.toString()]) {
+                    return employeeMap[rawHead._id.toString()];
+                }
+            } else if (typeof rawHead === "string") {
+                const trimmed = rawHead.trim();
+                if (employeeMap[trimmed]) return employeeMap[trimmed];
+                if (!isMongoId(trimmed) && trimmed.length > 0) return trimmed;
+            }
+        }
+
+        // 2. Fallback: Find an employee designated as lead/manager of this department
+        const deptId = (dept._id || dept.id)?.toString();
+        const deptName = (dept.name || "").toLowerCase().trim();
+
+        const deptLeader = employees.find((emp) => {
+            const empDeptId =
+                typeof emp.department === "object"
+                    ? emp.department?._id?.toString()
+                    : emp.department?.toString();
+            const empDeptName =
+                typeof emp.department === "object"
+                    ? emp.department?.name?.toLowerCase().trim()
+                    : "";
+
+            const matchesDept =
+                (deptId && empDeptId === deptId) ||
+                (deptName && empDeptName === deptName);
+
+            if (!matchesDept) return false;
+
+            const role = (emp.role || emp.designation?.title || emp.designation?.name || "").toLowerCase();
             return (
-                headVal.name ||
-                `${headVal.firstName || ""} ${headVal.lastName || ""}`.trim() ||
-                headVal.fullName ||
-                headVal.email ||
-                "Not Assigned"
+                role.includes("head") ||
+                role.includes("manager") ||
+                role.includes("lead") ||
+                role.includes("director")
+            );
+        });
+
+        if (deptLeader) {
+            return (
+                deptLeader.name ||
+                `${deptLeader.firstName || ""} ${deptLeader.lastName || ""}`.trim() ||
+                deptLeader.fullName ||
+                deptLeader.email
             );
         }
-        if (typeof headVal === "string") {
-            const trimmed = headVal.trim();
-            return trimmed.length > 0 ? trimmed : "Not Assigned";
-        }
+
         return "Not Assigned";
     };
+
+    // Calculate actual members if not returned by backend
+    const resolveMemberCount = (dept) => {
+        if (typeof dept.employeeCount === "number" && dept.employeeCount > 0) {
+            return dept.employeeCount;
+        }
+        const deptId = (dept._id || dept.id)?.toString();
+        const deptName = (dept.name || "").toLowerCase().trim();
+
+        const count = employees.filter((emp) => {
+            const empDeptId =
+                typeof emp.department === "object"
+                    ? emp.department?._id?.toString()
+                    : emp.department?.toString();
+            const empDeptName =
+                typeof emp.department === "object"
+                    ? emp.department?.name?.toLowerCase().trim()
+                    : (typeof emp.department === "string" ? emp.department.toLowerCase().trim() : "");
+            return (deptId && empDeptId === deptId) || (deptName && empDeptName === deptName);
+        }).length;
+
+        return count;
+    };
+
+    const totalMembers = useMemo(() => {
+        return departments.reduce((acc, curr) => acc + resolveMemberCount(curr), 0);
+    }, [departments, employees]);
 
     const filteredDepartments = useMemo(() => {
         if (!searchQuery.trim()) return departments;
@@ -91,15 +200,14 @@ export default function DepartmentsPage() {
         return departments.filter((d) => {
             const name = String(d.name || "").toLowerCase();
             const code = String(d.code || "").toLowerCase();
-            const head = resolveHeadName(d.head).toLowerCase();
+            const head = resolveHeadName(d).toLowerCase();
             return name.includes(q) || code.includes(q) || head.includes(q);
         });
-    }, [departments, searchQuery]);
+    }, [departments, searchQuery, employees, employeeMap]);
 
     const handleDeleteDepartment = async (id, e) => {
         e?.stopPropagation();
-        if (!window.confirm("Are you sure you want to delete this department?"))
-            return;
+        if (!window.confirm("Are you sure you want to delete this department?")) return;
 
         setDeletingId(id);
         try {
@@ -141,33 +249,45 @@ export default function DepartmentsPage() {
         return "DP";
     };
 
+    // Employee options for Department Head dropdown selection
+    const employeeOptions = useMemo(() => {
+        return employees.map((emp) => ({
+            label:
+                emp.name ||
+                `${emp.firstName || ""} ${emp.lastName || ""}`.trim() ||
+                emp.email ||
+                "Employee",
+            value: emp._id || emp.id,
+        }));
+    }, [employees]);
+
     return (
-        <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-6 space-y-3.5 sm:space-y-6 bg-[#f8fafc] min-h-screen font-sans antialiased text-slate-900">
+        <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3.5 sm:py-6 lg:py-8 space-y-4 sm:space-y-6 bg-[#f8fafc] min-h-screen font-sans antialiased text-slate-900">
             {/* Top Header Card */}
-            <div className="bg-white p-4 sm:p-6 lg:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-md">
+            <div className="bg-white p-4 sm:p-6 lg:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-xs transition-all duration-300 hover:shadow-md">
                 <div className="flex items-start sm:items-center gap-3 sm:gap-4">
                     <div className="p-2.5 sm:p-3 bg-indigo-50 text-indigo-600 rounded-xl sm:rounded-2xl border border-indigo-100 shadow-2xs shrink-0">
                         <Layers className="w-5 h-5 sm:w-6 sm:h-6" />
                     </div>
                     <div className="min-w-0">
-                        <h1 className="text-lg sm:text-2xl font-bold text-slate-900 tracking-tight truncate">
+                        <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight truncate">
                             Corporate Departments
                         </h1>
-                        <p className="text-xs sm:text-sm font-medium text-slate-500 mt-0.5 leading-relaxed line-clamp-2 sm:line-clamp-none">
-                            Organize functional operational units, department codes, team leads, and staff distributions.
+                        <p className="text-xs sm:text-sm font-medium text-slate-500 mt-0.5 leading-relaxed">
+                            Organize operational business divisions, departmental codes, department heads, and staffing quotas.
                         </p>
                     </div>
                 </div>
             </div>
 
             {/* Metrics Overview Row */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
-                <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-md flex items-center justify-between group">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4 lg:gap-5">
+                <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-md hover:border-indigo-300 hover:-translate-y-0.5 flex items-center justify-between group">
                     <div className="min-w-0">
                         <p className="text-[10px] sm:text-[11px] font-extrabold tracking-wider text-slate-400 uppercase group-hover:text-indigo-600 transition-colors">
                             Total Departments
                         </p>
-                        <h3 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 font-mono mt-0.5 sm:mt-1 tracking-tight">
+                        <h3 className="text-2xl sm:text-3xl font-black text-slate-900 font-mono mt-1 tracking-tight">
                             {loading ? "..." : totalDepts.toLocaleString()}
                         </h3>
                     </div>
@@ -176,12 +296,12 @@ export default function DepartmentsPage() {
                     </div>
                 </div>
 
-                <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-md flex items-center justify-between group">
+                <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-md hover:border-emerald-300 hover:-translate-y-0.5 flex items-center justify-between group">
                     <div className="min-w-0">
                         <p className="text-[10px] sm:text-[11px] font-extrabold tracking-wider text-emerald-600 uppercase">
                             Active Units
                         </p>
-                        <h3 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 font-mono mt-0.5 sm:mt-1 tracking-tight">
+                        <h3 className="text-2xl sm:text-3xl font-black text-slate-900 font-mono mt-1 tracking-tight">
                             {loading ? "..." : activeDepts.toLocaleString()}
                         </h3>
                     </div>
@@ -190,12 +310,12 @@ export default function DepartmentsPage() {
                     </div>
                 </div>
 
-                <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-md flex items-center justify-between group sm:col-span-2 lg:col-span-1">
+                <div className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-md hover:border-blue-300 hover:-translate-y-0.5 flex items-center justify-between group sm:col-span-2 lg:col-span-1">
                     <div className="min-w-0">
                         <p className="text-[10px] sm:text-[11px] font-extrabold tracking-wider text-blue-500 uppercase">
                             Total Members
                         </p>
-                        <h3 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 font-mono mt-0.5 sm:mt-1 tracking-tight">
+                        <h3 className="text-2xl sm:text-3xl font-black text-slate-900 font-mono mt-1 tracking-tight">
                             {loading ? "..." : totalMembers.toLocaleString()}
                         </h3>
                     </div>
@@ -207,7 +327,6 @@ export default function DepartmentsPage() {
 
             {/* MOBILE & TABLET CARD VIEW */}
             <div className="block md:hidden space-y-3">
-                {/* Search bar on mobile */}
                 <div className="relative w-full">
                     <Search
                         size={15}
@@ -217,13 +336,14 @@ export default function DepartmentsPage() {
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Search departments or code..."
-                        className="w-full pl-9 pr-9 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600/10 focus:border-indigo-600 transition"
+                        placeholder="Search departments, codes or leaders..."
+                        className="w-full pl-9 pr-9 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600/10 focus:border-indigo-600 transition"
                     />
                     {searchQuery && (
                         <button
+                            type="button"
                             onClick={() => setSearchQuery("")}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
                         >
                             <X size={14} />
                         </button>
@@ -234,7 +354,7 @@ export default function DepartmentsPage() {
                     <div className="py-16 text-center text-slate-400 flex flex-col items-center justify-center gap-2 bg-white rounded-2xl border border-slate-200">
                         <Loader2 className="animate-spin text-indigo-600" size={24} />
                         <span className="text-xs font-semibold">
-                            Loading department cards...
+                            Loading corporate departments...
                         </span>
                     </div>
                 ) : filteredDepartments.length === 0 ? (
@@ -246,12 +366,11 @@ export default function DepartmentsPage() {
                         const id = dept._id || dept.id;
                         const code = dept.code || "";
                         const name = dept.name || "Department";
-                        const headName = resolveHeadName(dept.head);
+                        const headName = resolveHeadName(dept);
+                        const memberCount = resolveMemberCount(dept);
                         const dateStr = dept.createdAt
-                            ? new Date(dept.createdAt).toLocaleDateString("en-US")
-                            : dept.updatedAt
-                                ? new Date(dept.updatedAt).toLocaleDateString("en-US")
-                                : "—";
+                            ? new Date(dept.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                            : "—";
                         const isDeleting = deletingId === id;
                         const isActive =
                             dept.isActive === true ||
@@ -263,26 +382,25 @@ export default function DepartmentsPage() {
                             <div
                                 key={id}
                                 onClick={() => setSelectedDept(dept)}
-                                className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs space-y-3 cursor-pointer hover:border-indigo-300 transition-all"
+                                className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs space-y-3 cursor-pointer hover:border-indigo-300 hover:shadow-xs transition-all"
                             >
-                                {/* Top Row */}
                                 <div className="flex items-start justify-between gap-2">
                                     <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-10 h-10 rounded-2xl bg-rose-50/80 border border-rose-100 text-rose-600 font-extrabold text-xs flex items-center justify-center shrink-0">
+                                        <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 font-black text-xs flex items-center justify-center shrink-0">
                                             {getDeptInitials(code, name)}
                                         </div>
                                         <div className="min-w-0">
                                             <p className="font-bold text-slate-900 text-sm truncate leading-tight">
                                                 {name}
                                             </p>
-                                            <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                                                {headName}
+                                            <p className="text-[11px] font-semibold text-slate-500 truncate mt-0.5">
+                                                Head: <span className={headName === "Not Assigned" ? "text-amber-600 italic" : "text-slate-700"}>{headName}</span>
                                             </p>
                                         </div>
                                     </div>
 
                                     <span
-                                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border shrink-0 ${isActive
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border shrink-0 ${isActive
                                             ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                             : "bg-rose-50 text-rose-700 border-rose-200"
                                             }`}
@@ -295,19 +413,21 @@ export default function DepartmentsPage() {
                                     </span>
                                 </div>
 
-                                {/* Middle Row */}
                                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                                    <div className="flex items-center gap-1.5 truncate text-[11px]">
+                                    <div className="flex items-center gap-1.5 text-[11px] font-mono">
                                         <Building2 size={13} className="text-slate-400 shrink-0" />
-                                        <span className="truncate">{code || "General Unit"}</span>
+                                        <span className="font-bold text-slate-700">{code || "N/A"}</span>
                                     </div>
-                                    <div className="flex items-center gap-1 font-mono text-[11px] text-slate-400 shrink-0">
-                                        <Calendar size={12} className="text-slate-400" />
-                                        <span>{dateStr}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
+                                            {memberCount} Members
+                                        </span>
+                                        <span className="text-[11px] font-mono text-slate-400">
+                                            {dateStr}
+                                        </span>
                                     </div>
                                 </div>
 
-                                {/* Bottom Action Bar */}
                                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                                     <button
                                         type="button"
@@ -329,10 +449,7 @@ export default function DepartmentsPage() {
                                         title="Delete Department"
                                     >
                                         {isDeleting ? (
-                                            <Loader2
-                                                size={15}
-                                                className="animate-spin text-rose-600"
-                                            />
+                                            <Loader2 size={15} className="animate-spin text-rose-600" />
                                         ) : (
                                             <Trash2 size={15} />
                                         )}
@@ -349,7 +466,7 @@ export default function DepartmentsPage() {
                 <EntityManager
                     title="Department Directory"
                     subtitle="Manage corporate units, departmental codes, and team leads efficiently."
-                    endpoint="departments"   // FIXED: was "organization/departments" (double prefix -> 404)
+                    endpoint="departments"
                     primaryKey="_id"
                     layout="table"
                     hoverEffect={true}
@@ -361,7 +478,7 @@ export default function DepartmentsPage() {
                             bold: true,
                             searchable: true,
                             render: (val, row) => (
-                                <span className="font-semibold text-slate-900">
+                                <span className="font-bold text-slate-900">
                                     {row?.name || val || "Unnamed Department"}
                                 </span>
                             ),
@@ -371,7 +488,7 @@ export default function DepartmentsPage() {
                             label: "Code",
                             searchable: true,
                             render: (val, row) => (
-                                <span className="px-2.5 py-1 text-xs font-mono font-medium bg-slate-100 text-slate-700 rounded-md border border-slate-200">
+                                <span className="px-2.5 py-1 text-xs font-mono font-bold bg-slate-100 text-slate-700 rounded-md border border-slate-200">
                                     {row?.code || val || "N/A"}
                                 </span>
                             ),
@@ -380,18 +497,28 @@ export default function DepartmentsPage() {
                             key: "head",
                             label: "Department Head",
                             render: (val, row) => {
-                                const headName = resolveHeadName(row?.head || val);
-                                const hasAssignedHead = headName && headName !== "Not Assigned";
-                                const initialChar = hasAssignedHead
+                                const headName = resolveHeadName(row);
+                                const isAssigned = headName && headName !== "Not Assigned";
+                                const initialChar = isAssigned
                                     ? String(headName).trim().charAt(0).toUpperCase()
                                     : "?";
 
                                 return (
                                     <div className="flex items-center gap-2">
-                                        <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold shadow-2xs shrink-0">
+                                        <div
+                                            className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shadow-2xs shrink-0 ${isAssigned
+                                                ? "bg-indigo-100 text-indigo-700"
+                                                : "bg-amber-100 text-amber-700"
+                                                }`}
+                                        >
                                             {initialChar}
                                         </div>
-                                        <span className="text-slate-700 font-medium text-sm">
+                                        <span
+                                            className={`text-sm font-medium ${isAssigned
+                                                ? "text-slate-800"
+                                                : "text-slate-400 italic"
+                                                }`}
+                                        >
                                             {headName}
                                         </span>
                                     </div>
@@ -402,7 +529,7 @@ export default function DepartmentsPage() {
                             key: "employeeCount",
                             label: "Active Members",
                             render: (val, row) => {
-                                const count = row?.employeeCount ?? val ?? 0;
+                                const count = resolveMemberCount(row);
                                 return (
                                     <span className="inline-flex items-center px-2.5 py-0.5 text-xs font-semibold bg-indigo-50 text-indigo-700 rounded-full border border-indigo-100">
                                         {count} Employees
@@ -420,7 +547,7 @@ export default function DepartmentsPage() {
                                     row?.status === "active";
                                 return (
                                     <span
-                                        className={`inline-flex items-center px-3 py-1 text-xs font-medium rounded-full transition-colors ${active
+                                        className={`inline-flex items-center px-3 py-1 text-xs font-semibold rounded-full transition-colors ${active
                                             ? "bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs"
                                             : "bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs"
                                             }`}
@@ -453,6 +580,16 @@ export default function DepartmentsPage() {
                             colSpan: 1,
                         },
                         {
+                            key: "head",
+                            label: "Department Head",
+                            type: "select",
+                            options: [
+                                { label: "Select Head (Optional)", value: "" },
+                                ...employeeOptions,
+                            ],
+                            colSpan: 1,
+                        },
+                        {
                             key: "isActive",
                             label: "Department Status",
                             type: "select",
@@ -467,7 +604,7 @@ export default function DepartmentsPage() {
                             key: "description",
                             label: "Description",
                             type: "textarea",
-                            placeholder: "Write a brief overview of departmental responsibilities...",
+                            placeholder: "Write a brief overview of departmental scope...",
                             colSpan: 2,
                         },
                     ]}
@@ -492,6 +629,7 @@ export default function DepartmentsPage() {
                                 </h3>
                             </div>
                             <button
+                                type="button"
                                 onClick={() => setSelectedDept(null)}
                                 className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
                             >
@@ -529,7 +667,7 @@ export default function DepartmentsPage() {
                                     Department Head
                                 </span>
                                 <p className="font-semibold text-slate-800 mt-0.5">
-                                    {resolveHeadName(selectedDept.head)}
+                                    {resolveHeadName(selectedDept)}
                                 </p>
                             </div>
 
@@ -538,7 +676,7 @@ export default function DepartmentsPage() {
                                     Active Staff Allocation
                                 </span>
                                 <p className="font-semibold text-slate-800 mt-0.5">
-                                    {selectedDept.employeeCount || 0} Employees
+                                    {resolveMemberCount(selectedDept)} Employees
                                 </p>
                             </div>
 
@@ -556,8 +694,9 @@ export default function DepartmentsPage() {
 
                         <div className="p-3 bg-slate-50 border-t border-slate-100 flex justify-end">
                             <button
+                                type="button"
                                 onClick={() => setSelectedDept(null)}
-                                className="px-4 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-bold cursor-pointer"
+                                className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
                             >
                                 Close
                             </button>

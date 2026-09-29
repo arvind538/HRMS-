@@ -320,7 +320,7 @@ export default function BranchesPage() {
 
             {/* DESKTOP FULL ENTITY MANAGER VIEW */}
             <div className="hidden md:block bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden p-2 sm:p-4 transition-all duration-300 hover:shadow-md">
-                <div className="w-full overflow-x-auto">
+                <div className="w-full overflow-x-auto whitespace-nowrap">
                     <EntityManager
                         title="Branch Locations"
                         subtitle="Manage your physical workspaces, regional branches, and support facilities."

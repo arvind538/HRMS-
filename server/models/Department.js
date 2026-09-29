@@ -40,7 +40,7 @@ const departmentSchema = new mongoose.Schema(
     }
 );
 
-// Virtual field taaki employee count dynamically populate ho sake
+// Virtual field for employee count
 departmentSchema.virtual("employeeCount", {
     ref: "Employee",
     localField: "_id",
@@ -48,7 +48,6 @@ departmentSchema.virtual("employeeCount", {
     count: true,
 });
 
-// Duplicate model compilation error prevention
 module.exports =
     mongoose.models.Department ||
     mongoose.model("Department", departmentSchema);

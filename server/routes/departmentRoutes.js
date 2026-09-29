@@ -10,17 +10,24 @@ const {
     toggleDepartmentStatus,
 } = require("../controllers/departmentController");
 
+// Base Routes: /api/departments OR /api/organization/departments
 router
     .route("/")
     .get(protect, getDepartments)
-    .post(protect, authorize("admin", "hr"), createDepartment);
+    .post(protect, authorize("admin", "hr", "superadmin"), createDepartment);
 
 router
     .route("/:id")
     .get(protect, getDepartment)
-    .put(protect, authorize("admin", "hr"), updateDepartment)
-    .delete(protect, authorize("admin"), deleteDepartment);
+    .put(protect, authorize("admin", "hr", "superadmin"), updateDepartment)
+    .delete(protect, authorize("admin", "hr", "superadmin"), deleteDepartment);
 
-router.put("/:id/toggle-status", protect, authorize("admin", "hr"), toggleDepartmentStatus);
+// Quick Status Toggle Route
+router.put(
+    "/:id/toggle-status",
+    protect,
+    authorize("admin", "hr", "superadmin"),
+    toggleDepartmentStatus
+);
 
 module.exports = router;

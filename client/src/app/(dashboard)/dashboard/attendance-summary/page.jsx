@@ -12,6 +12,7 @@ import {
     ChevronDown,
     Check,
     ArrowUpRight,
+    Sparkles,
 } from "lucide-react";
 import {
     ResponsiveContainer,
@@ -42,24 +43,24 @@ const MONTHS = [
 function CustomAttendanceTooltip({ active, payload, label }) {
     if (active && payload && payload.length) {
         return (
-            <div className="bg-slate-900/95 backdrop-blur-md text-white p-3 rounded-2xl shadow-xl border border-slate-800 text-xs min-w-[140px] space-y-1.5">
-                <p className="font-bold text-slate-300 border-b border-slate-800 pb-1.5 flex items-center justify-between">
+            <div className="bg-slate-900/95 backdrop-blur-md text-white p-3 rounded-xl sm:rounded-2xl shadow-xl border border-slate-800 text-xs min-w-[145px] space-y-2">
+                <p className="font-semibold text-slate-300 border-b border-slate-800/80 pb-1.5 flex items-center justify-between">
                     <span>{label}</span>
-                    <Clock size={12} className="text-slate-500 shrink-0" />
+                    <Clock size={12} className="text-slate-400 shrink-0" />
                 </p>
-                <div className="space-y-1 font-medium">
-                    <div className="flex items-center justify-between gap-4">
-                        <span className="flex items-center gap-1.5 text-indigo-400">
-                            <span className="w-2 h-2 rounded-full bg-indigo-500 ring-2 ring-indigo-500/20" />
+                <div className="space-y-1.5 font-medium">
+                    <div className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-1.5 text-indigo-300">
+                            <span className="w-2 h-2 rounded-full bg-indigo-500 shadow-xs" />
                             Present:
                         </span>
                         <span className="font-bold text-white font-mono">
                             {payload[0]?.value ?? 0}
                         </span>
                     </div>
-                    <div className="flex items-center justify-between gap-4">
-                        <span className="flex items-center gap-1.5 text-rose-400">
-                            <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-rose-500/20" />
+                    <div className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-1.5 text-rose-300">
+                            <span className="w-2 h-2 rounded-full bg-rose-500 shadow-xs" />
                             Absent:
                         </span>
                         <span className="font-bold text-white font-mono">
@@ -152,9 +153,9 @@ export default function AttendanceSummaryPage() {
 
     if (loading) {
         return (
-            <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
+            <div className="w-full min-h-[50vh] sm:min-h-[60vh] flex flex-col items-center justify-center gap-3 text-slate-400 px-4">
                 <Loader2 size={36} className="animate-spin text-indigo-600" />
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
                     Loading Attendance Analytics...
                 </p>
             </div>
@@ -162,30 +163,37 @@ export default function AttendanceSummaryPage() {
     }
 
     return (
-        <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
             {/* Top Filter & Action Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
-                <div>
-                    <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-                        Monthly Attendance Summary
-                    </h1>
-                    <p className="text-xs sm:text-sm font-medium text-slate-500 mt-1">
-                        Aggregated shift logs, check-in records, and workforce presence ratios.
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-6 lg:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-xs">
+                <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                        <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
+                            Monthly Attendance Summary
+                        </h1>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60 shadow-2xs whitespace-nowrap">
+                            <Sparkles size={12} className="text-indigo-600 shrink-0" />
+                            Live Records
+                        </span>
+                    </div>
+                    <p className="text-xs sm:text-sm font-medium text-slate-500 max-w-2xl">
+                        Consolidated shift attendance, verified check-in volume, and monthly workforce presence metrics.
                     </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                {/* Filter Controls */}
+                <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto shrink-0">
                     {/* Custom Month Dropdown */}
-                    <div className="relative inline-block text-left" ref={dropdownRef}>
+                    <div className="relative flex-1 sm:flex-initial" ref={dropdownRef}>
                         <button
                             type="button"
                             onClick={() => setIsDropdownOpen((prev) => !prev)}
-                            className="flex items-center justify-between gap-2.5 px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-xl sm:rounded-2xl text-xs font-bold text-slate-700 shadow-2xs transition-all active:scale-95 focus:outline-none cursor-pointer"
+                            className="w-full sm:w-auto h-10 sm:h-11 flex items-center justify-between gap-2.5 px-3.5 sm:px-4 bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200/80 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold text-slate-700 shadow-2xs transition-all active:scale-95 focus:outline-none cursor-pointer whitespace-nowrap"
                         >
                             <span>{MONTHS[month - 1]}</span>
                             <ChevronDown
                                 size={15}
-                                className={`text-slate-400 transition-transform duration-200 ease-in-out ${isDropdownOpen ? "rotate-180 text-indigo-600" : ""
+                                className={`text-slate-400 transition-transform duration-200 ease-in-out shrink-0 ${isDropdownOpen ? "rotate-180 text-indigo-600" : ""
                                     }`}
                             />
                         </button>
@@ -207,7 +215,7 @@ export default function AttendanceSummaryPage() {
                                             setMonth(val);
                                             setIsDropdownOpen(false);
                                         }}
-                                        className={`w-full flex items-center justify-between px-3.5 py-2 rounded-xl text-xs transition-colors font-semibold cursor-pointer ${isSelected
+                                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors font-semibold cursor-pointer ${isSelected
                                             ? "bg-indigo-50 text-indigo-600"
                                             : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                                             }`}
@@ -227,7 +235,7 @@ export default function AttendanceSummaryPage() {
                         type="number"
                         value={year}
                         onChange={(e) => setYear(Number(e.target.value))}
-                        className="px-3 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl sm:rounded-2xl text-xs font-bold text-slate-700 w-20 sm:w-24 text-center focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                        className="h-10 sm:h-11 px-3 bg-slate-50 border border-slate-200/80 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold text-slate-700 w-20 sm:w-24 text-center focus:outline-none focus:ring-2 focus:ring-indigo-100"
                     />
 
                     {/* Refresh Action */}
@@ -235,27 +243,27 @@ export default function AttendanceSummaryPage() {
                         type="button"
                         onClick={() => fetchAttendanceSummary(true)}
                         disabled={refreshing}
-                        className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-xl sm:rounded-2xl text-slate-700 hover:text-indigo-600 transition-all active:scale-95 focus:outline-none shadow-2xs disabled:opacity-60 cursor-pointer"
-                        title="Sync Data"
+                        className="h-10 sm:h-11 px-3.5 inline-flex items-center justify-center bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200/80 rounded-xl sm:rounded-2xl text-slate-700 hover:text-indigo-600 transition-all active:scale-95 focus:outline-none shadow-2xs disabled:opacity-60 cursor-pointer shrink-0"
+                        title="Synchronize attendance records"
                     >
                         <RefreshCw
                             size={15}
-                            className={refreshing ? "animate-spin text-indigo-600" : ""}
+                            className={refreshing ? "animate-spin text-indigo-600" : "text-slate-500"}
                         />
                     </button>
                 </div>
             </div>
 
             {/* 4 Stat KPI Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4 lg:gap-5">
                 {/* Total Logs */}
                 <div
                     onClick={() => router.push("/attendance")}
-                    className="bg-white p-5 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
+                    className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
                 >
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100/80 shadow-2xs group-hover:scale-105 transition-transform">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100/80 shadow-2xs group-hover:scale-105 transition-transform">
                                 <Calendar size={20} className="sm:w-[22px] sm:h-[22px]" />
                             </div>
                             <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider group-hover:text-indigo-600 transition-colors">
@@ -266,8 +274,8 @@ export default function AttendanceSummaryPage() {
                             {records.length.toLocaleString()}
                         </h3>
                     </div>
-                    <p className="text-xs font-semibold text-slate-500 mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
-                        <span>{totalEmployees} enrolled personnel</span>
+                    <p className="text-xs font-semibold text-slate-500 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                        <span>{totalEmployees} enrolled staff</span>
                         <ArrowUpRight
                             size={14}
                             className="text-indigo-600 group-hover:translate-x-0.5 transition-transform"
@@ -278,11 +286,11 @@ export default function AttendanceSummaryPage() {
                 {/* Present Count */}
                 <div
                     onClick={() => router.push("/attendance?status=present")}
-                    className="bg-white p-5 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-emerald-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
+                    className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-emerald-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
                 >
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/80 shadow-2xs group-hover:scale-105 transition-transform">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100/80 shadow-2xs group-hover:scale-105 transition-transform">
                                 <UserCheck size={20} className="sm:w-[22px] sm:h-[22px]" />
                             </div>
                             <span className="text-[11px] font-black text-emerald-600 uppercase tracking-wider">
@@ -293,7 +301,7 @@ export default function AttendanceSummaryPage() {
                             {presentRecords.length.toLocaleString()}
                         </h3>
                     </div>
-                    <p className="text-xs font-semibold text-emerald-600 mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <p className="text-xs font-semibold text-emerald-600 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
                         <span>Verified check-ins</span>
                         <ArrowUpRight
                             size={14}
@@ -305,11 +313,11 @@ export default function AttendanceSummaryPage() {
                 {/* Absent Count */}
                 <div
                     onClick={() => router.push("/attendance?status=absent")}
-                    className="bg-white p-5 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-rose-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
+                    className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-rose-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
                 >
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100/80 shadow-2xs group-hover:scale-105 transition-transform">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100/80 shadow-2xs group-hover:scale-105 transition-transform">
                                 <UserX size={20} className="sm:w-[22px] sm:h-[22px]" />
                             </div>
                             <span className="text-[11px] font-black text-rose-500 uppercase tracking-wider">
@@ -320,8 +328,8 @@ export default function AttendanceSummaryPage() {
                             {absentRecords.length.toLocaleString()}
                         </h3>
                     </div>
-                    <p className="text-xs font-semibold text-rose-500 mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
-                        <span>Unrecorded shifts</span>
+                    <p className="text-xs font-semibold text-rose-500 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                        <span>Unlogged shifts</span>
                         <ArrowUpRight
                             size={14}
                             className="text-rose-500 group-hover:translate-x-0.5 transition-transform"
@@ -332,23 +340,23 @@ export default function AttendanceSummaryPage() {
                 {/* Average Daily Hours */}
                 <div
                     onClick={() => router.push("/attendance")}
-                    className="bg-white p-5 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-violet-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
+                    className="bg-white p-4 sm:p-5 lg:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-xl hover:border-violet-300 hover:-translate-y-1 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
                 >
                     <div>
                         <div className="flex items-center justify-between mb-3">
-                            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100/80 shadow-2xs group-hover:scale-105 transition-transform">
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-violet-50 text-violet-600 flex items-center justify-center border border-violet-100/80 shadow-2xs group-hover:scale-105 transition-transform">
                                 <Clock size={20} className="sm:w-[22px] sm:h-[22px]" />
                             </div>
                             <span className="text-[11px] font-black text-violet-600 uppercase tracking-wider">
-                                Average Daily Hours
+                                Daily Average
                             </span>
                         </div>
                         <h3 className="text-2xl sm:text-3xl font-black text-slate-900 font-mono">
                             {averageHoursPerDay} hrs
                         </h3>
                     </div>
-                    <p className="text-xs font-semibold text-slate-500 mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
-                        <span>{totalWorkingHours.toLocaleString()} total logged hours</span>
+                    <p className="text-xs font-semibold text-slate-500 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                        <span>{totalWorkingHours.toLocaleString()} logged work hours</span>
                         <ArrowUpRight
                             size={14}
                             className="text-violet-600 group-hover:translate-x-0.5 transition-transform"
@@ -358,45 +366,45 @@ export default function AttendanceSummaryPage() {
             </div>
 
             {/* Monthly Attendance Trend Chart */}
-            <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 border border-slate-200/80 shadow-xs hover:shadow-md transition-all duration-300 space-y-4 sm:space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4 sm:pb-5">
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 border border-slate-200/80 shadow-xs hover:shadow-md transition-all duration-300 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
                     <div>
                         <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
                             Monthly Attendance Trend
                         </h2>
                         <p className="text-xs font-medium text-slate-500 mt-0.5">
-                            Day-by-day attendance distribution for {MONTHS[month - 1]} {year}
+                            Day-by-day turnout overview for {MONTHS[month - 1]} {year}
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-3 text-xs font-bold text-slate-600 self-start sm:self-auto">
-                        <div className="flex items-center gap-2 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200/60">
-                            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 ring-2 ring-indigo-500/20" />
+                    <div className="flex items-center gap-2.5 sm:gap-3 text-xs font-bold text-slate-600 self-start sm:self-auto">
+                        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/60">
+                            <span className="w-2 h-2 rounded-full bg-indigo-500" />
                             <span>Present</span>
                         </div>
-                        <div className="flex items-center gap-2 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200/60">
-                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-500/20" />
+                        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/60">
+                            <span className="w-2 h-2 rounded-full bg-rose-500" />
                             <span>Absent</span>
                         </div>
                     </div>
                 </div>
 
                 {chartData.length === 0 ? (
-                    <div className="py-20 text-center">
+                    <div className="py-16 sm:py-20 text-center">
                         <Calendar size={36} className="mx-auto text-slate-300 stroke-[1.5] mb-2" />
                         <p className="text-sm font-bold text-slate-700">
                             No attendance records found
                         </p>
                         <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                            No punch logs have been registered for {MONTHS[month - 1]} {year}. Try selecting another month or year.
+                            No attendance punches have been logged for {MONTHS[month - 1]} {year}. Please choose another month or year.
                         </p>
                     </div>
                 ) : (
-                    <div className="h-64 sm:h-72 w-full select-none pt-2">
+                    <div className="h-56 sm:h-64 lg:h-72 w-full select-none pt-2">
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart
                                 data={chartData}
-                                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                                margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
                             >
                                 <defs>
                                     <linearGradient id="attSummaryGrad" x1="0" y1="0" x2="0" y2="1">

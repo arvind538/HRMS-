@@ -274,7 +274,7 @@ export default function PayrollSummaryPage() {
                         className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-bold shadow-sm shadow-indigo-100 transition-all hover:shadow-md active:scale-95 cursor-pointer"
                     >
                         <Download size={14} className="shrink-0" />
-                        <span>Export Snapshot</span>
+                        <span className="whitespace-nowrap">Export Snapshot</span>
                     </button>
                 </div>
             </div>

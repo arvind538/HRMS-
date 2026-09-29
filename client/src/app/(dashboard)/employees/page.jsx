@@ -38,11 +38,142 @@ const getInitials = (name) => {
         : parts[0].slice(0, 2).toUpperCase();
 };
 
+// API response kisi bhi shape me aaye, array nikal lo
+const extractList = (raw, depth = 0) => {
+    if (Array.isArray(raw)) return raw;
+    if (!raw || typeof raw !== "object" || depth > 3) return [];
+    for (const k of [
+        "data",
+        "designations",
+        "departments",
+        "docs",
+        "items",
+        "results",
+        "rows",
+        "list",
+    ]) {
+        if (raw[k] !== undefined) {
+            const r = extractList(raw[k], depth + 1);
+            if (r.length) return r;
+        }
+    }
+    return [];
+};
+
+// Object se readable label nikalo (broad key support)
+const getLabel = (obj, preferredFields = []) => {
+    if (!obj) return "";
+    if (typeof obj === "string") {
+        const trimmed = obj.trim();
+        return isHexObjectId(trimmed) ? "" : trimmed;
+    }
+    if (typeof obj !== "object") return "";
+
+    // 1. Check preferred fields first
+    for (const f of preferredFields) {
+        if (typeof obj[f] === "string" && obj[f].trim() && !isHexObjectId(obj[f])) {
+            return obj[f].trim();
+        }
+    }
+
+    // 2. Common designation & department naming patterns
+    const commonKeys = [
+        "title",
+        "name",
+        "designationTitle",
+        "designationName",
+        "designation_name",
+        "departmentName",
+        "department_name",
+        "role_name",
+        "roleName",
+        "role",
+        "position",
+        "label",
+        "jobTitle"
+    ];
+
+    for (const k of commonKeys) {
+        if (typeof obj[k] === "string" && obj[k].trim() && !isHexObjectId(obj[k])) {
+            return obj[k].trim();
+        }
+    }
+
+    // 3. Fallback: Scan remaining string keys that are not IDs or system meta
+    const skipRegex = /(^_)|id$|date|at$|status|description|code|createdby|updatedby/i;
+    for (const [k, v] of Object.entries(obj)) {
+        if (skipRegex.test(k)) continue;
+        if (typeof v === "string" && v.trim() && !isHexObjectId(v)) {
+            return v.trim();
+        }
+    }
+    return "";
+};
+
+// Value (string / object / {$oid}) se ID nikalo
+const getRefId = (v) => {
+    if (!v) return "";
+    if (typeof v === "string") return v.trim();
+    if (typeof v === "object") {
+        return String(v._id || v.id || v.$oid || "").trim();
+    }
+    return "";
+};
+
+// Employee me designation kisi bhi deep ya shallow field me ho sakti hai
+const getDesigRaw = (emp) => {
+    if (!emp) return null;
+    return (
+        emp?.designation ??
+        emp?.designationId ??
+        emp?.designation_id ??
+        emp?.jobDetails?.designation ??
+        emp?.jobDetails?.designationId ??
+        emp?.employmentDetails?.designation ??
+        emp?.workDetails?.designation ??
+        emp?.position ??
+        emp?.jobTitle ??
+        emp?.designationName ??
+        emp?.role ??
+        null
+    );
+};
+
+const getDeptRaw = (emp) => {
+    if (!emp) return null;
+    return (
+        emp?.department ??
+        emp?.departmentId ??
+        emp?.department_id ??
+        emp?.jobDetails?.department ??
+        emp?.employmentDetails?.department ??
+        emp?.workDetails?.department ??
+        emp?.branch ??
+        null
+    );
+};
+
+const DESIG_FIELDS = [
+    "title",
+    "name",
+    "designationName",
+    "designation_name",
+    "designationTitle",
+    "designation",
+    "label",
+    "position",
+    "jobTitle",
+];
+const DEPT_FIELDS = ["name", "title", "departmentName", "department_name", "label"];
+
 export default function EmployeesPage() {
     const router = useRouter();
     const [employees, setEmployees] = useState([]);
     const [departmentsList, setDepartmentsList] = useState([]);
     const [designationsList, setDesignationsList] = useState([]);
+    const [lookupsLoaded, setLookupsLoaded] = useState(false);
+    const [extraDesignations, setExtraDesignations] = useState({});
+    const [desigResolving, setDesigResolving] = useState(false);
     const [search, setSearch] = useState("");
     const [departmentFilter, setDepartmentFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("all");
@@ -57,39 +188,35 @@ export default function EmployeesPage() {
 
     const deptDropdownRef = useRef(null);
     const statusDropdownRef = useRef(null);
+    const attemptedDesigIds = useRef(new Set());
 
-    // 1. Master lookup: Departments aur Designations list fetch karein
+    // 1. Master lookup: Departments aur Designations load karein
     useEffect(() => {
         async function loadLookups() {
             try {
                 const [deptRes, desigRes] = await Promise.allSettled([
-                    api.get("/departments"),
-                    api.get("/designations"),
+                    api.get("/departments", { params: { limit: 1000 } }),
+                    api.get("/designations", { params: { limit: 1000 } }),
                 ]);
 
                 if (deptRes.status === "fulfilled") {
-                    const raw = deptRes.value?.data;
-                    const list = Array.isArray(raw)
-                        ? raw
-                        : raw?.data || raw?.departments || [];
-                    setDepartmentsList(list);
+                    setDepartmentsList(extractList(deptRes.value?.data));
                 }
 
                 if (desigRes.status === "fulfilled") {
-                    const raw = desigRes.value?.data;
-                    const list = Array.isArray(raw)
-                        ? raw
-                        : raw?.data || raw?.designations || [];
+                    const list = extractList(desigRes.value?.data);
                     setDesignationsList(list);
                 }
             } catch (err) {
-                console.error("Lookup dropdown error:", err);
+                console.error("Lookup fetch error:", err);
+            } finally {
+                setLookupsLoaded(true);
             }
         }
         loadLookups();
     }, []);
 
-    // 2. Employees list fetch karein
+    // 2. Employees fetch karein
     const fetchEmployees = useCallback(async (searchTerm = "") => {
         setLoading(true);
         try {
@@ -116,19 +243,94 @@ export default function EmployeesPage() {
         return () => clearTimeout(delay);
     }, [search, fetchEmployees]);
 
+    // Lookup Maps: ID -> Readable Name
+    const departmentMap = useMemo(() => {
+        const map = new Map();
+        departmentsList.forEach((d) => {
+            const id = String(d?._id || d?.id || "").trim();
+            const label = getLabel(d, DEPT_FIELDS);
+            if (id && label) {
+                map.set(id, label);
+                map.set(id.toLowerCase(), label);
+            }
+        });
+        return map;
+    }, [departmentsList]);
+
+    const designationMap = useMemo(() => {
+        const map = new Map();
+        designationsList.forEach((d) => {
+            const id = String(d?._id || d?.id || "").trim();
+            const label = getLabel(d, DESIG_FIELDS);
+            if (id && label) {
+                map.set(id, label);
+                map.set(id.toLowerCase(), label);
+            }
+        });
+        Object.entries(extraDesignations).forEach(([id, label]) => {
+            if (id && label) {
+                map.set(id, label);
+                map.set(id.toLowerCase(), label);
+            }
+        });
+        return map;
+    }, [designationsList, extraDesignations]);
+
+    // Fallback: Jo ID match nahi hui unko fetch karein
+    useEffect(() => {
+        if (!lookupsLoaded || loading) return;
+
+        const missing = [];
+        employees.forEach((emp) => {
+            const raw = getDesigRaw(emp);
+            // Agar object me seedhe title ya name already populated hai to API call na karein
+            if (raw && typeof raw === "object" && getLabel(raw, DESIG_FIELDS)) {
+                return;
+            }
+            const id = getRefId(raw);
+            if (
+                isHexObjectId(id) &&
+                !designationMap.has(id) &&
+                !designationMap.has(id.toLowerCase()) &&
+                !attemptedDesigIds.current.has(id)
+            ) {
+                attemptedDesigIds.current.add(id);
+                missing.push(id);
+            }
+        });
+
+        if (missing.length === 0) return;
+
+        setDesigResolving(true);
+        Promise.allSettled(missing.map((id) => api.get(`/designations/${id}`)))
+            .then((results) => {
+                const found = {};
+                results.forEach((r, i) => {
+                    if (r.status === "fulfilled") {
+                        const raw = r.value?.data;
+                        const obj =
+                            raw?.data?.designation ||
+                            raw?.designation ||
+                            raw?.data ||
+                            raw;
+                        const label = getLabel(obj, DESIG_FIELDS);
+                        if (label) found[missing[i]] = label;
+                    }
+                });
+                if (Object.keys(found).length > 0) {
+                    setExtraDesignations((prev) => ({ ...prev, ...found }));
+                }
+            })
+            .finally(() => setDesigResolving(false));
+    }, [employees, designationMap, lookupsLoaded, loading]);
+
     // Click outside listener for dropdowns
     useEffect(() => {
         const handleClickOutside = (e) => {
-            if (
-                deptDropdownRef.current &&
-                !deptDropdownRef.current.contains(e.target)
-            ) {
+            if (deptDropdownRef.current && !deptDropdownRef.current.contains(e.target)) {
                 setDeptOpen(false);
             }
-            if (
-                statusDropdownRef.current &&
-                !statusDropdownRef.current.contains(e.target)
-            ) {
+            if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target)) {
                 setStatusOpen(false);
             }
             if (!e.target.closest(".row-status-dropdown-container")) {
@@ -142,138 +344,79 @@ export default function EmployeesPage() {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // Status change handler (Fixed: Automatic active hone se bachane ke liye)
-    const handleStatusChange = async (employeeId, newStatus, e) => {
-        e.stopPropagation();
-        setActiveRowStatusDropdown(null);
+    // Department Resolver
+    const resolveDepartmentName = useCallback(
+        (emp) => {
+            if (!emp) return "General";
+            const raw = getDeptRaw(emp);
 
-        const isExit = newStatus.toLowerCase() === "exit";
-        const exitDateValue = isExit ? new Date().toISOString() : null;
+            if (raw && typeof raw === "object") {
+                const label = getLabel(raw, DEPT_FIELDS);
+                if (label) return label;
+                const id = getRefId(raw);
+                if (departmentMap.has(id)) return departmentMap.get(id);
+                if (departmentMap.has(id.toLowerCase())) return departmentMap.get(id.toLowerCase());
+                return "General";
+            }
 
-        // Capitalize format for mongoose schema matching
-        const formattedStatus = isExit
-            ? "Exit"
-            : newStatus.charAt(0).toUpperCase() + newStatus.slice(1).toLowerCase();
-
-        // 1. Optimistic UI update
-        setEmployees((prev) =>
-            prev.map((emp) =>
-                emp._id === employeeId
-                    ? {
-                        ...emp,
-                        status: formattedStatus,
-                        employeeStatus: formattedStatus,
-                        isActive: !isExit && formattedStatus !== "Inactive",
-                        isExited: isExit,
-                        exitDate: exitDateValue || emp.exitDate,
-                    }
-                    : emp
-            )
-        );
-
-        // 2. Multi-strategy API update
-        const payload = {
-            status: formattedStatus,
-            employeeStatus: formattedStatus,
-            isActive: !isExit && formattedStatus !== "Inactive",
-            isExited: isExit,
-            exitDate: exitDateValue,
-            exitReason: isExit ? "Administrative separation update" : undefined,
-        };
-
-        try {
-            if (isExit) {
-                // Try exit route first, fallback to standard update if 404
-                try {
-                    await api.put(`/employees/${employeeId}/exit`, payload);
-                } catch (exitErr) {
-                    console.warn("Dedicated exit endpoint failed, using standard update:", exitErr);
-                    await api.put(`/employees/${employeeId}`, payload);
+            if (typeof raw === "string" && raw.trim()) {
+                const val = raw.trim();
+                if (isHexObjectId(val)) {
+                    return departmentMap.get(val) || departmentMap.get(val.toLowerCase()) || "General";
                 }
-            } else {
-                await api.put(`/employees/${employeeId}`, payload);
+                return val;
             }
 
-            toast.success(`Employee marked as ${formattedStatus}`);
-        } catch (err) {
-            console.error("Status update error on server:", err.response?.data || err.message);
-            toast.error("Failed to update status on server.");
-            // Rollback to original server data only on failure
-            fetchEmployees(search);
-        }
-    };
+            return "General";
+        },
+        [departmentMap]
+    );
 
-    const handleDeleteEmployee = async (employeeId, e) => {
-        e.stopPropagation();
-        setActiveRowActionDropdown(null);
+    // FIXED: Designation Resolver (Never returns 'Unknown designation')
+    const resolveDesignationName = useCallback(
+        (emp) => {
+            if (!emp) return "Not assigned";
+            const raw = getDesigRaw(emp);
 
-        if (
-            !window.confirm(
-                "Are you sure you want to permanently delete this employee record?"
-            )
-        ) {
-            return;
-        }
-
-        setDeletingId(employeeId);
-        try {
-            setEmployees((prev) => prev.filter((emp) => emp._id !== employeeId));
-            await api.delete(`/employees/${employeeId}`);
-            toast.success("Employee record deleted permanently.");
-        } catch (err) {
-            console.error("Failed to delete employee:", err.response?.data || err.message);
-            toast.error("Failed to delete employee record.");
-            fetchEmployees(search);
-        } finally {
-            setDeletingId(null);
-        }
-    };
-
-    // Helper: Hex ID ko readable Department Name me badle
-    const resolveDepartmentName = (emp) => {
-        if (!emp) return "General";
-        const dept = emp.department;
-
-        if (typeof dept === "object" && dept !== null) {
-            return dept.name || dept.title || "General";
-        }
-
-        if (typeof dept === "string") {
-            const val = dept.trim();
-            if (/^[0-9a-fA-F]{24}$/.test(val)) {
-                const matched = departmentsList.find(
-                    (d) => String(d._id || d.id) === val
-                );
-                if (matched) return matched.name || matched.title;
+            // 1. Agar direct object me label hai (populated object)
+            if (raw && typeof raw === "object") {
+                const label = getLabel(raw, DESIG_FIELDS);
+                if (label) return label;
+                const id = getRefId(raw);
+                if (designationMap.has(id)) return designationMap.get(id);
+                if (designationMap.has(id.toLowerCase())) return designationMap.get(id.toLowerCase());
             }
-            return val || "General";
-        }
 
-        return emp.branch || "General";
-    };
-
-    // Helper: Hex ID ko readable Designation Title me badle
-    const resolveDesignationName = (emp) => {
-        if (!emp) return "Staff Member";
-        const desig = emp.designation;
-
-        if (typeof desig === "object" && desig !== null) {
-            return desig.title || desig.name || "Staff Member";
-        }
-
-        if (typeof desig === "string") {
-            const val = desig.trim();
-            if (/^[0-9a-fA-F]{24}$/.test(val)) {
-                const matched = designationsList.find(
-                    (d) => String(d._id || d.id) === val
-                );
-                if (matched) return matched.title || matched.name;
+            // 2. Agar string hai
+            if (typeof raw === "string" && raw.trim()) {
+                const val = raw.trim();
+                if (isHexObjectId(val)) {
+                    if (designationMap.has(val)) return designationMap.get(val);
+                    if (designationMap.has(val.toLowerCase())) return designationMap.get(val.toLowerCase());
+                    if (desigResolving || !lookupsLoaded) return "Loading...";
+                } else {
+                    return val;
+                }
             }
-            return val || "Staff Member";
-        }
 
-        return emp.role || "Staff Member";
-    };
+            // 3. Fallbacks: check other descriptive keys in employee record
+            const backupFields = [
+                emp.position,
+                emp.jobTitle,
+                emp.role,
+                emp.jobDetails?.position,
+                emp.jobDetails?.role,
+            ];
+            for (const b of backupFields) {
+                if (typeof b === "string" && b.trim() && !isHexObjectId(b.trim())) {
+                    return b.trim();
+                }
+            }
+
+            return "Team Member";
+        },
+        [designationMap, desigResolving, lookupsLoaded]
+    );
 
     const departments = useMemo(() => {
         const set = new Set();
@@ -281,14 +424,11 @@ export default function EmployeesPage() {
             const d = resolveDepartmentName(emp);
             if (d && d !== "General") set.add(d);
         });
-        departmentsList.forEach((d) => {
-            const name = d.name || d.title;
-            if (name) set.add(name);
-        });
+        departmentMap.forEach((name) => set.add(name));
         return Array.from(set);
-    }, [employees, departmentsList]);
+    }, [employees, departmentMap, resolveDepartmentName]);
 
-    // Robust status normalizer
+    // Status normalizer
     const getNormalizedStatus = (emp) => {
         const empStatus = String(emp.employeeStatus || "").toLowerCase();
         const status = String(emp.status || "").toLowerCase();
@@ -321,13 +461,13 @@ export default function EmployeesPage() {
 
             const normalizedStatus = getNormalizedStatus(emp);
             const matchesStatus =
-                statusFilter === "all" || normalizedStatus === statusFilter.toLowerCase();
+                statusFilter === "all" ||
+                normalizedStatus === statusFilter.toLowerCase();
 
             return matchesDept && matchesStatus;
         });
-    }, [employees, departmentFilter, statusFilter]);
+    }, [employees, departmentFilter, statusFilter, resolveDepartmentName]);
 
-    // Metric Counts
     const activeCount = useMemo(
         () => employees.filter((e) => getNormalizedStatus(e) === "active").length,
         [employees]
@@ -343,6 +483,80 @@ export default function EmployeesPage() {
         [employees]
     );
 
+    const handleStatusChange = async (employeeId, newStatus, e) => {
+        e.stopPropagation();
+        setActiveRowStatusDropdown(null);
+
+        const isExit = newStatus.toLowerCase() === "exit";
+        const exitDateValue = isExit ? new Date().toISOString() : null;
+        const formattedStatus = isExit
+            ? "Exit"
+            : newStatus.charAt(0).toUpperCase() + newStatus.slice(1).toLowerCase();
+
+        setEmployees((prev) =>
+            prev.map((emp) =>
+                emp._id === employeeId
+                    ? {
+                        ...emp,
+                        status: formattedStatus,
+                        employeeStatus: formattedStatus,
+                        isActive: !isExit && formattedStatus !== "Inactive",
+                        isExited: isExit,
+                        exitDate: exitDateValue || emp.exitDate,
+                    }
+                    : emp
+            )
+        );
+
+        const payload = {
+            status: formattedStatus,
+            employeeStatus: formattedStatus,
+            isActive: !isExit && formattedStatus !== "Inactive",
+            isExited: isExit,
+            exitDate: exitDateValue,
+            exitReason: isExit ? "Administrative separation update" : undefined,
+        };
+
+        try {
+            if (isExit) {
+                try {
+                    await api.put(`/employees/${employeeId}/exit`, payload);
+                } catch {
+                    await api.put(`/employees/${employeeId}`, payload);
+                }
+            } else {
+                await api.put(`/employees/${employeeId}`, payload);
+            }
+            toast.success(`Employee marked as ${formattedStatus}`);
+        } catch (err) {
+            console.error("Status update error:", err);
+            toast.error("Failed to update status on server.");
+            fetchEmployees(search);
+        }
+    };
+
+    const handleDeleteEmployee = async (employeeId, e) => {
+        e.stopPropagation();
+        setActiveRowActionDropdown(null);
+
+        if (!window.confirm("Are you sure you want to permanently delete this employee record?")) {
+            return;
+        }
+
+        setDeletingId(employeeId);
+        try {
+            setEmployees((prev) => prev.filter((emp) => emp._id !== employeeId));
+            await api.delete(`/employees/${employeeId}`);
+            toast.success("Employee record deleted permanently.");
+        } catch (err) {
+            console.error("Failed to delete employee:", err);
+            toast.error("Failed to delete employee record.");
+            fetchEmployees(search);
+        } finally {
+            setDeletingId(null);
+        }
+    };
+
     const handleExportCSV = () => {
         const headers =
             "Employee ID,Name,Email,Phone,Department,Designation,Status,Joining Date\n";
@@ -356,9 +570,7 @@ export default function EmployeesPage() {
             })
             .join("\n");
 
-        const blob = new Blob([headers + rows], {
-            type: "text/csv;charset=utf-8;",
-        });
+        const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -375,21 +587,9 @@ export default function EmployeesPage() {
     ];
 
     const rowStatusChoices = [
-        {
-            value: "active",
-            label: "Active",
-            color: "bg-emerald-500",
-        },
-        {
-            value: "inactive",
-            label: "Inactive",
-            color: "bg-amber-500",
-        },
-        {
-            value: "exit",
-            label: "Exited",
-            color: "bg-rose-500",
-        },
+        { value: "active", label: "Active", color: "bg-emerald-500" },
+        { value: "inactive", label: "Inactive", color: "bg-amber-500" },
+        { value: "exit", label: "Exited", color: "bg-rose-500" },
     ];
 
     const getStatusTheme = (statusStr) => {
@@ -455,7 +655,7 @@ export default function EmployeesPage() {
                 </div>
             </div>
 
-            {/* Metric Cards Grid */}
+            {/* Metrics */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex items-center justify-between">
                     <div>
@@ -569,7 +769,7 @@ export default function EmployeesPage() {
                         </button>
 
                         <div
-                            className={`absolute left-0 right-0 mt-2 z-50 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl shadow-slate-900/10 py-1.5 max-h-60 overflow-y-auto transition-all duration-200 origin-top ${deptOpen
+                            className={`absolute left-0 right-0 mt-2 z-50 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl py-1.5 max-h-60 overflow-y-auto transition-all duration-200 origin-top ${deptOpen
                                 ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
                                 : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
                                 }`}
@@ -638,7 +838,7 @@ export default function EmployeesPage() {
                         </button>
 
                         <div
-                            className={`absolute left-0 right-0 mt-2 z-50 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl shadow-slate-900/10 py-1.5 transition-all duration-200 origin-top ${statusOpen
+                            className={`absolute left-0 right-0 mt-2 z-50 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-xl py-1.5 transition-all duration-200 origin-top ${statusOpen
                                 ? "opacity-100 scale-100 translate-y-0 pointer-events-auto"
                                 : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
                                 }`}
@@ -836,7 +1036,7 @@ export default function EmployeesPage() {
                                                 key={row._id}
                                                 className="group hover:bg-slate-50/70 transition-colors"
                                             >
-                                                {/* Employee Info + Avatar + ID */}
+                                                {/* Employee Info */}
                                                 <td className="py-3.5 sm:py-4 px-5 sm:px-6">
                                                     <div
                                                         onClick={() =>
@@ -877,7 +1077,7 @@ export default function EmployeesPage() {
                                                     </div>
                                                 </td>
 
-                                                {/* Resolved Department Name */}
+                                                {/* Department */}
                                                 <td className="py-3.5 sm:py-4 px-4">
                                                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200/80 px-2.5 py-1 rounded-xl shadow-2xs">
                                                         <Building2
@@ -890,7 +1090,7 @@ export default function EmployeesPage() {
                                                     </span>
                                                 </td>
 
-                                                {/* Resolved Designation Title */}
+                                                {/* Designation */}
                                                 <td className="py-3.5 sm:py-4 px-4">
                                                     <p className="text-xs font-bold text-slate-800 truncate max-w-[160px]">
                                                         {desigName}
@@ -900,7 +1100,7 @@ export default function EmployeesPage() {
                                                     </p>
                                                 </td>
 
-                                                {/* Status Dropdown (Includes Inactive, Active, Exited) */}
+                                                {/* Status */}
                                                 <td className="py-3.5 sm:py-4 px-4 relative">
                                                     <div className="relative row-status-dropdown-container inline-block">
                                                         <button
@@ -964,7 +1164,7 @@ export default function EmployeesPage() {
                                                     )}
                                                 </td>
 
-                                                {/* Action Menu */}
+                                                {/* Actions */}
                                                 <td className="py-3.5 sm:py-4 px-5 sm:px-6 text-right relative">
                                                     <div className="relative row-action-dropdown-container inline-block">
                                                         <button

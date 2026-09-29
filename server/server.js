@@ -38,7 +38,7 @@ const biometricRoutes = require("./routes/biometricRoutes");
 const branchRoutes = require('./routes/branchRoutes');
 const orgChartRoutes = require('./routes/orgChartRoutes');
 const holidayRoutes = require("./routes/holidayRoutes");
-
+const designationRoutes = require("./routes/designationRoutes");
 
 const app = express();
 connectDB();
@@ -70,7 +70,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.get("/api/health", (req, res) => res.json({ status: "OK" }));
 
 
-
+app.use("/api/designations", designationRoutes);
 app.use("/api/holiday", holidayRoutes);
 app.use('/api/organization/chart', orgChartRoutes);
 app.use('/api/organization/branches', branchRoutes);

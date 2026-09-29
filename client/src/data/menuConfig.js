@@ -66,7 +66,7 @@ export const menuConfig = [
             { label: "Employee ID Cards", href: "/employees/id-cards" },
             { label: "Emergency Contacts", href: "/employees/emergency-contacts" },
             { label: "Employee History", href: "/employees/history" },
-            { label: "Exit Employees", href: "/employees/exit" },
+            { label: "Exited Employees", href: "/employees/exit" },
         ],
     },
     {

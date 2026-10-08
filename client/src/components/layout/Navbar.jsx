@@ -200,14 +200,14 @@ export default function Navbar() {
                                     <User size={15} />
                                     <span>My Profile</span>
                                 </Link>
-                                <Link
+                                {/* <Link
                                     href="/settings/general"
                                     onClick={() => setProfileOpen(false)}
                                     className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-600 hover:text-indigo-600 hover:bg-slate-50 rounded-xl transition-colors duration-150"
                                 >
                                     <Settings size={15} />
                                     <span>Account Settings</span>
-                                </Link>
+                                </Link> */}
                             </div>
 
                             <div className="p-1 border-t-2 border-slate-100">

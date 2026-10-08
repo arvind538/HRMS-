@@ -24,16 +24,16 @@ function AccessDeniedScreen({ role, router }) {
         <ShieldAlert className="w-8 h-8 text-rose-500" />
       </div>
       <div className="space-y-1">
-        <h2 className="text-lg font-bold text-slate-900 tracking-tight">Access Denied</h2>
+        <h2 className="text-lg font-bold text-slate-900 tracking-tight">Access Restricted</h2>
         <p className="text-xs sm:text-sm font-medium text-slate-500 max-w-xs">
-          Your role ({role || "employee"}) does not have permission to access the monthly attendance register.
+          Your role ({role || "employee"}) has restricted view access.
         </p>
       </div>
 
       <button
         type="button"
         onClick={() => router.push("/dashboard")}
-        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-xs transition-all duration-200 hover:shadow-md active:scale-95 cursor-pointer"
+        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-xs transition-all duration-200 cursor-pointer"
       >
         Back to Dashboard
       </button>
@@ -54,7 +54,7 @@ export default function MonthlyAttendance() {
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-  // Safe normalized role extraction (string, nested object, or array)
+  // Safe normalized role extraction
   const currentRole = useMemo(() => {
     if (!user) return null;
     const rawRole = user.role || user.userRole || user.type;
@@ -76,27 +76,33 @@ export default function MonthlyAttendance() {
       setLoading(true);
       setErrorMsg(null);
 
-      const { data } = await api.get("/attendance", {
-        params: { month: selectedMonth, year: selectedYear },
-      });
+      const params = { month: selectedMonth, year: selectedYear };
+
+      // Agar regular employee hai toh backend me bhi employeeId bhej sakein (optional agar backend support kare)
+      if (!isPrivileged && user?._id) {
+        params.employeeId = user._id;
+      }
+
+      const { data } = await api.get("/attendance", { params });
 
       const records = Array.isArray(data) ? data : (data?.data || data?.records || []);
       const employeeMap = {};
 
       records.forEach((rec) => {
         const empObj = rec.employee && typeof rec.employee === "object" ? rec.employee : null;
-        const empId = empObj?._id || empObj?.id || (typeof rec.employee === "string" ? rec.employee : null);
+        const empId = empObj?._id || empObj?.id || (typeof rec.employee === "string" ? rec.employee : null) || user?._id;
         if (!empId) return;
 
         if (!employeeMap[empId]) {
           const resolvedCode = empObj?.employeeId || empObj?.empId || empObj?.code || (typeof empId === 'string' ? empId.slice(-6) : "—");
 
           employeeMap[empId] = {
-            employee: empObj ? { ...empObj, employeeId: resolvedCode } : { _id: empId, name: "Staff Member", employeeId: resolvedCode },
+            employee: empObj ? { ...empObj, employeeId: resolvedCode } : { _id: empId, name: user?.name || "Staff Member", employeeId: resolvedCode },
             days: {},
             totalPresent: 0,
             totalLate: 0,
             totalAbsent: 0,
+            totalLeave: 0,
           };
         }
 
@@ -107,12 +113,12 @@ export default function MonthlyAttendance() {
 
         if (status === "present" || status === "half-day" || status === "half day") {
           employeeMap[empId].totalPresent += 1;
-        }
-        if (rec.isLate || status === "late") {
+        } else if (status === "late") {
           employeeMap[empId].totalLate += 1;
-        }
-        if (status === "absent") {
+        } else if (status === "absent") {
           employeeMap[empId].totalAbsent += 1;
+        } else if (status === "leave" || status === "on-leave") {
+          employeeMap[empId].totalLeave += 1;
         }
       });
 
@@ -122,24 +128,20 @@ export default function MonthlyAttendance() {
       if (err.response?.status === 401) {
         setErrorMsg("Session expired. Please log in again.");
       } else if (err.response?.status === 403) {
-        setErrorMsg("Your manager/staff profile is not authorized to view this data on the backend.");
-      } else if (!err.response) {
-        setErrorMsg("Unable to reach backend server. Please check your network or server status.");
+        setErrorMsg("You are not authorized to view this data.");
       } else {
         setErrorMsg(err.response?.data?.message || "Failed to fetch attendance data.");
       }
     } finally {
       setLoading(false);
     }
-  }, [selectedMonth, selectedYear]);
+  }, [selectedMonth, selectedYear, isPrivileged, user]);
 
   useEffect(() => {
-    if (roleChecked && isPrivileged) {
+    if (roleChecked && user) {
       fetchMonthlyData();
-    } else if (roleChecked && !isPrivileged) {
-      setLoading(false);
     }
-  }, [roleChecked, isPrivileged, fetchMonthlyData]);
+  }, [roleChecked, user, fetchMonthlyData]);
 
   const handlePrevMonth = () => {
     if (selectedMonth === 1) {
@@ -167,33 +169,56 @@ export default function MonthlyAttendance() {
   const getDayStatusBadge = (status, isWeekend) => {
     if (!status) {
       return isWeekend
-        ? <span className="inline-block w-5 h-5 leading-5 text-[10px] font-bold text-slate-400 bg-slate-100 rounded-md">WO</span>
+        ? <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-slate-400 bg-slate-100 rounded-md text-center">WO</span>
         : <span className="text-[10px] text-slate-300">—</span>;
     }
     const st = status.toLowerCase();
     switch (st) {
       case 'present':
-        return <span className="inline-block w-5 h-5 leading-5 text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-md shadow-2xs" title="Present">P</span>;
+        return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-md text-center" title="Present">P</span>;
       case 'late':
-        return <span className="inline-block w-5 h-5 leading-5 text-[10px] font-bold text-amber-700 bg-amber-100 rounded-md shadow-2xs" title="Late">L</span>;
+        return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-amber-700 bg-amber-100 rounded-md text-center" title="Late">L</span>;
       case 'absent':
-        return <span className="inline-block w-5 h-5 leading-5 text-[10px] font-bold text-rose-700 bg-rose-100 rounded-md shadow-2xs" title="Absent">A</span>;
+        return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-rose-700 bg-rose-100 rounded-md text-center" title="Absent">A</span>;
       case 'half-day':
       case 'half day':
-        return <span className="inline-block w-5 h-5 leading-5 text-[10px] font-bold text-indigo-700 bg-indigo-100 rounded-md shadow-2xs" title="Half Day">HD</span>;
+        return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-indigo-700 bg-indigo-100 rounded-md text-center" title="Half Day">HD</span>;
+      case 'leave':
       case 'on-leave':
-        return <span className="inline-block w-5 h-5 leading-5 text-[10px] font-bold text-sky-700 bg-sky-100 rounded-md shadow-2xs" title="On Leave">H</span>;
+        return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-sky-700 bg-sky-100 rounded-md text-center" title="On Leave">L</span>;
       default:
         return <span className="text-[10px] text-slate-300">—</span>;
     }
   };
 
-  const visibleList = groupedData.filter((item) => {
+  // STRICT FILTER: Agar employee login hai toh sirf usi ka record dikhega, dusro ka nahi!
+  const visibleList = useMemo(() => {
+    if (!isPrivileged) {
+      // Current logged-in user ki ID match karne wala record hi filter karein
+      return groupedData.filter((item) => {
+        const itemEmpId = item.employee?._id || item.employee?.id;
+        return itemEmpId === user?._id || (item.employee?.name && user?.name && item.employee.name.toLowerCase() === user.name.toLowerCase());
+      });
+    }
+
+    // Admin ke liye search term filter kaam karega
     const q = searchTerm.toLowerCase();
-    const name = (item.employee?.name || '').toLowerCase();
-    const empCode = (item.employee?.employeeId || '').toLowerCase();
-    return name.includes(q) || empCode.includes(q);
-  });
+    return groupedData.filter((item) => {
+      const name = (item.employee?.name || '').toLowerCase();
+      const empCode = (item.employee?.employeeId || '').toLowerCase();
+      return name.includes(q) || empCode.includes(q);
+    });
+  }, [groupedData, searchTerm, isPrivileged, user]);
+
+  const summaryTotals = useMemo(() => {
+    let present = 0, absent = 0, leave = 0;
+    visibleList.forEach(item => {
+      present += item.totalPresent;
+      absent += item.totalAbsent;
+      leave += (item.totalLeave || 0);
+    });
+    return { present, absent, leave, employees: visibleList.length };
+  }, [visibleList]);
 
   if (!roleChecked) {
     return (
@@ -206,10 +231,6 @@ export default function MonthlyAttendance() {
     );
   }
 
-  if (!isPrivileged) {
-    return <AccessDeniedScreen role={currentRole} router={router} />;
-  }
-
   return (
     <div className="w-full space-y-5 animate-in fade-in duration-300 pb-12 font-sans">
 
@@ -217,12 +238,12 @@ export default function MonthlyAttendance() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Monthly Attendance Sheet</h1>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Daily Attendance Record</h1>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 uppercase tracking-wider">
-              {currentRole}
+              {currentRole || "employee"}
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">Comprehensive monthly presence sheet, late marks, and leaves.</p>
+          <p className="text-xs text-slate-500 mt-0.5">Comprehensive monthly presence sheet, punch records, and logs.</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -251,19 +272,24 @@ export default function MonthlyAttendance() {
 
       {/* Filter and Legend Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-          <input
-            type="text"
-            placeholder="Search employee by name or ID..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 transition"
-          />
-        </div>
+        {isPrivileged ? (
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
+            <input
+              type="text"
+              placeholder="Filter employee name or ID..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 transition"
+            />
+          </div>
+        ) : (
+          <div className="text-xs font-semibold text-slate-600">
+            Showing personal attendance record for: <span className="text-indigo-600 font-bold">{user?.name}</span>
+          </div>
+        )}
 
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <span className="text-[11px] font-semibold text-slate-400">Legend:</span>
+        <div className="flex flex-wrap items-center gap-4 text-xs">
           <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium">
             <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full"></span> Present (P)
           </span>
@@ -274,7 +300,7 @@ export default function MonthlyAttendance() {
             <span className="w-2.5 h-2.5 bg-rose-500 rounded-full"></span> Absent (A)
           </span>
           <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium">
-            <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full"></span> Half Day (HD)
+            <span className="w-2.5 h-2.5 bg-sky-500 rounded-full"></span> Leave (L)
           </span>
         </div>
       </div>
@@ -292,8 +318,8 @@ export default function MonthlyAttendance() {
           <table className="w-full text-left text-xs text-slate-600 border-collapse">
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-700 uppercase">
               <tr>
-                <th className="px-4 py-3.5 sticky left-0 bg-slate-50 z-20 border-r border-slate-200 min-w-[180px]">
-                  Employee
+                <th className="px-4 py-3.5 sticky left-0 bg-slate-50 z-20 border-r border-slate-200 min-w-[200px]">
+                  NAME OF ATTENDEE
                 </th>
                 {daysArray.map((day) => {
                   const dateObj = new Date(selectedYear, selectedMonth - 1, day);
@@ -301,50 +327,43 @@ export default function MonthlyAttendance() {
                   return (
                     <th
                       key={day}
-                      className={`px-1.5 py-2 text-center min-w-[32px] border-r border-slate-100 ${isWeekend ? 'bg-slate-100/70 text-slate-400' : ''}`}
+                      className={`px-1 py-2 text-center min-w-[30px] border-r border-slate-100 ${isWeekend ? 'bg-slate-100/70 text-slate-400' : ''}`}
                     >
                       <div>{day}</div>
-                      <div className="text-[9px] font-normal text-slate-400">
-                        {dateObj.toLocaleDateString('en-US', { weekday: 'narrow' })}
-                      </div>
                     </th>
                   );
                 })}
-                <th className="px-3 py-3.5 text-center bg-emerald-50 text-emerald-800 border-l border-slate-200 min-w-[45px]">P</th>
-                <th className="px-3 py-3.5 text-center bg-amber-50 text-amber-800 min-w-[45px]">L</th>
-                <th className="px-3 py-3.5 text-center bg-rose-50 text-rose-800 min-w-[45px]">A</th>
+                <th className="px-3 py-3.5 text-center bg-indigo-50/50 text-indigo-800 border-l border-slate-200 min-w-[50px]">TOTAL</th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={daysInMonth + 4} className="py-16 text-center text-slate-400">
+                  <td colSpan={daysInMonth + 2} className="py-16 text-center text-slate-400">
                     <Loader2 className="w-7 h-7 animate-spin mx-auto text-indigo-600 mb-2" />
-                    Fetching monthly records from backend...
+                    Fetching real attendance records from backend...
                   </td>
                 </tr>
               ) : visibleList.length === 0 ? (
                 <tr>
-                  <td colSpan={daysInMonth + 4} className="py-14 text-center text-slate-400 text-xs">
-                    No monthly records found for {monthNames[selectedMonth - 1]} {selectedYear}.
+                  <td colSpan={daysInMonth + 2} className="py-14 text-center text-slate-400 text-xs">
+                    No attendance records found for {monthNames[selectedMonth - 1]} {selectedYear}.
                   </td>
                 </tr>
               ) : (
-                visibleList.map((item) => {
+                visibleList.map((item, index) => {
                   const empName = item.employee?.name || item.employee?.username || "Staff Member";
-                  const empId = item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?._id?.slice(-6) || "—";
+                  const empCode = item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?._id?.slice(-6) || "—";
 
                   return (
-                    <tr key={item.employee._id} className="hover:bg-indigo-50/40 transition-all duration-150 group">
+                    <tr key={item.employee._id || index} className="hover:bg-indigo-50/40 transition-all duration-150 group">
                       <td className="px-4 py-3 sticky left-0 bg-white group-hover:bg-indigo-50/40 z-10 border-r border-slate-200 transition-colors">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-[10px] shrink-0">
-                            {empName.charAt(0).toUpperCase()}
-                          </div>
+                          <span className="text-xs text-slate-400 font-medium">{index + 1}.</span>
                           <div className="overflow-hidden">
-                            <div className="font-semibold text-slate-900 truncate max-w-[130px]" title={empName}>{empName}</div>
-                            <div className="text-[10px] text-indigo-600 font-mono font-semibold">ID: {empId}</div>
+                            <div className="font-semibold text-slate-900 truncate max-w-[140px]" title={empName}>{empName}</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">{item.employee?.department || empCode}</div>
                           </div>
                         </div>
                       </td>
@@ -355,20 +374,14 @@ export default function MonthlyAttendance() {
                         const dayStatus = item.days[day];
 
                         return (
-                          <td key={day} className={`px-1 py-2 text-center border-r border-slate-100 ${isWeekend ? 'bg-slate-50/50' : ''}`}>
+                          <td key={day} className={`px-0.5 py-2 text-center border-r border-slate-100 ${isWeekend ? 'bg-slate-50/50' : ''}`}>
                             {getDayStatusBadge(dayStatus, isWeekend)}
                           </td>
                         );
                       })}
 
-                      <td className="px-2 py-2 text-center font-bold text-emerald-700 bg-emerald-50/30 border-l border-slate-200">
+                      <td className="px-2 py-2 text-center font-bold text-indigo-700 bg-indigo-50/30 border-l border-slate-200">
                         {item.totalPresent}
-                      </td>
-                      <td className="px-2 py-2 text-center font-bold text-amber-700 bg-amber-50/30">
-                        {item.totalLate}
-                      </td>
-                      <td className="px-2 py-2 text-center font-bold text-rose-700 bg-rose-50/30">
-                        {item.totalAbsent}
                       </td>
                     </tr>
                   );
@@ -376,6 +389,22 @@ export default function MonthlyAttendance() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Bottom Summary Badges Bar */}
+        <div className="p-4 bg-white border-t border-slate-200/80 flex flex-wrap items-center gap-3">
+          <span className="px-3.5 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100 shadow-2xs">
+            {summaryTotals.present} PRESENT
+          </span>
+          <span className="px-3.5 py-1.5 bg-rose-50 text-rose-700 rounded-xl text-xs font-bold border border-rose-100 shadow-2xs">
+            {summaryTotals.absent} ABSENT
+          </span>
+          <span className="px-3.5 py-1.5 bg-sky-50 text-sky-700 rounded-xl text-xs font-bold border border-sky-100 shadow-2xs">
+            {summaryTotals.leave} LEAVE
+          </span>
+          <span className="px-3.5 py-1.5 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold border border-indigo-100 shadow-2xs ml-auto">
+            {summaryTotals.employees} EMPLOYEES
+          </span>
         </div>
       </div>
 

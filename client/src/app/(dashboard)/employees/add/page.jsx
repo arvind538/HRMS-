@@ -1,43 +1,55 @@
 "use client";
 
-import { useEffect, useState, useRef, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
     User,
-    Mail,
-    Phone,
     Briefcase,
-    Building2,
-    Calendar,
-    IndianRupee,
     AlertCircle,
-    ArrowLeft,
-    UserPlus,
     Loader2,
     Save,
-    Hash,
-    BadgeCheck,
-    MapPin,
-    Clock,
-    ShieldAlert,
-    Camera,
     Upload,
     Landmark,
-    CreditCard,
-    GraduationCap,
     FileText,
-    KeyRound,
-    Droplet,
-    Heart,
     X,
+    CheckCircle2,
+    ChevronRight,
+    Camera,
+    Image as ImageIcon,
+    Trash2,
+    Users,
+    CalendarDays,
+    IndianRupee,
+    Building2,
+    Mail,
+    Phone,
+    BadgeCheck,
+    CreditCard,
+    MapPin,
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
 
+/* -------------------------------------------------------------------------- */
+/* CONSTANTS                                                                  */
+/* -------------------------------------------------------------------------- */
+
 const GENDER_OPTIONS = [
-    { value: "male", label: "Male" },
-    { value: "female", label: "Female" },
-    { value: "other", label: "Other" },
+    {
+        value: "male",
+        label: "Male",
+        sub: "Identify as male",
+    },
+    {
+        value: "female",
+        label: "Female",
+        sub: "Identify as female",
+    },
+    {
+        value: "other",
+        label: "Other",
+        sub: "Prefer not to say",
+    },
 ];
 
 const EMPLOYMENT_TYPES = [
@@ -47,1196 +59,2658 @@ const EMPLOYMENT_TYPES = [
     "Probationary",
     "Internship",
     "Remote",
+    "Hybrid",
+    "Freelance",
 ];
 
-const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+const EMPLOYEE_STATUS_OPTIONS = [
+    "Active",
+    "Probation",
+    "Notice Period",
+    "On Leave",
+    "Permanent",
+    "Freelancer",
+    "Inactive",
+];
 
-const MARITAL_STATUS_OPTIONS = ["Single", "Married", "Divorced", "Widowed"];
+const REPORTING_MANAGER_OPTIONS = [
+    "Sanjay Sir",
+    "Nitesh Sir",
+    "Vimal Sir",
+];
 
-const EMPLOYEE_STATUS_OPTIONS = ["Active", "Probation", "Notice Period", "On Leave"];
-
-const ROLE_OPTIONS = ["Employee", "Manager", "HR", "Admin"];
-
-const PAYMENT_MODES = ["Bank Transfer", "Cheque", "Cash", "UPI"];
-
-const ID_PROOF_TYPES = [
-    "National ID / Unique ID Card",
-    "Passport",
+const NATIONAL_ID_OPTIONS = [
+    "Aadhaar Card",
+    "PAN Card",
     "Voter ID",
     "Driving License",
     "Other Official ID",
 ];
 
-// Reusable Section Header
-function SectionHeader({ icon: Icon, index, title }) {
-    return (
-        <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
-            <Icon size={16} className="text-indigo-600" />
-            <h2 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-900">
-                {index}. {title}
-            </h2>
-        </div>
-    );
-}
+const DESIGNATION_PRESETS = [
+    "Software Engineer",
+    "Senior Software Engineer",
+    "Frontend Developer",
+    "Backend Developer",
+    "Full Stack Developer",
+    "UI/UX Designer",
+    "Product Designer",
+    "Project Manager",
+    "Product Manager",
+    "Team Lead",
+    "HR Executive",
+    "HR Manager",
+    "Accountant",
+    "Finance Executive",
+    "Sales Executive",
+    "Business Development Executive",
+    "Marketing Executive",
+    "Operations Executive",
+    "Customer Support Executive",
+    "IT Support Executive",
+    "Office Administrator",
+    "Intern",
+];
 
-// Reusable Field Container
-function Field({ icon: Icon, label, required, children }) {
-    return (
-        <div className="space-y-1.5">
-            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                {Icon && <Icon size={13} className="text-indigo-600 shrink-0" />}
-                {label}
-                {required && <span className="text-rose-500">*</span>}
-            </label>
-            {children}
-        </div>
-    );
-}
+const DEPARTMENT_PRESETS = [
+    "Human Resources",
+    "Engineering",
+    "Information Technology",
+    "Finance",
+    "Accounts",
+    "Sales",
+    "Marketing",
+    "Operations",
+    "Administration",
+    "Customer Support",
+    "Product",
+    "Design",
+    "Legal",
+    "Procurement",
+    "Quality Assurance",
+];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 const inputClass =
-    "w-full px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-slate-200 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/10 outline-none transition-all shadow-2xs";
+    "w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10";
+
+const errorInputClass =
+    "w-full px-4 py-3 bg-white border border-red-400 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-red-500 focus:ring-4 focus:ring-red-500/10";
+
+/* -------------------------------------------------------------------------- */
+/* HELPERS                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const normalizeText = (value = "") =>
+    String(value)
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+
+const normalizeEmail = (value = "") =>
+    String(value).trim().toLowerCase();
+
+const normalizePhone = (value = "") =>
+    String(value).replace(/\D/g, "");
+
+const getEmployeeName = (employee) => {
+    if (!employee) return "";
+
+    return (
+        employee.name ||
+        `${employee.firstName || ""} ${employee.lastName || ""}`.trim()
+    );
+};
+
+const getLookupId = (item) => {
+    if (!item) return "";
+
+    if (typeof item === "object") {
+        return item._id || item.id || "";
+    }
+
+    return item;
+};
+
+const getLookupLabel = (item) => {
+    if (!item) return "";
+
+    if (typeof item === "object") {
+        return (
+            item.title ||
+            item.name ||
+            item.label ||
+            item.designation ||
+            item.department ||
+            ""
+        );
+    }
+
+    return item;
+};
+
+/* -------------------------------------------------------------------------- */
+/* SMALL COMPONENTS                                                           */
+/* -------------------------------------------------------------------------- */
+
+function FieldError({ children }) {
+    if (!children) return null;
+
+    return (
+        <div className="flex items-center gap-1.5 mt-1.5 text-[11px] font-semibold text-red-600">
+            <AlertCircle size={13} />
+            <span>{children}</span>
+        </div>
+    );
+}
+
+function SectionTitle({ title, description }) {
+    return (
+        <div>
+            <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+            <p className="text-xs text-slate-500 mt-1">{description}</p>
+        </div>
+    );
+}
+
+function UploadCard({
+    title,
+    subtitle,
+    fileName,
+    preview,
+    onClick,
+    onRemove,
+    acceptText = "JPG, PNG, WEBP, PDF · up to 10MB",
+}) {
+    return (
+        <div>
+            <div
+                onClick={onClick}
+                className={`group relative min-h-[190px] border-2 border-dashed rounded-2xl cursor-pointer transition-all overflow-hidden ${fileName
+                    ? "border-emerald-300 bg-emerald-50/40"
+                    : "border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50/30"
+                    }`}
+            >
+                {preview ? (
+                    <div className="absolute inset-0">
+                        <img
+                            src={preview}
+                            alt={title}
+                            className="w-full h-full object-contain p-4"
+                        />
+
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-900/70 to-transparent px-4 pt-10 pb-3">
+                            <p className="text-xs font-semibold text-white truncate">
+                                {fileName}
+                            </p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="h-full min-h-[190px] flex flex-col items-center justify-center p-6 text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3">
+                            <Upload size={21} />
+                        </div>
+
+                        <p className="text-xs font-bold text-slate-700">
+                            {title}
+                        </p>
+
+                        <p className="text-[11px] text-slate-400 mt-1">
+                            {subtitle}
+                        </p>
+
+                        <p className="text-[10px] text-slate-400 mt-3">
+                            {acceptText}
+                        </p>
+                    </div>
+                )}
+
+                {fileName && (
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onRemove?.();
+                        }}
+                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/95 border border-slate-200 text-red-500 flex items-center justify-center shadow-sm hover:bg-red-50"
+                    >
+                        <Trash2 size={14} />
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function SummaryCard({
+    icon: Icon,
+    title,
+    status,
+    active,
+    children,
+}) {
+    return (
+        <div
+            className={`rounded-2xl border p-4 transition-all ${active
+                ? "border-indigo-500 bg-indigo-50/40 shadow-sm"
+                : "border-slate-200 bg-white"
+                }`}
+        >
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                        <Icon size={15} />
+                    </div>
+
+                    <span className="text-xs font-bold text-slate-900">
+                        {title}
+                    </span>
+                </div>
+
+                <span
+                    className={`text-[10px] font-bold px-2 py-1 rounded-full ${status === "Done"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-700"
+                        }`}
+                >
+                    {status}
+                </span>
+            </div>
+
+            <div className="space-y-2">{children}</div>
+        </div>
+    );
+}
+
+function SummaryRow({ label, value }) {
+    return (
+        <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-slate-400 shrink-0">{label}</span>
+            <span className="font-semibold text-slate-700 text-right truncate max-w-[160px]">
+                {value || "—"}
+            </span>
+        </div>
+    );
+}
+
+/* -------------------------------------------------------------------------- */
+/* MAIN                                                                       */
+/* -------------------------------------------------------------------------- */
 
 function EmployeeFormContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
+
     const editId = searchParams.get("id");
-    const fileInputRef = useRef(null);
-    const resumeInputRef = useRef(null);
-    const idProofInputRef = useRef(null);
+
+    const frontIdRef = useRef(null);
+    const backIdRef = useRef(null);
+    const passportPhotoRef = useRef(null);
+
+    const [currentStep, setCurrentStep] = useState(1);
 
     const [form, setForm] = useState({
-        // Personal
         employeeId: "",
+
+        // Personal
+        firstName: "",
+        lastName: "",
         name: "",
         email: "",
         phone: "",
         gender: "male",
-        dateOfBirth: "",
-        bloodGroup: "",
-        maritalStatus: "",
-        avatar: "",
+        timeZone: "Asia/Kolkata (GMT+5:30)",
 
-        // Job / Org
+        // Profile photo
+        avatar: "",
+        profilePhotoFileName: "",
+        profilePhotoData: "",
+
+        // Job
         designation: "",
+        designationOther: "",
         department: "",
-        branch: "",
+        departmentOther: "",
         employmentType: "Full-time",
         reportingManager: "",
+        reportingManagerOther: "",
         dateOfJoining: "",
         employeeStatus: "Active",
-
-        // Salary & Bank
         salary: "",
+
+        // Documents
+        nationalIdType: "Aadhaar Card",
+        nationalIdOther: "",
+        nationalId: "",
+
+        nationalIdFrontFileName: "",
+        nationalIdFrontFileData: "",
+
+        nationalIdBackFileName: "",
+        nationalIdBackFileData: "",
+
+        passportPhotoFileName: "",
+        passportPhotoData: "",
+
+        // Banking
+        accountName: "",
         bankName: "",
+        branchName: "",
         accountNumber: "",
         ifscCode: "",
-        panNumber: "",
-        uanNumber: "",
-        paymentMode: "Bank Transfer",
-
-        // Emergency Contact
-        emergencyContactName: "",
-        emergencyContactRelation: "",
-        emergencyContactPhone: "",
-
         // Address
         address: "",
         city: "",
         state: "",
         pincode: "",
 
-        // Education & Experience
-        highestQualification: "",
-        instituteName: "",
-        yearOfPassing: "",
-        previousCompany: "",
-        previousDesignation: "",
-        previousExperienceYears: "",
-
-        // Identity Document & Verification
-        idProofType: "National ID / Unique ID Card",
-        idProofNumber: "",
-        resumeFileName: "",
-        resumeFileData: "",
-        idProofFileName: "",
-        idProofFileData: "",
-
-        // Account & Access
-        loginEmail: "",
         role: "Employee",
     });
 
     const [departmentsList, setDepartmentsList] = useState([]);
     const [designationsList, setDesignationsList] = useState([]);
-    const [branchesList, setBranchesList] = useState([]);
     const [managersList, setManagersList] = useState([]);
+    const [employeesList, setEmployeesList] = useState([]);
 
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(false);
 
-    // 1. Fetch lookup options
+    const [duplicateErrors, setDuplicateErrors] = useState({
+        name: "",
+        email: "",
+        phone: "",
+    });
+
+    /* ------------------------------------------------------------------------ */
+    /* LOOKUPS                                                                  */
+    /* ------------------------------------------------------------------------ */
+
     useEffect(() => {
-        async function loadSelectOptions() {
+        async function loadLookups() {
             try {
-                const [deptRes, desigRes, branchRes, mgrRes] = await Promise.allSettled([
+                const results = await Promise.allSettled([
                     api.get("/organization/departments?status=active"),
                     api.get("/organization/designations?status=active"),
-                    api.get("/organization/branches?status=active"),
-                    api.get("/employees?status=active"),
+                    api.get("/employees"),
                 ]);
+
+                const [deptRes, desigRes, employeesRes] = results;
 
                 if (deptRes.status === "fulfilled") {
                     const raw = deptRes.value?.data;
-                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.departments || [];
-                    setDepartmentsList(list.filter((d) => d.status === undefined || d.status === "active" || d.isActive === true));
+
+                    const list = Array.isArray(raw)
+                        ? raw
+                        : raw?.data ||
+                        raw?.departments ||
+                        [];
+
+                    setDepartmentsList(list);
                 }
 
                 if (desigRes.status === "fulfilled") {
                     const raw = desigRes.value?.data;
-                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.designations || [];
-                    setDesignationsList(list.filter((d) => d.status === undefined || d.status === "active" || d.isActive === true));
+
+                    const list = Array.isArray(raw)
+                        ? raw
+                        : raw?.data ||
+                        raw?.designations ||
+                        [];
+
+                    setDesignationsList(list);
                 }
 
-                if (branchRes.status === "fulfilled") {
-                    const raw = branchRes.value?.data;
-                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.branches || [];
-                    setBranchesList(list.filter((b) => b.status === undefined || b.status === "active" || b.isActive === true));
-                }
+                if (employeesRes.status === "fulfilled") {
+                    const raw = employeesRes.value?.data;
 
-                if (mgrRes.status === "fulfilled") {
-                    const raw = mgrRes.value?.data;
-                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.employees || [];
-                    const filtered = list.filter((emp) => (!editId || emp._id !== editId) && (emp.status === undefined || emp.status === "active"));
-                    setManagersList(filtered);
-                }
-            } catch (err) {
-                console.error("Failed to load organization dropdown parameters:", err);
-            }
-        }
+                    const list = Array.isArray(raw)
+                        ? raw
+                        : raw?.data ||
+                        raw?.employees ||
+                        [];
 
-        loadSelectOptions();
-    }, [editId]);
+                    setEmployeesList(list);
+                    setManagersList(list);
 
-    // 2. Load existing data in Edit Mode
-    useEffect(() => {
-        if (editId) {
-            setFetching(true);
-            api
-                .get(`/employees/${editId}`)
-                .then((res) => {
-                    const emp = res?.data?.employee || res?.data?.data || res?.data;
-                    if (emp) {
-                        const deptVal = emp.department?._id || (typeof emp.department === "string" ? emp.department : "");
-
-                        let mgrVal = "";
-                        if (emp.reportingManager && typeof emp.reportingManager === "object") {
-                            mgrVal = emp.reportingManager.name || `${emp.reportingManager.firstName || ""} ${emp.reportingManager.lastName || ""}`.trim();
-                        } else if (emp.reportingManager) {
-                            mgrVal = String(emp.reportingManager);
-                        }
-
-                        const desigVal = typeof emp.designation === "object" && emp.designation !== null
-                            ? emp.designation.title || emp.designation.name || emp.designation._id || ""
-                            : emp.designation || "";
-
-                        const branchVal = typeof emp.branch === "object" && emp.branch !== null
-                            ? emp.branch.name || emp.branch.location || ""
-                            : emp.branch || "";
+                    if (!editId) {
+                        const nextNum = list.length + 1;
 
                         setForm((prev) => ({
                             ...prev,
-                            employeeId: emp.employeeId || "",
-                            name: emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim(),
-                            email: emp.email || "",
-                            phone: emp.phone || "",
-                            gender: String(emp.gender || "male").toLowerCase(),
-                            dateOfBirth: emp.dateOfBirth || emp.dob ? (emp.dateOfBirth || emp.dob).split("T")[0] : "",
-                            bloodGroup: emp.bloodGroup || "",
-                            maritalStatus: emp.maritalStatus || "",
-                            avatar: emp.avatar || emp.photo || "",
-
-                            designation: desigVal,
-                            department: deptVal,
-                            branch: branchVal,
-                            employmentType: emp.employmentType || "Full-time",
-                            reportingManager: mgrVal,
-                            dateOfJoining: emp.dateOfJoining || emp.joiningDate ? (emp.dateOfJoining || emp.joiningDate).split("T")[0] : "",
-                            employeeStatus: emp.employeeStatus || "Active",
-
-                            salary: emp.salary ?? "",
-                            bankName: emp.bankDetails?.bankName || emp.bankName || "",
-                            accountNumber: emp.bankDetails?.accountNumber || emp.accountNumber || "",
-                            ifscCode: emp.bankDetails?.ifscCode || emp.ifscCode || "",
-                            panNumber: emp.panNumber || "",
-                            uanNumber: emp.uanNumber || "",
-                            paymentMode: emp.bankDetails?.paymentMode || "Bank Transfer",
-
-                            emergencyContactName: emp.emergencyContactName || emp.emergencyContact?.name || "",
-                            emergencyContactRelation: emp.emergencyContactRelation || emp.emergencyContact?.relation || "",
-                            emergencyContactPhone: emp.emergencyContactPhone || emp.emergencyContact?.phone || "",
-
-                            address: emp.address || emp.residentialAddress?.street || "",
-                            city: emp.city || emp.residentialAddress?.city || "",
-                            state: emp.state || emp.residentialAddress?.state || "",
-                            pincode: emp.pincode || emp.residentialAddress?.pincode || "",
-
-                            highestQualification: emp.education?.highestQualification || "",
-                            instituteName: emp.education?.instituteName || "",
-                            yearOfPassing: emp.education?.yearOfPassing || "",
-                            previousCompany: emp.experience?.previousCompany || "",
-                            previousDesignation: emp.experience?.previousDesignation || "",
-                            previousExperienceYears: emp.experience?.years || "",
-
-                            idProofType: emp.idProofType || "National ID / Unique ID Card",
-                            idProofNumber: emp.idProofNumber || "",
-                            resumeFileName: emp.documents?.resumeFileName || "",
-                            resumeFileData: emp.documents?.resumeFileData || emp.documents?.resumeUrl || "",
-                            idProofFileName: emp.documents?.idProofFileName || "",
-                            idProofFileData: emp.documents?.idProofFileData || emp.documents?.idProofUrl || "",
-
-                            loginEmail: emp.loginEmail || emp.email || "",
-                            role: emp.role || "Employee",
+                            employeeId: `EMP-${String(nextNum).padStart(3, "0")}`,
                         }));
                     }
-                })
-                .catch((err) => {
-                    console.error("Failed to load employee details:", err);
-                    setError("Failed to load employee record. Please refresh.");
-                })
-                .finally(() => setFetching(false));
+                }
+            } catch (err) {
+                console.error("Failed to load employee options", err);
+            }
         }
+
+        loadLookups();
     }, [editId]);
+
+    /* ------------------------------------------------------------------------ */
+    /* EDIT EMPLOYEE                                                            */
+    /* ------------------------------------------------------------------------ */
+
+    useEffect(() => {
+        if (!editId) return;
+
+        async function loadEmployee() {
+            try {
+                setFetching(true);
+
+                const res = await api.get(`/employees/${editId}`);
+
+                const emp =
+                    res?.data?.employee ||
+                    res?.data?.data ||
+                    res?.data;
+
+                if (!emp) return;
+
+                const fullName =
+                    emp.name ||
+                    `${emp.firstName || ""} ${emp.lastName || ""}`.trim();
+
+                const parts = fullName.split(" ");
+
+                const firstName =
+                    emp.firstName ||
+                    parts[0] ||
+                    "";
+
+                const lastName =
+                    emp.lastName ||
+                    parts.slice(1).join(" ") ||
+                    "";
+
+                const profilePhoto =
+                    emp.avatar ||
+                    emp.profilePhoto ||
+                    emp.profilePhotoData ||
+                    emp.photo ||
+                    "";
+
+                setForm((prev) => ({
+                    ...prev,
+
+                    employeeId:
+                        emp.employeeId ||
+                        `EMP-${String(editId).slice(-4)}`,
+
+                    firstName,
+                    lastName,
+                    name: fullName,
+
+                    email: emp.email || "",
+                    phone: emp.phone || "",
+
+                    gender:
+                        String(emp.gender || "male").toLowerCase(),
+
+                    avatar: profilePhoto,
+                    profilePhotoData: profilePhoto,
+
+                    profilePhotoFileName:
+                        emp.profilePhotoFileName || "",
+
+                    designation:
+                        typeof emp.designation === "object"
+                            ? emp.designation?._id
+                            : emp.designation || "",
+
+                    department:
+                        typeof emp.department === "object"
+                            ? emp.department?._id
+                            : emp.department || "",
+
+                    employmentType:
+                        emp.employmentType || "Full-time",
+
+                    reportingManager:
+                        typeof emp.reportingManager === "object"
+                            ? getEmployeeName(emp.reportingManager)
+                            : REPORTING_MANAGER_OPTIONS.includes(emp.reportingManager)
+                                ? emp.reportingManager
+                                : emp.reportingManager
+                                    ? "Other"
+                                    : "",
+
+                    reportingManagerOther:
+                        typeof emp.reportingManager === "object"
+                            ? ""
+                            : REPORTING_MANAGER_OPTIONS.includes(emp.reportingManager)
+                                ? ""
+                                : emp.reportingManager || "",
+
+                    employeeStatus:
+                        emp.employeeStatus || "Active",
+
+                    dateOfJoining:
+                        emp.dateOfJoining
+                            ? String(emp.dateOfJoining).split("T")[0]
+                            : "",
+
+                    salary: emp.salary ?? "",
+
+                    nationalIdType:
+                        emp.nationalIdType ||
+                        emp.documents?.nationalIdType ||
+                        "Aadhaar Card",
+
+                    nationalIdOther:
+                        emp.nationalIdOther ||
+                        emp.documents?.nationalIdOther ||
+                        "",
+
+                    nationalId:
+                        emp.nationalId ||
+                        emp.idProofNumber ||
+                        "",
+
+                    nationalIdFrontFileName:
+                        emp.documents?.nationalIdFrontFileName || "",
+
+                    nationalIdFrontFileData:
+                        emp.documents?.nationalIdFrontFileData || "",
+
+                    nationalIdBackFileName:
+                        emp.documents?.nationalIdBackFileName || "",
+
+                    nationalIdBackFileData:
+                        emp.documents?.nationalIdBackFileData || "",
+
+                    passportPhotoFileName:
+                        emp.documents?.passportPhotoFileName || "",
+
+                    passportPhotoData:
+                        emp.documents?.passportPhotoData ||
+                        profilePhoto ||
+                        "",
+
+                    accountName:
+                        emp.bankDetails?.accountName ||
+                        fullName,
+
+                    bankName:
+                        emp.bankDetails?.bankName || "",
+
+                    branchName:
+                        emp.bankDetails?.branchName || "",
+
+                    accountNumber:
+                        emp.bankDetails?.accountNumber || "",
+
+                    ifscCode:
+                        emp.bankDetails?.ifscCode || "",
+
+                    address:
+                        emp.address || "",
+
+                    city:
+                        emp.city || "",
+
+                    state:
+                        emp.state || "",
+
+                    pincode:
+                        emp.pincode || "",
+                }));
+            } catch (err) {
+                console.error(err);
+                setError("Failed to fetch employee record.");
+            } finally {
+                setFetching(false);
+            }
+        }
+
+        loadEmployee();
+    }, [editId]);
+
+    /* ------------------------------------------------------------------------ */
+    /* OPTIONS                                                                  */
+    /* ------------------------------------------------------------------------ */
+
+    const designationOptions = useMemo(() => {
+        const apiOptions = designationsList
+            .map((item) => ({
+                value: getLookupId(item),
+                label: getLookupLabel(item),
+            }))
+            .filter((item) => item.value && item.label);
+
+        const presetOptions = DESIGNATION_PRESETS.map((item) => ({
+            value: item,
+            label: item,
+        }));
+
+        const map = new Map();
+
+        [...apiOptions, ...presetOptions].forEach((item) => {
+            if (!map.has(item.value)) {
+                map.set(item.value, item);
+            }
+        });
+
+        return [...map.values()];
+    }, [designationsList]);
+
+    const departmentOptions = useMemo(() => {
+        const apiOptions = departmentsList
+            .map((item) => ({
+                value: getLookupId(item),
+                label: getLookupLabel(item),
+            }))
+            .filter((item) => item.value && item.label);
+
+        const presetOptions = DEPARTMENT_PRESETS.map((item) => ({
+            value: item,
+            label: item,
+        }));
+
+        const map = new Map();
+
+        [...apiOptions, ...presetOptions].forEach((item) => {
+            if (!map.has(item.value)) {
+                map.set(item.value, item);
+            }
+        });
+
+        return [...map.values()];
+    }, [departmentsList]);
+
+    const selectedDesignation = useMemo(() => {
+        const option = designationOptions.find(
+            (item) => item.value === form.designation
+        );
+
+        return (
+            option?.label ||
+            form.designationOther ||
+            form.designation ||
+            "—"
+        );
+    }, [
+        designationOptions,
+        form.designation,
+        form.designationOther,
+    ]);
+
+    const selectedDepartment = useMemo(() => {
+        const option = departmentOptions.find(
+            (item) => item.value === form.department
+        );
+
+        return (
+            option?.label ||
+            form.departmentOther ||
+            form.department ||
+            "—"
+        );
+    }, [
+        departmentOptions,
+        form.department,
+        form.departmentOther,
+    ]);
+
+    /* ------------------------------------------------------------------------ */
+    /* DUPLICATE CHECK                                                          */
+    /* ------------------------------------------------------------------------ */
+
+    const getDuplicateErrors = (candidate) => {
+        const errors = {
+            name: "",
+            email: "",
+            phone: "",
+        };
+
+        const candidateName = normalizeText(
+            candidate.name ||
+            `${candidate.firstName || ""} ${candidate.lastName || ""}`
+        );
+
+        const candidateEmail = normalizeEmail(candidate.email);
+
+        const candidatePhone = normalizePhone(candidate.phone);
+
+        if (!candidateName && !candidateEmail && !candidatePhone) {
+            return errors;
+        }
+
+        const duplicate = employeesList.find((employee) => {
+            const employeeId =
+                employee?._id ||
+                employee?.id ||
+                employee?.employeeId;
+
+            // Don't compare the employee with itself while editing.
+            if (editId && String(employeeId) === String(editId)) {
+                return false;
+            }
+
+            const employeeName = normalizeText(
+                getEmployeeName(employee)
+            );
+
+            const employeeEmail = normalizeEmail(
+                employee.email
+            );
+
+            const employeePhone = normalizePhone(
+                employee.phone
+            );
+
+            if (
+                candidateName &&
+                employeeName &&
+                candidateName === employeeName
+            ) {
+                errors.name =
+                    "This employee name is already added.";
+            }
+
+            if (
+                candidateEmail &&
+                employeeEmail &&
+                candidateEmail === employeeEmail
+            ) {
+                errors.email =
+                    "This email is already registered.";
+            }
+
+            if (
+                candidatePhone &&
+                employeePhone &&
+                candidatePhone === employeePhone
+            ) {
+                errors.phone =
+                    "This phone number is already registered.";
+            }
+
+            return Boolean(
+                errors.name ||
+                errors.email ||
+                errors.phone
+            );
+        });
+
+        if (!duplicate) {
+            return errors;
+        }
+
+        return errors;
+    };
+
+    /* Re-check whenever employee list arrives or form changes. */
+    useEffect(() => {
+        if (!employeesList.length) return;
+
+        setDuplicateErrors(
+            getDuplicateErrors(form)
+        );
+    }, [
+        employeesList,
+        form.firstName,
+        form.lastName,
+        form.email,
+        form.phone,
+        editId,
+    ]);
+
+    /* ------------------------------------------------------------------------ */
+    /* INPUT CHANGE                                                             */
+    /* ------------------------------------------------------------------------ */
 
     const handleChange = (e) => {
         const { name, value } = e.target;
+
+        setError("");
+
+        setForm((prev) => {
+            const updated = {
+                ...prev,
+                [name]: value,
+            };
+
+            if (
+                name === "firstName" ||
+                name === "lastName"
+            ) {
+                updated.name =
+                    `${name === "firstName" ? value : prev.firstName} ${name === "lastName" ? value : prev.lastName
+                        }`.trim();
+
+                updated.accountName = updated.name;
+            }
+
+            return updated;
+        });
+    };
+
+    /* ------------------------------------------------------------------------ */
+    /* FILE UPLOAD                                                              */
+    /* ------------------------------------------------------------------------ */
+
+    const readFile = (file, callback, imagesOnly = false) => {
+        if (!file) return;
+
+        if (file.size > MAX_FILE_SIZE) {
+            toast.error("File size must be less than 10MB.");
+            return;
+        }
+
+        const isImage = file.type.startsWith("image/");
+        const allowed = imagesOnly
+            ? isImage
+            : isImage || file.type === "application/pdf";
+
+        if (!allowed) {
+            toast.error(
+                imagesOnly
+                    ? "Only JPG, PNG or WEBP images are allowed."
+                    : "Only JPG, PNG, WEBP or PDF files are allowed."
+            );
+            return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onloadend = () => {
+            callback(reader.result, file.name);
+        };
+
+        reader.readAsDataURL(file);
+    };
+
+    const handleProfilePhoto = (e) => {
+        const file = e.target.files?.[0];
+
+        readFile(file, (data, name) => {
+            setForm((prev) => ({
+                ...prev,
+                avatar: data,
+                profilePhotoData: data,
+                profilePhotoFileName: name,
+                passportPhotoData: data,
+                passportPhotoFileName: name,
+            }));
+        });
+    };
+
+    const handleDocumentUpload = (
+        e,
+        dataKey,
+        nameKey,
+        imagesOnly = false
+    ) => {
+        const file = e.target.files?.[0];
+
+        readFile(file, (data, name) => {
+            setForm((prev) => ({
+                ...prev,
+                [dataKey]: data,
+                [nameKey]: name,
+            }));
+        }, imagesOnly);
+    };
+
+    const removeFile = (dataKey, nameKey) => {
         setForm((prev) => ({
             ...prev,
-            [name]: value,
+            [dataKey]: "",
+            [nameKey]: "",
         }));
     };
 
-    const handleAvatarUpload = (e) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            if (file.size > 2 * 1024 * 1024) {
-                toast.error("Avatar size should be under 2MB.");
-                return;
-            }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setForm((prev) => ({ ...prev, avatar: reader.result }));
-            };
-            reader.readAsDataURL(file);
-        }
-    };
+    /* ------------------------------------------------------------------------ */
+    /* VALIDATION                                                               */
+    /* ------------------------------------------------------------------------ */
 
-    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit
-
-    const handleDocUpload = (e, fileKey, nameKey) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            if (file.size > MAX_FILE_SIZE) {
-                toast.error("File size 5MB se kam hona chahiye. Kripya compress karein.");
-                return;
-            }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setForm((prev) => ({
-                    ...prev,
-                    [fileKey]: reader.result,
-                    [nameKey]: file.name,
-                }));
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const validateStep = () => {
         setError("");
 
-        if (!form.name.trim()) {
-            setError("Employee full name is mandatory.");
-            return;
+        const duplicates = getDuplicateErrors(form);
+
+        setDuplicateErrors(duplicates);
+
+        if (
+            duplicates.name ||
+            duplicates.email ||
+            duplicates.phone
+        ) {
+            setError(
+                "Please fix the duplicate employee details before continuing."
+            );
+
+            if (
+                currentStep !== 1
+            ) {
+                setCurrentStep(1);
+            }
+
+            return false;
         }
-        if (!form.email.trim()) {
-            setError("Corporate email address is mandatory.");
-            return;
+
+        if (currentStep === 1) {
+            if (!form.firstName.trim()) {
+                setError("First Name is required.");
+                return false;
+            }
+
+            if (!form.lastName.trim()) {
+                setError("Last Name is required.");
+                return false;
+            }
+
+            if (!form.email.trim()) {
+                setError("Email address is required.");
+                return false;
+            }
+
+            if (!/^\S+@\S+\.\S+$/.test(form.email)) {
+                setError("Please enter a valid email address.");
+                return false;
+            }
+
+            if (
+                form.phone &&
+                normalizePhone(form.phone).length < 10
+            ) {
+                setError("Please enter a valid phone number.");
+                return false;
+            }
         }
-        if (!form.department) {
-            setError("Department selection is mandatory.");
-            return;
+
+        if (currentStep === 2) {
+            if (!form.department) {
+                setError("Department is required.");
+                return false;
+            }
+
+            if (
+                form.department === "Other" &&
+                !form.departmentOther.trim()
+            ) {
+                setError("Please enter the department name.");
+                return false;
+            }
+
+            if (!form.designation) {
+                setError("Designation is required.");
+                return false;
+            }
+
+            if (
+                form.designation === "Other" &&
+                !form.designationOther.trim()
+            ) {
+                setError("Please enter the designation.");
+                return false;
+            }
         }
-        if (!form.designation) {
-            setError("Job designation is mandatory.");
-            return;
+
+        if (currentStep === 3) {
+            // Documents are intentionally optional.
+            // If you want mandatory documents, add required validation here.
         }
-        if (!form.idProofNumber.trim()) {
-            setError("Document Unique ID Number is required for verification.");
+
+        if (currentStep === 4) {
+            // Banking is optional.
+        }
+
+        return true;
+    };
+
+    /* ------------------------------------------------------------------------ */
+    /* NEXT                                                                     */
+    /* ------------------------------------------------------------------------ */
+
+    const handleNext = () => {
+        if (!validateStep()) return;
+
+        if (currentStep < 4) {
+            setCurrentStep((prev) => prev + 1);
             return;
         }
 
+        handleSubmitForm();
+    };
+
+    /* ------------------------------------------------------------------------ */
+    /* SUBMIT                                                                   */
+    /* ------------------------------------------------------------------------ */
+
+    const handleSubmitForm = async () => {
         setLoading(true);
+        setError("");
 
         try {
-            const typedManager = form.reportingManager ? form.reportingManager.trim() : "";
-            const matchedMgr = managersList.find((m) => {
-                const fullName = m.name || `${m.firstName || ""} ${m.lastName || ""}`.trim();
-                return fullName.toLowerCase() === typedManager.toLowerCase();
-            });
+            const duplicates = getDuplicateErrors(form);
 
-            const resolvedManager = matchedMgr ? String(matchedMgr._id) : (typedManager || null);
+            setDuplicateErrors(duplicates);
+
+            if (
+                duplicates.name ||
+                duplicates.email ||
+                duplicates.phone
+            ) {
+                setCurrentStep(1);
+                setError(
+                    "Employee already exists with the same name, email or phone."
+                );
+                setLoading(false);
+                return;
+            }
+
+            const finalDesignation =
+                form.designation === "Other"
+                    ? form.designationOther
+                    : form.designation;
+
+            const finalDepartment =
+                form.department === "Other"
+                    ? form.departmentOther
+                    : form.department;
 
             const payload = {
                 ...form,
-                employeeId: form.employeeId.trim(),
-                name: form.name.trim(),
-                email: form.email.trim().toLowerCase(),
-                gender: form.gender.toLowerCase(),
-                salary: form.salary !== "" ? Number(form.salary) : 0,
-                reportingManager: resolvedManager,
-                department: form.department && form.department !== "" ? form.department : null,
-                branch: form.branch.trim() || "Main Campus",
-                loginEmail: (form.loginEmail || form.email).trim().toLowerCase(),
-                panNumber: form.panNumber.trim().toUpperCase() || undefined,
-                idProofType: form.idProofType.trim(),
-                idProofNumber: form.idProofNumber.trim().toUpperCase(),
 
-                emergencyContactName: form.emergencyContactName.trim(),
-                emergencyContactRelation: form.emergencyContactRelation.trim(),
-                emergencyContactPhone: form.emergencyContactPhone.trim(),
-                emergencyContact: {
-                    name: form.emergencyContactName.trim(),
-                    relation: form.emergencyContactRelation.trim(),
-                    phone: form.emergencyContactPhone.trim(),
-                },
+                name:
+                    `${form.firstName} ${form.lastName}`.trim(),
 
-                address: form.address.trim(),
-                city: form.city.trim(),
-                state: form.state.trim(),
-                pincode: form.pincode.trim(),
-                residentialAddress: {
-                    street: form.address.trim(),
-                    city: form.city.trim(),
-                    state: form.state.trim(),
-                    pincode: form.pincode.trim(),
-                },
+                designation: finalDesignation,
+                department: finalDepartment,
+
+                reportingManager:
+                    form.reportingManager === "Other"
+                        ? form.reportingManagerOther.trim()
+                        : form.reportingManager,
+
+                nationalIdType: form.nationalIdType,
+                nationalIdOther: form.nationalIdOther,
+
+                salary: form.salary
+                    ? Number(form.salary)
+                    : 0,
+
+                idProofNumber:
+                    form.nationalId ||
+                    "",
 
                 bankDetails: {
-                    bankName: form.bankName.trim(),
-                    accountNumber: form.accountNumber.trim(),
-                    ifscCode: form.ifscCode.trim().toUpperCase(),
-                    paymentMode: form.paymentMode,
-                },
-
-                education: {
-                    highestQualification: form.highestQualification.trim(),
-                    instituteName: form.instituteName.trim(),
-                    yearOfPassing: form.yearOfPassing ? Number(form.yearOfPassing) : null,
-                },
-
-                experience: {
-                    previousCompany: form.previousCompany.trim(),
-                    previousDesignation: form.previousDesignation.trim(),
-                    years: form.previousExperienceYears ? Number(form.previousExperienceYears) : 0,
+                    accountName: form.accountName,
+                    bankName: form.bankName,
+                    branchName: form.branchName,
+                    accountNumber: form.accountNumber,
+                    ifscCode: form.ifscCode,
                 },
 
                 documents: {
-                    resumeFileName: form.resumeFileName,
-                    resumeFileData: form.resumeFileData,
-                    idProofFileName: form.idProofFileName,
-                    idProofFileData: form.idProofFileData,
+                    nationalIdFrontFileName:
+                        form.nationalIdFrontFileName,
+
+                    nationalIdFrontFileData:
+                        form.nationalIdFrontFileData,
+
+                    nationalIdBackFileName:
+                        form.nationalIdBackFileName,
+
+                    nationalIdBackFileData:
+                        form.nationalIdBackFileData,
+
+                    passportPhotoFileName:
+                        form.passportPhotoFileName,
+
+                    passportPhotoData:
+                        form.passportPhotoData,
                 },
+
+                // Keep profile image easy for employee profile/list API.
+                avatar:
+                    form.profilePhotoData ||
+                    form.avatar ||
+                    "",
             };
 
             if (editId) {
-                try {
-                    await api.put(`/employees/${editId}`, payload);
-                } catch (putErr) {
-                    if (putErr.response?.status === 404 || putErr.response?.data?.message?.includes("not found")) {
-                        await api.put(`/employees/update/${editId}`, payload);
-                    } else {
-                        throw putErr;
-                    }
-                }
-                toast.success("Employee record saved successfully!");
+                await api.put(
+                    `/employees/${editId}`,
+                    payload
+                );
+
+                toast.success(
+                    "Employee updated successfully!"
+                );
             } else {
-                await api.post("/employees", payload);
-                toast.success("Employee registered successfully!");
+                await api.post(
+                    "/employees",
+                    payload
+                );
+
+                toast.success(
+                    "Employee registered successfully!"
+                );
             }
 
-            router.refresh();
             router.push("/employees");
-
-            setTimeout(() => {
-                if (typeof window !== "undefined" && window.location.pathname.includes("/add")) {
-                    window.location.href = "/employees";
-                }
-            }, 400);
         } catch (err) {
-            console.error("Backend error:", err.response?.data);
-            const errMsg =
-                err.response?.data?.message ||
-                err.response?.data?.error ||
-                "Failed to save employee profile. Duplicate credentials or invalid fields detected.";
-            setError(errMsg);
-            toast.error(errMsg);
+            console.error(err);
+
+            const status = err?.response?.status;
+
+            const msg =
+                err?.response?.data?.message ||
+                err?.response?.data?.error ||
+                "Failed to save employee record.";
+
+            if (status === 409) {
+                setError(
+                    "This employee already exists. Please check name, email or phone number."
+                );
+                setCurrentStep(1);
+            } else {
+                setError(msg);
+            }
+
+            toast.error(msg);
+        } finally {
             setLoading(false);
         }
     };
 
+    /* ------------------------------------------------------------------------ */
+    /* STEP STATUS                                                              */
+    /* ------------------------------------------------------------------------ */
+
+    const isStep1Done = Boolean(
+        form.firstName &&
+        form.lastName &&
+        form.email &&
+        !duplicateErrors.name &&
+        !duplicateErrors.email
+    );
+
+    const isStep2Done = Boolean(
+        form.department &&
+        form.designation
+    );
+
+    const isStep3Done = Boolean(
+        form.nationalIdType ||
+        form.nationalId ||
+        form.nationalIdFrontFileData ||
+        form.nationalIdBackFileData ||
+        form.passportPhotoData
+    );
+
+    const isStep4Done = Boolean(
+        form.accountNumber &&
+        form.bankName
+    );
+
+    /* ------------------------------------------------------------------------ */
+    /* LOADING                                                                  */
+    /* ------------------------------------------------------------------------ */
+
     if (fetching) {
         return (
-            <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
-                <Loader2 size={36} className="animate-spin text-indigo-600" />
-                <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
-                    Loading Employee Profile...
-                </p>
+            <div className="min-h-[500px] flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                    <Loader2
+                        size={32}
+                        className="animate-spin text-indigo-600"
+                    />
+                    <p className="text-xs text-slate-500 font-medium">
+                        Loading employee profile...
+                    </p>
+                </div>
             </div>
         );
     }
 
+    /* ------------------------------------------------------------------------ */
+    /* UI                                                                       */
+    /* ------------------------------------------------------------------------ */
+
     return (
-        <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 antialiased font-sans text-slate-900">
-            {/* Top Navigation Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-xs">
-                <div className="flex items-center gap-3.5">
-                    <button
-                        type="button"
-                        onClick={() => router.back()}
-                        className="p-2.5 rounded-xl sm:rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-2xs transition-all active:scale-95 shrink-0 cursor-pointer"
-                        title="Go Back"
-                    >
-                        <ArrowLeft size={18} />
-                    </button>
-                    <div>
-                        <div className="flex items-center gap-2">
-                            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-                                {editId ? "Update Employee Profile" : "Register New Employee"}
-                            </h1>
-                            <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200/60">
-                                <BadgeCheck size={12} /> HRMS Master Record
-                            </span>
+        <div className="min-h-screen bg-slate-50/70 px-4 py-6 sm:px-6 lg:px-8">
+            <div className="max-w-7xl mx-auto">
+                <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+
+                    {/* ---------------------------------------------------------------- */}
+                    {/* HEADER                                                           */}
+                    {/* ---------------------------------------------------------------- */}
+
+                    <div className="px-6 sm:px-8 py-5 border-b border-slate-100 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/20">
+                                <User size={20} />
+                            </div>
+
+                            <div>
+                                <h1 className="text-lg sm:text-xl font-bold text-slate-900">
+                                    {editId
+                                        ? "Edit Employee"
+                                        : "Add Employee"}
+                                </h1>
+
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    Create a complete professional employee profile
+                                </p>
+                            </div>
                         </div>
-                        <p className="text-xs sm:text-sm font-medium text-slate-500 mt-0.5">
-                            Complete the corporate credential parameters and personal records.
-                        </p>
+
+                        <button
+                            type="button"
+                            onClick={() => router.back()}
+                            className="w-9 h-9 rounded-full border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-500 transition"
+                        >
+                            <X size={17} />
+                        </button>
+                    </div>
+
+                    {/* ---------------------------------------------------------------- */}
+                    {/* STEPS                                                            */}
+                    {/* ---------------------------------------------------------------- */}
+
+                    <div className="px-6 sm:px-8 py-4 border-b border-slate-100 bg-slate-50/60">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            {[
+                                {
+                                    step: 1,
+                                    title: "Personal Info",
+                                    icon: User,
+                                },
+                                {
+                                    step: 2,
+                                    title: "Job Details",
+                                    icon: Briefcase,
+                                },
+                                {
+                                    step: 3,
+                                    title: "Documents",
+                                    icon: FileText,
+                                },
+                                {
+                                    step: 4,
+                                    title: "Banking Info",
+                                    icon: Landmark,
+                                },
+                            ].map((item) => {
+                                const active =
+                                    currentStep === item.step;
+
+                                const passed =
+                                    currentStep > item.step;
+
+                                const Icon = item.icon;
+
+                                return (
+                                    <button
+                                        type="button"
+                                        key={item.step}
+                                        onClick={() =>
+                                            setCurrentStep(item.step)
+                                        }
+                                        className={`text-left rounded-2xl border p-3 transition-all ${active
+                                            ? "border-indigo-300 bg-indigo-50 shadow-sm"
+                                            : passed
+                                                ? "border-emerald-200 bg-emerald-50/40"
+                                                : "border-slate-200 bg-white hover:border-indigo-200"
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div
+                                                className={`w-8 h-8 rounded-xl flex items-center justify-center ${active
+                                                    ? "bg-indigo-600 text-white"
+                                                    : passed
+                                                        ? "bg-emerald-600 text-white"
+                                                        : "bg-slate-100 text-slate-500"
+                                                    }`}
+                                            >
+                                                {passed ? (
+                                                    <CheckCircle2 size={15} />
+                                                ) : (
+                                                    <Icon size={15} />
+                                                )}
+                                            </div>
+
+                                            <div>
+                                                <p className="text-[9px] uppercase tracking-widest font-bold text-slate-400">
+                                                    Step {item.step}
+                                                </p>
+
+                                                <p className="text-xs font-bold text-slate-800">
+                                                    {item.title}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* ---------------------------------------------------------------- */}
+                    {/* GLOBAL ERROR                                                     */}
+                    {/* ---------------------------------------------------------------- */}
+
+                    {error && (
+                        <div className="mx-6 sm:mx-8 mt-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+                            <AlertCircle
+                                size={17}
+                                className="shrink-0 mt-0.5"
+                            />
+
+                            <div>
+                                <p className="text-xs font-bold">
+                                    Please check the form
+                                </p>
+
+                                <p className="text-[11px] mt-0.5">
+                                    {error}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ---------------------------------------------------------------- */}
+                    {/* MAIN                                                             */}
+                    {/* ---------------------------------------------------------------- */}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 sm:p-8">
+
+                        {/* ============================================================ */}
+                        {/* SIDEBAR                                                       */}
+                        {/* ============================================================ */}
+
+                        <aside className="lg:col-span-4 space-y-4">
+
+                            <div className="flex items-center justify-between px-1">
+                                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                                    Profile Summary
+                                </h3>
+
+                                <span className="text-[10px] font-semibold text-slate-400">
+                                    {[
+                                        isStep1Done,
+                                        isStep2Done,
+                                        isStep3Done,
+                                        isStep4Done,
+                                    ].filter(Boolean).length}
+                                    /4 complete
+                                </span>
+                            </div>
+
+                            {/* PROFILE */}
+                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="relative">
+                                        {form.profilePhotoData ||
+                                            form.avatar ? (
+                                            <img
+                                                src={
+                                                    form.profilePhotoData ||
+                                                    form.avatar
+                                                }
+                                                alt="Employee profile"
+                                                className="w-16 h-16 rounded-2xl object-cover border border-slate-200 shadow-sm"
+                                            />
+                                        ) : (
+                                            <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                                                <User size={25} />
+                                            </div>
+                                        )}
+
+                                        {isStep1Done && (
+                                            <div className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center">
+                                                <CheckCircle2
+                                                    size={12}
+                                                    className="text-white"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-sm text-slate-900 truncate">
+                                            {form.firstName ||
+                                                form.lastName
+                                                ? `${form.firstName} ${form.lastName}`
+                                                : "New Employee"}
+                                        </p>
+
+                                        <p className="text-[11px] text-slate-400 truncate">
+                                            {form.email ||
+                                                "Employee profile"}
+                                        </p>
+
+                                        {form.employeeId && (
+                                            <span className="inline-flex mt-1 text-[9px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full">
+                                                {form.employeeId}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <SummaryCard
+                                icon={User}
+                                title="Personal Info"
+                                active={currentStep === 1}
+                                status={
+                                    isStep1Done
+                                        ? "Done"
+                                        : "In progress"
+                                }
+                            >
+                                <SummaryRow
+                                    label="Name"
+                                    value={
+                                        form.firstName ||
+                                            form.lastName
+                                            ? `${form.firstName} ${form.lastName}`
+                                            : ""
+                                    }
+                                />
+
+                                <SummaryRow
+                                    label="Email"
+                                    value={form.email}
+                                />
+
+                                <SummaryRow
+                                    label="Phone"
+                                    value={form.phone}
+                                />
+
+                                <SummaryRow
+                                    label="Gender"
+                                    value={form.gender}
+                                />
+                            </SummaryCard>
+
+                            <SummaryCard
+                                icon={Briefcase}
+                                title="Job Details"
+                                active={currentStep === 2}
+                                status={
+                                    isStep2Done
+                                        ? "Done"
+                                        : "Pending"
+                                }
+                            >
+                                <SummaryRow
+                                    label="Designation"
+                                    value={selectedDesignation}
+                                />
+
+                                <SummaryRow
+                                    label="Department"
+                                    value={selectedDepartment}
+                                />
+
+                                <SummaryRow
+                                    label="Employment"
+                                    value={form.employmentType}
+                                />
+
+                                <SummaryRow
+                                    label="Status"
+                                    value={form.employeeStatus}
+                                />
+
+                                <SummaryRow
+                                    label="Joining"
+                                    value={form.dateOfJoining}
+                                />
+                            </SummaryCard>
+
+                            <SummaryCard
+                                icon={FileText}
+                                title="Documents"
+                                active={currentStep === 3}
+                                status={
+                                    isStep3Done
+                                        ? "Done"
+                                        : "Pending"
+                                }
+                            >
+                                <SummaryRow
+                                    label="National ID Type"
+                                    value={form.nationalIdType}
+                                />
+
+                                <SummaryRow
+                                    label="National ID"
+                                    value={form.nationalId}
+                                />
+
+                                <SummaryRow
+                                    label="ID Front"
+                                    value={
+                                        form.nationalIdFrontFileName
+                                            ? "Uploaded"
+                                            : ""
+                                    }
+                                />
+
+                                <SummaryRow
+                                    label="ID Back"
+                                    value={
+                                        form.nationalIdBackFileName
+                                            ? "Uploaded"
+                                            : ""
+                                    }
+                                />
+
+                                <SummaryRow
+                                    label="Photo"
+                                    value={
+                                        form.passportPhotoFileName
+                                            ? "Uploaded"
+                                            : ""
+                                    }
+                                />
+                            </SummaryCard>
+
+                            <SummaryCard
+                                icon={Landmark}
+                                title="Banking Info"
+                                active={currentStep === 4}
+                                status={
+                                    isStep4Done
+                                        ? "Done"
+                                        : "Pending"
+                                }
+                            >
+                                <SummaryRow
+                                    label="Account Name"
+                                    value={form.accountName}
+                                />
+
+                                <SummaryRow
+                                    label="Bank"
+                                    value={form.bankName}
+                                />
+
+                                <SummaryRow
+                                    label="Account"
+                                    value={
+                                        form.accountNumber
+                                            ? `•••• ${form.accountNumber.slice(-4)}`
+                                            : ""
+                                    }
+                                />
+                            </SummaryCard>
+                        </aside>
+
+                        {/* ============================================================ */}
+                        {/* FORM PANEL                                                    */}
+                        {/* ============================================================ */}
+
+                        <main className="lg:col-span-8">
+                            <div className="rounded-3xl border border-slate-200 bg-slate-50/50 p-5 sm:p-7">
+
+                                {/* ======================================================== */}
+                                {/* STEP 1                                                     */}
+                                {/* ======================================================== */}
+
+                                {currentStep === 1 && (
+                                    <div className="space-y-6">
+
+                                        <SectionTitle
+                                            title="Personal Information"
+                                            description="Basic identity and profile information of the employee."
+                                        />
+
+                                        {/* PROFILE PHOTO */}
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                                            <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+                                                <div className="relative shrink-0">
+                                                    {form.profilePhotoData ||
+                                                        form.avatar ? (
+                                                        <img
+                                                            src={
+                                                                form.profilePhotoData ||
+                                                                form.avatar
+                                                            }
+                                                            alt="Employee"
+                                                            className="w-24 h-24 rounded-2xl object-cover border border-slate-200 shadow-sm"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-24 h-24 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+                                                            <Camera size={28} />
+                                                        </div>
+                                                    )}
+
+                                                    {form.profilePhotoData && (
+                                                        <div className="absolute -right-2 -bottom-2 w-7 h-7 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center">
+                                                            <CheckCircle2
+                                                                size={14}
+                                                                className="text-white"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex-1">
+                                                    <p className="text-sm font-bold text-slate-900">
+                                                        Passport Size Profile Photo
+                                                    </p>
+
+                                                    <p className="text-xs text-slate-500 mt-1">
+                                                        Upload a clear professional photo.
+                                                        This photo will also appear in the employee profile.
+                                                    </p>
+
+                                                    <div className="flex flex-wrap items-center gap-2 mt-4">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                passportPhotoRef.current?.click()
+                                                            }
+                                                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition"
+                                                        >
+                                                            <Camera size={15} />
+                                                            {form.profilePhotoData
+                                                                ? "Change Photo"
+                                                                : "Upload Photo"}
+                                                        </button>
+
+                                                        {form.profilePhotoData && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    removeFile(
+                                                                        "profilePhotoData",
+                                                                        "profilePhotoFileName"
+                                                                    )
+                                                                }
+                                                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 text-red-600 bg-white hover:bg-red-50 text-xs font-bold"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                                Remove
+                                                            </button>
+                                                        )}
+                                                    </div>
+
+                                                    <p className="text-[10px] text-slate-400 mt-2">
+                                                        JPG, PNG, WEBP · maximum 10MB
+                                                    </p>
+
+                                                    {form.profilePhotoFileName && (
+                                                        <p className="text-[11px] text-emerald-600 font-semibold mt-2">
+                                                            {form.profilePhotoFileName}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <input
+                                                ref={passportPhotoRef}
+                                                type="file"
+                                                accept="image/jpeg,image/png,image/webp"
+                                                onChange={handleProfilePhoto}
+                                                className="hidden"
+                                            />
+                                        </div>
+
+                                        {/* NAME */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                                            <div>
+                                                <label className="field-label">
+                                                    First Name
+                                                    <span className="text-red-500">*</span>
+                                                </label>
+
+                                                <input
+                                                    name="firstName"
+                                                    value={form.firstName}
+                                                    onChange={handleChange}
+                                                    placeholder="Enter first name"
+                                                    className={
+                                                        duplicateErrors.name
+                                                            ? errorInputClass
+                                                            : inputClass
+                                                    }
+                                                />
+
+                                                {/* NAME DUPLICATE RED MESSAGE */}
+                                                {duplicateErrors.name && (
+                                                    <FieldError>
+                                                        {duplicateErrors.name}
+                                                    </FieldError>
+                                                )}
+                                            </div>
+
+                                            <div>
+                                                <label className="field-label">
+                                                    Last Name
+                                                    <span className="text-red-500">*</span>
+                                                </label>
+
+                                                <input
+                                                    name="lastName"
+                                                    value={form.lastName}
+                                                    onChange={handleChange}
+                                                    placeholder="Enter last name"
+                                                    className={
+                                                        duplicateErrors.name
+                                                            ? errorInputClass
+                                                            : inputClass
+                                                    }
+                                                />
+
+                                                {duplicateErrors.name && (
+                                                    <FieldError>
+                                                        {duplicateErrors.name}
+                                                    </FieldError>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* EMAIL */}
+                                        <div>
+                                            <label className="field-label">
+                                                Email Address
+                                                <span className="text-red-500">*</span>
+                                            </label>
+
+                                            <div className="relative">
+                                                <Mail
+                                                    size={16}
+                                                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                                                />
+
+                                                <input
+                                                    type="email"
+                                                    name="email"
+                                                    value={form.email}
+                                                    onChange={handleChange}
+                                                    placeholder="employee@company.com"
+                                                    className={`${duplicateErrors.email
+                                                        ? errorInputClass
+                                                        : inputClass
+                                                        } pl-11`}
+                                                />
+                                            </div>
+
+                                            {duplicateErrors.email && (
+                                                <FieldError>
+                                                    {duplicateErrors.email}
+                                                </FieldError>
+                                            )}
+                                        </div>
+
+                                        {/* PHONE */}
+                                        <div>
+                                            <label className="field-label">
+                                                Phone Number
+                                            </label>
+
+                                            <div className="flex">
+                                                <div className="flex items-center px-3 bg-slate-100 border border-r-0 border-slate-200 rounded-l-xl text-xs font-bold text-slate-600">
+                                                    IN +91
+                                                </div>
+
+                                                <div className="relative flex-1">
+                                                    <Phone
+                                                        size={15}
+                                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                                                    />
+
+                                                    <input
+                                                        type="tel"
+                                                        name="phone"
+                                                        value={form.phone}
+                                                        onChange={handleChange}
+                                                        placeholder="9876543210"
+                                                        className={`${duplicateErrors.phone
+                                                            ? errorInputClass
+                                                            : inputClass
+                                                            } pl-9 rounded-l-none`}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {duplicateErrors.phone && (
+                                                <FieldError>
+                                                    {duplicateErrors.phone}
+                                                </FieldError>
+                                            )}
+                                        </div>
+
+                                        {/* GENDER */}
+                                        <div>
+                                            <label className="field-label">
+                                                Gender
+                                            </label>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                {GENDER_OPTIONS.map((gender) => (
+                                                    <label
+                                                        key={gender.value}
+                                                        className={`p-4 rounded-2xl border cursor-pointer transition-all ${form.gender === gender.value
+                                                            ? "border-indigo-500 bg-indigo-50"
+                                                            : "border-slate-200 bg-white hover:border-indigo-200"
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="text-xs font-bold text-slate-800">
+                                                                {gender.label}
+                                                            </span>
+
+                                                            <input
+                                                                type="radio"
+                                                                name="gender"
+                                                                value={gender.value}
+                                                                checked={
+                                                                    form.gender ===
+                                                                    gender.value
+                                                                }
+                                                                onChange={handleChange}
+                                                                className="accent-indigo-600"
+                                                            />
+                                                        </div>
+
+                                                        <p className="text-[10px] text-slate-400 mt-1">
+                                                            {gender.sub}
+                                                        </p>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* LOCATION */}
+                                        <div>
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <MapPin
+                                                    size={15}
+                                                    className="text-indigo-600"
+                                                />
+                                                <span className="text-xs font-bold text-slate-700">
+                                                    Address
+                                                </span>
+                                            </div>
+
+                                            <textarea
+                                                name="address"
+                                                value={form.address}
+                                                onChange={handleChange}
+                                                rows={3}
+                                                placeholder="Employee address"
+                                                className={`${inputClass} resize-none`}
+                                            />
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                                                <input
+                                                    name="city"
+                                                    value={form.city}
+                                                    onChange={handleChange}
+                                                    placeholder="City"
+                                                    className={inputClass}
+                                                />
+
+                                                <input
+                                                    name="state"
+                                                    value={form.state}
+                                                    onChange={handleChange}
+                                                    placeholder="State"
+                                                    className={inputClass}
+                                                />
+
+                                                <input
+                                                    name="pincode"
+                                                    value={form.pincode}
+                                                    onChange={handleChange}
+                                                    placeholder="Pincode"
+                                                    className={inputClass}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ======================================================== */}
+                                {/* STEP 2                                                     */}
+                                {/* ======================================================== */}
+
+                                {currentStep === 2 && (
+                                    <div className="space-y-6">
+
+                                        <SectionTitle
+                                            title="Job Details"
+                                            description="Role, department, employment status and compensation details."
+                                        />
+
+                                        {/* DESIGNATION + STATUS */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                                            <div>
+                                                <label className="field-label">
+                                                    Designation
+                                                    <span className="text-red-500">*</span>
+                                                </label>
+
+                                                <select
+                                                    name="designation"
+                                                    value={form.designation}
+                                                    onChange={handleChange}
+                                                    className={`${inputClass} cursor-pointer`}
+                                                >
+                                                    <option value="">
+                                                        Select Designation
+                                                    </option>
+
+                                                    {designationOptions.map(
+                                                        (item) => (
+                                                            <option
+                                                                key={item.value}
+                                                                value={item.value}
+                                                            >
+                                                                {item.label}
+                                                            </option>
+                                                        )
+                                                    )}
+
+                                                    <option value="Other">
+                                                        + Add Other Designation
+                                                    </option>
+                                                </select>
+
+                                                {form.designation === "Other" && (
+                                                    <input
+                                                        name="designationOther"
+                                                        value={form.designationOther}
+                                                        onChange={handleChange}
+                                                        placeholder="Enter designation"
+                                                        className={`${inputClass} mt-2`}
+                                                    />
+                                                )}
+                                            </div>
+
+                                            <div>
+                                                <label className="field-label">
+                                                    Employee Status
+                                                </label>
+
+                                                <select
+                                                    name="employeeStatus"
+                                                    value={form.employeeStatus}
+                                                    onChange={handleChange}
+                                                    className={`${inputClass} cursor-pointer`}
+                                                >
+                                                    {EMPLOYEE_STATUS_OPTIONS.map(
+                                                        (status) => (
+                                                            <option
+                                                                key={status}
+                                                                value={status}
+                                                            >
+                                                                {status}
+                                                            </option>
+                                                        )
+                                                    )}
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        {/* DEPARTMENT + EMPLOYMENT */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                                            <div>
+                                                <label className="field-label">
+                                                    Department
+                                                    <span className="text-red-500">*</span>
+                                                </label>
+
+                                                <select
+                                                    name="department"
+                                                    value={form.department}
+                                                    onChange={handleChange}
+                                                    className={`${inputClass} cursor-pointer`}
+                                                >
+                                                    <option value="">
+                                                        Select Department
+                                                    </option>
+
+                                                    {departmentOptions.map(
+                                                        (item) => (
+                                                            <option
+                                                                key={item.value}
+                                                                value={item.value}
+                                                            >
+                                                                {item.label}
+                                                            </option>
+                                                        )
+                                                    )}
+
+                                                    <option value="Other">
+                                                        + Add Other Department
+                                                    </option>
+                                                </select>
+
+                                                {form.department === "Other" && (
+                                                    <input
+                                                        name="departmentOther"
+                                                        value={form.departmentOther}
+                                                        onChange={handleChange}
+                                                        placeholder="Enter department"
+                                                        className={`${inputClass} mt-2`}
+                                                    />
+                                                )}
+                                            </div>
+
+                                            <div>
+                                                <label className="field-label">
+                                                    Employment Type
+                                                </label>
+
+                                                <select
+                                                    name="employmentType"
+                                                    value={form.employmentType}
+                                                    onChange={handleChange}
+                                                    className={`${inputClass} cursor-pointer`}
+                                                >
+                                                    {EMPLOYMENT_TYPES.map(
+                                                        (type) => (
+                                                            <option
+                                                                key={type}
+                                                                value={type}
+                                                            >
+                                                                {type}
+                                                            </option>
+                                                        )
+                                                    )}
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        {/* MANAGER + JOINING */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                                            <div>
+                                                <label className="field-label">
+                                                    Reporting Manager
+                                                </label>
+
+                                                <select
+                                                    name="reportingManager"
+                                                    value={form.reportingManager}
+                                                    onChange={handleChange}
+                                                    className={`${inputClass} cursor-pointer`}
+                                                >
+                                                    <option value="">
+                                                        Select Reporting Manager
+                                                    </option>
+
+                                                    {REPORTING_MANAGER_OPTIONS.map((manager) => (
+                                                        <option key={manager} value={manager}>
+                                                            {manager}
+                                                        </option>
+                                                    ))}
+
+                                                    <option value="Other">
+                                                        + Add Reporting Manager
+                                                    </option>
+                                                </select>
+
+                                                {form.reportingManager === "Other" && (
+                                                    <input
+                                                        name="reportingManagerOther"
+                                                        value={form.reportingManagerOther}
+                                                        onChange={handleChange}
+                                                        placeholder="Enter reporting manager name"
+                                                        className={`${inputClass} mt-3`}
+                                                    />
+                                                )}
+                                            </div>
+
+                                            <div>
+                                                <label className="field-label">
+                                                    Joining Date
+                                                </label>
+
+                                                <div className="relative">
+                                                    <CalendarDays
+                                                        size={15}
+                                                        className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                                                    />
+
+                                                    <input
+                                                        type="date"
+                                                        name="dateOfJoining"
+                                                        value={form.dateOfJoining}
+                                                        onChange={handleChange}
+                                                        className={`${inputClass} pl-10`}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* SALARY */}
+                                        <div>
+                                            <label className="field-label">
+                                                Monthly Salary
+                                            </label>
+
+                                            <div className="relative">
+                                                <IndianRupee
+                                                    size={15}
+                                                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                                                />
+
+                                                <input
+                                                    type="number"
+                                                    name="salary"
+                                                    value={form.salary}
+                                                    onChange={handleChange}
+                                                    placeholder="50000"
+                                                    className={`${inputClass} pl-10`}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* JOB INFO BOX */}
+                                        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
+                                            <div className="flex gap-3">
+                                                <BadgeCheck
+                                                    size={18}
+                                                    className="text-indigo-600 shrink-0"
+                                                />
+
+                                                <div>
+                                                    <p className="text-xs font-bold text-indigo-900">
+                                                        Professional Job Profile
+                                                    </p>
+
+                                                    <p className="text-[11px] text-indigo-700/70 mt-1">
+                                                        Designation, department, reporting manager,
+                                                        employment type, status and salary are all
+                                                        stored in the employee profile.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ======================================================== */}
+                                {/* STEP 3                                                     */}
+                                {/* ======================================================== */}
+
+                                {currentStep === 3 && (
+                                    <div className="space-y-6">
+
+                                        <SectionTitle
+                                            title="Documents"
+                                            description="Identification numbers and scanned copies."
+                                        />
+
+                                        {/* NATIONAL ID */}
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                                                        <CreditCard size={18} />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-slate-900">
+                                                            National ID Card
+                                                        </p>
+                                                        <p className="text-[11px] text-slate-400">
+                                                            Select the document type and upload its front and back images.
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full self-start sm:self-auto">
+                                                    Image only · Max 10MB
+                                                </span>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                                                <div>
+                                                    <label className="field-label">
+                                                        ID Type
+                                                    </label>
+                                                    <select
+                                                        name="nationalIdType"
+                                                        value={form.nationalIdType}
+                                                        onChange={handleChange}
+                                                        className={`${inputClass} cursor-pointer`}
+                                                    >
+                                                        {NATIONAL_ID_OPTIONS.map((option) => (
+                                                            <option key={option} value={option}>
+                                                                {option}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+
+                                                <div>
+                                                    <label className="field-label">
+                                                        {form.nationalIdType} Number
+                                                    </label>
+                                                    <input
+                                                        name="nationalId"
+                                                        value={form.nationalId}
+                                                        onChange={handleChange}
+                                                        placeholder={`Enter ${form.nationalIdType} number`}
+                                                        className={`${inputClass} font-mono uppercase`}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {form.nationalIdType === "Other Official ID" && (
+                                                <div className="mb-4">
+                                                    <label className="field-label">
+                                                        Other Official ID Name
+                                                    </label>
+                                                    <input
+                                                        name="nationalIdOther"
+                                                        value={form.nationalIdOther}
+                                                        onChange={handleChange}
+                                                        placeholder="Enter official ID name"
+                                                        className={inputClass}
+                                                    />
+                                                </div>
+                                            )}
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <UploadCard
+                                                    title={`${form.nationalIdType} - Front Side`}
+                                                    subtitle="Click to upload front image"
+                                                    fileName={form.nationalIdFrontFileName}
+                                                    preview={
+                                                        form.nationalIdFrontFileData?.startsWith("data:image")
+                                                            ? form.nationalIdFrontFileData
+                                                            : ""
+                                                    }
+                                                    onClick={() => frontIdRef.current?.click()}
+                                                    onRemove={() =>
+                                                        removeFile(
+                                                            "nationalIdFrontFileData",
+                                                            "nationalIdFrontFileName"
+                                                        )
+                                                    }
+                                                />
+
+                                                <UploadCard
+                                                    title={`${form.nationalIdType} - Back Side`}
+                                                    subtitle="Click to upload back image"
+                                                    fileName={form.nationalIdBackFileName}
+                                                    preview={
+                                                        form.nationalIdBackFileData?.startsWith("data:image")
+                                                            ? form.nationalIdBackFileData
+                                                            : ""
+                                                    }
+                                                    onClick={() => backIdRef.current?.click()}
+                                                    onRemove={() =>
+                                                        removeFile(
+                                                            "nationalIdBackFileData",
+                                                            "nationalIdBackFileName"
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+
+                                            <input
+                                                ref={frontIdRef}
+                                                type="file"
+                                                accept="image/jpeg,image/png,image/webp"
+                                                onChange={(e) =>
+                                                    handleDocumentUpload(
+                                                        e,
+                                                        "nationalIdFrontFileData",
+                                                        "nationalIdFrontFileName",
+                                                        true
+                                                    )
+                                                }
+                                                className="hidden"
+                                            />
+
+                                            <input
+                                                ref={backIdRef}
+                                                type="file"
+                                                accept="image/jpeg,image/png,image/webp"
+                                                onChange={(e) =>
+                                                    handleDocumentUpload(
+                                                        e,
+                                                        "nationalIdBackFileData",
+                                                        "nationalIdBackFileName",
+                                                        true
+                                                    )
+                                                }
+                                                className="hidden"
+                                            />
+                                        </div>
+
+                                        {/* PASSPORT PHOTO */}
+                                        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-5">
+
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className="w-9 h-9 rounded-xl bg-white text-indigo-600 flex items-center justify-center border border-indigo-100">
+                                                    <ImageIcon size={17} />
+                                                </div>
+
+                                                <div>
+                                                    <p className="text-sm font-bold text-slate-900">
+                                                        Passport Size Photo
+                                                    </p>
+
+                                                    <p className="text-[11px] text-slate-500">
+                                                        This image will be used as the employee profile photo.
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-[150px_1fr] gap-5 items-center">
+
+                                                <div className="w-[150px] h-[180px] rounded-2xl bg-white border border-slate-200 overflow-hidden flex items-center justify-center">
+                                                    {form.passportPhotoData ? (
+                                                        <img
+                                                            src={
+                                                                form.passportPhotoData
+                                                            }
+                                                            alt="Passport size"
+                                                            className="w-full h-full object-cover"
+                                                        />
+                                                    ) : (
+                                                        <div className="text-center">
+                                                            <Camera
+                                                                size={28}
+                                                                className="mx-auto text-slate-300"
+                                                            />
+
+                                                            <p className="text-[10px] text-slate-400 mt-2">
+                                                                No photo
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            passportPhotoRef.current?.click()
+                                                        }
+                                                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                                                    >
+                                                        <Upload size={15} />
+                                                        Upload Passport Photo
+                                                    </button>
+
+                                                    {form.passportPhotoData && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                removeFile(
+                                                                    "passportPhotoData",
+                                                                    "passportPhotoFileName"
+                                                                );
+
+                                                                setForm((prev) => ({
+                                                                    ...prev,
+                                                                    avatar: "",
+                                                                    profilePhotoData: "",
+                                                                    profilePhotoFileName: "",
+                                                                }));
+                                                            }}
+                                                            className="ml-2 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-600 text-xs font-bold"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                            Remove
+                                                        </button>
+                                                    )}
+
+                                                    <p className="text-[10px] text-slate-400 mt-3">
+                                                        JPG, PNG or WEBP · maximum 10MB
+                                                    </p>
+
+                                                    {form.passportPhotoFileName && (
+                                                        <p className="text-[11px] font-semibold text-emerald-600 mt-2">
+                                                            {form.passportPhotoFileName}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ======================================================== */}
+                                {/* STEP 4                                                     */}
+                                {/* ======================================================== */}
+
+                                {currentStep === 4 && (
+                                    <div className="space-y-6">
+
+                                        <SectionTitle
+                                            title="Banking Information"
+                                            description="Bank account details for salary payments."
+                                        />
+
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                                            <div className="flex items-center gap-3 mb-5">
+                                                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                                                    <Landmark size={18} />
+                                                </div>
+
+                                                <div>
+                                                    <p className="text-sm font-bold text-slate-900">
+                                                        Salary Account
+                                                    </p>
+
+                                                    <p className="text-[11px] text-slate-400">
+                                                        Enter the employee's salary receiving account.
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                                                <div>
+                                                    <label className="field-label">
+                                                        Account Name
+                                                    </label>
+
+                                                    <input
+                                                        name="accountName"
+                                                        value={form.accountName}
+                                                        onChange={handleChange}
+                                                        placeholder="Account holder name"
+                                                        className={inputClass}
+                                                    />
+                                                </div>
+
+                                                <div>
+                                                    <label className="field-label">
+                                                        Bank Name
+                                                    </label>
+
+                                                    <input
+                                                        name="bankName"
+                                                        value={form.bankName}
+                                                        onChange={handleChange}
+                                                        placeholder="Bank name"
+                                                        className={inputClass}
+                                                    />
+                                                </div>
+
+                                                <div>
+                                                    <label className="field-label">
+                                                        Branch Name
+                                                    </label>
+
+                                                    <input
+                                                        name="branchName"
+                                                        value={form.branchName}
+                                                        onChange={handleChange}
+                                                        placeholder="Branch name"
+                                                        className={inputClass}
+                                                    />
+                                                </div>
+
+                                                <div>
+                                                    <label className="field-label">
+                                                        Account Number
+                                                    </label>
+
+                                                    <input
+                                                        name="accountNumber"
+                                                        value={form.accountNumber}
+                                                        onChange={handleChange}
+                                                        placeholder="Account number"
+                                                        className={`${inputClass} font-mono`}
+                                                    />
+                                                </div>
+
+                                                <div>
+                                                    <label className="field-label">
+                                                        IFSC Code
+                                                    </label>
+
+                                                    <input
+                                                        name="ifscCode"
+                                                        value={form.ifscCode}
+                                                        onChange={handleChange}
+                                                        placeholder="SBIN0000000"
+                                                        className={`${inputClass} font-mono uppercase`}
+                                                    />
+                                                </div>
+
+                                            </div>
+                                        </div>
+
+                                        {/* FINAL PROFILE PREVIEW */}
+                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
+                                            <div className="flex items-center gap-3">
+                                                {form.profilePhotoData ? (
+                                                    <img
+                                                        src={form.profilePhotoData}
+                                                        alt="Employee"
+                                                        className="w-14 h-14 rounded-2xl object-cover border-2 border-white shadow-sm"
+                                                    />
+                                                ) : (
+                                                    <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center text-emerald-600">
+                                                        <User size={23} />
+                                                    </div>
+                                                )}
+
+                                                <div>
+                                                    <p className="text-sm font-bold text-emerald-900">
+                                                        Profile Ready
+                                                    </p>
+
+                                                    <p className="text-[11px] text-emerald-700/70 mt-0.5">
+                                                        Review the information and click Save Employee.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* ======================================================== */}
+                                {/* FOOTER                                                     */}
+                                {/* ======================================================== */}
+
+                                <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-6 mt-8 border-t border-slate-200">
+
+                                    <button
+                                        type="button"
+                                        onClick={() => router.back()}
+                                        className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-xs font-bold"
+                                    >
+                                        Cancel
+                                    </button>
+
+                                    <div className="flex items-center gap-2">
+
+                                        {currentStep > 1 && (
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    setCurrentStep(
+                                                        (prev) => prev - 1
+                                                    )
+                                                }
+                                                className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold"
+                                            >
+                                                Back
+                                            </button>
+                                        )}
+
+                                        <button
+                                            type="button"
+                                            onClick={handleNext}
+                                            disabled={loading}
+                                            className="inline-flex items-center justify-center gap-2 min-w-[130px] px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-60"
+                                        >
+                                            {loading ? (
+                                                <>
+                                                    <Loader2
+                                                        size={15}
+                                                        className="animate-spin"
+                                                    />
+                                                    Saving...
+                                                </>
+                                            ) : currentStep === 4 ? (
+                                                <>
+                                                    <Save size={15} />
+                                                    Save Employee
+                                                </>
+                                            ) : (
+                                                <>
+                                                    Continue
+                                                    <ChevronRight size={15} />
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </main>
                     </div>
                 </div>
             </div>
 
-            {/* Main Form Card */}
-            <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 p-5 sm:p-8 shadow-xs transition-all">
-                {error && (
-                    <div className="flex items-center gap-2.5 bg-rose-50 border border-rose-200/80 text-rose-700 text-xs sm:text-sm px-4 py-3 rounded-2xl mb-6 shadow-2xs">
-                        <AlertCircle size={16} className="shrink-0 text-rose-500" />
-                        <span className="font-semibold">{error}</span>
-                    </div>
-                )}
-
-                <form onSubmit={handleSubmit} className="space-y-8 sm:space-y-10">
-                    {/* SECTION 1: PERSONAL IDENTITY */}
-                    <div className="space-y-4">
-                        <SectionHeader icon={User} index={1} title="Personal Identity & Credentials" />
-
-                        <div className="flex flex-col items-center gap-2 pb-1">
-                            <div className="relative w-24 h-24 rounded-2xl bg-slate-100 border-2 border-dashed border-slate-300 p-1 flex items-center justify-center overflow-hidden group shadow-inner">
-                                {form.avatar ? (
-                                    <img src={form.avatar} alt="Preview" className="w-full h-full object-cover rounded-xl" />
-                                ) : (
-                                    <Camera className="w-8 h-8 text-slate-400" />
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-opacity cursor-pointer rounded-xl"
-                                >
-                                    <Upload size={14} />
-                                    <span>Upload Photo</span>
-                                </button>
-                            </div>
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept="image/*"
-                                onChange={handleAvatarUpload}
-                                className="hidden"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                className="text-xs font-bold text-indigo-600 hover:text-indigo-700 underline cursor-pointer"
-                            >
-                                Upload Profile Photo
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                            <Field icon={Hash} label="Employee ID">
-                                <input
-                                    type="text"
-                                    name="employeeId"
-                                    placeholder="e.g. EMP0001 (auto if blank)"
-                                    value={form.employeeId}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono uppercase`}
-                                />
-                            </Field>
-
-                            <Field icon={User} label="Full Name" required>
-                                <input
-                                    type="text"
-                                    name="name"
-                                    required
-                                    placeholder="e.g. Rahul Sharma"
-                                    value={form.name}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field icon={Mail} label="Corporate Email" required>
-                                <input
-                                    type="email"
-                                    name="email"
-                                    required
-                                    placeholder="rahul.sharma@company.com"
-                                    value={form.email}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field icon={Phone} label="Primary Phone">
-                                <input
-                                    type="tel"
-                                    name="phone"
-                                    placeholder="+91 98765 43210"
-                                    value={form.phone}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-
-                            <Field icon={User} label="Gender">
-                                <select
-                                    name="gender"
-                                    value={form.gender}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    {GENDER_OPTIONS.map((g) => (
-                                        <option key={g.value} value={g.value}>
-                                            {g.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-
-                            <Field icon={Calendar} label="Date of Birth">
-                                <input
-                                    type="date"
-                                    name="dateOfBirth"
-                                    value={form.dateOfBirth}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                />
-                            </Field>
-
-                            <Field icon={Droplet} label="Blood Group">
-                                <select
-                                    name="bloodGroup"
-                                    value={form.bloodGroup}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    <option value="">-- Select --</option>
-                                    {BLOOD_GROUPS.map((bg) => (
-                                        <option key={bg} value={bg}>
-                                            {bg}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-
-                            <Field icon={Heart} label="Marital Status">
-                                <select
-                                    name="maritalStatus"
-                                    value={form.maritalStatus}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    <option value="">-- Select --</option>
-                                    {MARITAL_STATUS_OPTIONS.map((s) => (
-                                        <option key={s} value={s}>
-                                            {s}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-                        </div>
-                    </div>
-
-                    {/* SECTION 2: JOB & ORGANIZATION ASSIGNMENT */}
-                    <div className="space-y-4">
-                        <SectionHeader icon={Building2} index={2} title="Job Role & Organization Assignment" />
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                            <Field icon={Building2} label="Department" required>
-                                <select
-                                    name="department"
-                                    required
-                                    value={form.department}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    <option value="">-- Select Active Department --</option>
-                                    {departmentsList.map((dept, index) => {
-                                        const deptId = dept._id || dept.id || index;
-                                        const label = dept.name || dept.title || dept;
-                                        return (
-                                            <option key={deptId} value={deptId}>
-                                                {label}
-                                            </option>
-                                        );
-                                    })}
-                                </select>
-                            </Field>
-
-                            <Field icon={Briefcase} label="Job Designation" required>
-                                <select
-                                    name="designation"
-                                    required
-                                    value={form.designation}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    <option value="">-- Select Designation --</option>
-                                    {designationsList.map((desig, index) => {
-                                        const label = typeof desig === "string" ? desig : desig.title || desig.name || "";
-                                        const val = desig._id || label;
-                                        return (
-                                            <option key={desig._id || index} value={val}>
-                                                {label}
-                                            </option>
-                                        );
-                                    })}
-                                </select>
-                            </Field>
-
-                            <Field icon={MapPin} label="Branch / Workplace Hub">
-                                <input
-                                    type="text"
-                                    name="branch"
-                                    list="branches-datalist"
-                                    value={form.branch}
-                                    onChange={handleChange}
-                                    placeholder="Type or pick workplace hub..."
-                                    className={inputClass}
-                                />
-                                <datalist id="branches-datalist">
-                                    {branchesList.map((b, i) => {
-                                        const name = typeof b === "string" ? b : b.name || b.location || "";
-                                        return name ? <option key={b._id || i} value={name} /> : null;
-                                    })}
-                                </datalist>
-                            </Field>
-
-                            <Field icon={Clock} label="Employment Type">
-                                <select
-                                    name="employmentType"
-                                    value={form.employmentType}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    {EMPLOYMENT_TYPES.map((t) => (
-                                        <option key={t} value={t}>
-                                            {t}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-
-                            <Field icon={Calendar} label="Date of Joining">
-                                <input
-                                    type="date"
-                                    name="dateOfJoining"
-                                    value={form.dateOfJoining}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                />
-                            </Field>
-
-                            <Field icon={User} label="Reporting Manager">
-                                <input
-                                    type="text"
-                                    name="reportingManager"
-                                    list="managers-datalist"
-                                    value={form.reportingManager}
-                                    onChange={handleChange}
-                                    placeholder="Type or pick manager name..."
-                                    className={inputClass}
-                                />
-                                <datalist id="managers-datalist">
-                                    {managersList.map((m) => {
-                                        const name = m.name || `${m.firstName || ""} ${m.lastName || ""}`.trim();
-                                        return name ? <option key={m._id} value={name} /> : null;
-                                    })}
-                                </datalist>
-                            </Field>
-
-                            <Field icon={BadgeCheck} label="Employee Status">
-                                <select
-                                    name="employeeStatus"
-                                    value={form.employeeStatus}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    {EMPLOYEE_STATUS_OPTIONS.map((s) => (
-                                        <option key={s} value={s}>
-                                            {s}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-                        </div>
-                    </div>
-
-                    {/* SECTION 3: SALARY & BANK DETAILS */}
-                    <div className="space-y-4">
-                        <SectionHeader icon={IndianRupee} index={3} title="Salary & Bank Details" />
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                            <Field icon={IndianRupee} label="Monthly Base CTC (₹)">
-                                <input
-                                    type="number"
-                                    name="salary"
-                                    placeholder="e.g. 65000"
-                                    value={form.salary}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-
-                            <Field icon={CreditCard} label="Payment Mode">
-                                <select
-                                    name="paymentMode"
-                                    value={form.paymentMode}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    {PAYMENT_MODES.map((m) => (
-                                        <option key={m} value={m}>
-                                            {m}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-
-                            <Field icon={Landmark} label="Bank Name">
-                                <input
-                                    type="text"
-                                    name="bankName"
-                                    placeholder="e.g. HDFC Bank"
-                                    value={form.bankName}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field icon={Hash} label="Account Number">
-                                <input
-                                    type="text"
-                                    name="accountNumber"
-                                    placeholder="e.g. 5021XXXXXX1234"
-                                    value={form.accountNumber}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-
-                            <Field icon={Hash} label="IFSC Code">
-                                <input
-                                    type="text"
-                                    name="ifscCode"
-                                    placeholder="e.g. HDFC0001234"
-                                    value={form.ifscCode}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono uppercase`}
-                                />
-                            </Field>
-
-                            <Field icon={Hash} label="PAN Number (Unique)">
-                                <input
-                                    type="text"
-                                    name="panNumber"
-                                    placeholder="e.g. ABCDE1234F"
-                                    value={form.panNumber}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono uppercase`}
-                                />
-                            </Field>
-
-                            <Field icon={Hash} label="UAN Number (PF)">
-                                <input
-                                    type="text"
-                                    name="uanNumber"
-                                    placeholder="e.g. 101234567890"
-                                    value={form.uanNumber}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-                        </div>
-                    </div>
-
-                    {/* SECTION 4: EMERGENCY CONTACT & RESIDENTIAL ADDRESS */}
-                    <div className="space-y-4">
-                        <SectionHeader icon={ShieldAlert} index={4} title="Emergency Contact & Residential Address" />
-
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
-                            <Field label="Emergency Contact Name">
-                                <input
-                                    type="text"
-                                    name="emergencyContactName"
-                                    placeholder="e.g. Sunita Sharma"
-                                    value={form.emergencyContactName}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field label="Relationship">
-                                <input
-                                    type="text"
-                                    name="emergencyContactRelation"
-                                    placeholder="e.g. Spouse / Father / Sister"
-                                    value={form.emergencyContactRelation}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field label="Emergency Phone Number">
-                                <input
-                                    type="tel"
-                                    name="emergencyContactPhone"
-                                    placeholder="+91 98111 22334"
-                                    value={form.emergencyContactPhone}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-
-                            <div className="sm:col-span-3">
-                                <Field icon={MapPin} label="Street Address">
-                                    <input
-                                        type="text"
-                                        name="address"
-                                        placeholder="Apartment/House No, Floor, Landmark, Area street..."
-                                        value={form.address}
-                                        onChange={handleChange}
-                                        className={inputClass}
-                                    />
-                                </Field>
-                            </div>
-
-                            <Field label="City">
-                                <input
-                                    type="text"
-                                    name="city"
-                                    placeholder="e.g. Noida / Bengaluru"
-                                    value={form.city}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field label="State / Province">
-                                <input
-                                    type="text"
-                                    name="state"
-                                    placeholder="e.g. Uttar Pradesh / Karnataka"
-                                    value={form.state}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field label="Postal PIN Code">
-                                <input
-                                    type="text"
-                                    name="pincode"
-                                    placeholder="e.g. 201301"
-                                    value={form.pincode}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-                        </div>
-                    </div>
-
-                    {/* SECTION 5: EDUCATION & EXPERIENCE */}
-                    <div className="space-y-4">
-                        <SectionHeader icon={GraduationCap} index={5} title="Education & Prior Experience" />
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                            <Field icon={GraduationCap} label="Highest Qualification">
-                                <input
-                                    type="text"
-                                    name="highestQualification"
-                                    placeholder="e.g. B.Tech CSE"
-                                    value={form.highestQualification}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field label="Institute / University">
-                                <input
-                                    type="text"
-                                    name="instituteName"
-                                    placeholder="e.g. Vivekananda Global University"
-                                    value={form.instituteName}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field icon={Calendar} label="Year of Passing">
-                                <input
-                                    type="number"
-                                    name="yearOfPassing"
-                                    placeholder="e.g. 2023"
-                                    value={form.yearOfPassing}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-
-                            <Field icon={Briefcase} label="Previous Company">
-                                <input
-                                    type="text"
-                                    name="previousCompany"
-                                    placeholder="e.g. Codtech IT Solutions"
-                                    value={form.previousCompany}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field label="Previous Designation">
-                                <input
-                                    type="text"
-                                    name="previousDesignation"
-                                    placeholder="e.g. Frontend Developer Intern"
-                                    value={form.previousDesignation}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field label="Total Prior Experience (Years)">
-                                <input
-                                    type="number"
-                                    step="0.1"
-                                    name="previousExperienceYears"
-                                    placeholder="e.g. 1.5"
-                                    value={form.previousExperienceYears}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono`}
-                                />
-                            </Field>
-                        </div>
-                    </div>
-
-                    {/* SECTION 6: DOCUMENTS & IDENTITY PROOF (UNIQUE ID NUMBER ENFORCED) */}
-                    <div className="space-y-4">
-                        <SectionHeader icon={FileText} index={6} title="Identity Verification & Document Upload" />
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                            <Field icon={BadgeCheck} label="ID Document Type" required>
-                                <select
-                                    name="idProofType"
-                                    value={form.idProofType}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    {ID_PROOF_TYPES.map((type) => (
-                                        <option key={type} value={type}>
-                                            {type}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-
-                            <Field icon={Hash} label="Document Unique ID Number" required>
-                                <input
-                                    type="text"
-                                    name="idProofNumber"
-                                    required
-                                    placeholder="Enter Document ID Number"
-                                    value={form.idProofNumber}
-                                    onChange={handleChange}
-                                    className={`${inputClass} font-mono uppercase`}
-                                />
-                            </Field>
-
-                            <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Upload size={13} className="text-indigo-600 shrink-0" /> Upload ID Proof File
-                                </label>
-                                <div
-                                    onClick={() => idProofInputRef.current?.click()}
-                                    className="w-full px-4 py-2.5 sm:py-3 bg-slate-50/70 hover:bg-slate-50 border border-dashed border-slate-300 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-500 flex items-center justify-between gap-2 cursor-pointer transition-all"
-                                >
-                                    <span className="truncate flex items-center gap-2">
-                                        <Upload size={14} className="text-indigo-600 shrink-0" />
-                                        {form.idProofFileName || "Upload ID file (PDF/Image)"}
-                                    </span>
-                                    {form.idProofFileName && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setForm((prev) => ({ ...prev, idProofFileName: "", idProofFileData: "" }));
-                                            }}
-                                            className="p-1 rounded-full hover:bg-slate-200 text-slate-500 cursor-pointer shrink-0"
-                                        >
-                                            <X size={13} />
-                                        </button>
-                                    )}
-                                </div>
-                                <input
-                                    ref={idProofInputRef}
-                                    type="file"
-                                    accept=".pdf,image/*"
-                                    onChange={(e) => handleDocUpload(e, "idProofFileData", "idProofFileName")}
-                                    className="hidden"
-                                />
-                            </div>
-
-                            {/* Resume Upload */}
-                            <div className="sm:col-span-2 lg:col-span-3 space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                    <FileText size={13} className="text-indigo-600 shrink-0" /> Resume / Curriculum Vitae (CV)
-                                </label>
-                                <div
-                                    onClick={() => resumeInputRef.current?.click()}
-                                    className="w-full px-4 py-3 bg-slate-50/70 hover:bg-slate-50 border border-dashed border-slate-300 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-semibold text-slate-500 flex items-center justify-between gap-2 cursor-pointer transition-all"
-                                >
-                                    <span className="truncate flex items-center gap-2">
-                                        <Upload size={14} className="text-indigo-600 shrink-0" />
-                                        {form.resumeFileName || "Click to attach candidate resume (PDF/DOC up to 2MB)"}
-                                    </span>
-                                    {form.resumeFileName && (
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setForm((prev) => ({ ...prev, resumeFileName: "", resumeFileData: "" }));
-                                            }}
-                                            className="p-1 rounded-full hover:bg-slate-200 text-slate-500 cursor-pointer shrink-0"
-                                        >
-                                            <X size={13} />
-                                        </button>
-                                    )}
-                                </div>
-                                <input
-                                    ref={resumeInputRef}
-                                    type="file"
-                                    accept=".pdf,.doc,.docx"
-                                    onChange={(e) => handleDocUpload(e, "resumeFileData", "resumeFileName")}
-                                    className="hidden"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* SECTION 7: ACCOUNT & ACCESS */}
-                    <div className="space-y-4">
-                        <SectionHeader icon={KeyRound} index={7} title="Account & Access" />
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                            <Field icon={Mail} label="Login Email">
-                                <input
-                                    type="email"
-                                    name="loginEmail"
-                                    placeholder="Defaults to corporate email if blank"
-                                    value={form.loginEmail}
-                                    onChange={handleChange}
-                                    className={inputClass}
-                                />
-                            </Field>
-
-                            <Field icon={KeyRound} label="System Role">
-                                <select
-                                    name="role"
-                                    value={form.role}
-                                    onChange={handleChange}
-                                    className={`${inputClass} cursor-pointer`}
-                                >
-                                    {ROLE_OPTIONS.map((r) => (
-                                        <option key={r} value={r}>
-                                            {r}
-                                        </option>
-                                    ))}
-                                </select>
-                            </Field>
-                        </div>
-                        <p className="text-[11px] text-slate-400 font-medium">
-                            An invite link with initial login credentials will be generated upon registration.
-                        </p>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5 sm:gap-3 pt-5 border-t border-slate-100">
-                        <button
-                            type="button"
-                            onClick={() => router.back()}
-                            className="w-full sm:w-auto px-5 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs sm:text-sm font-bold transition-all active:scale-95 cursor-pointer"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-sm shadow-indigo-600/20 disabled:opacity-60 transition-all active:scale-95 cursor-pointer"
-                        >
-                            {loading ? (
-                                <>
-                                    <Loader2 size={16} className="animate-spin shrink-0" />
-                                    <span>Submitting & Redirecting...</span>
-                                </>
-                            ) : editId ? (
-                                <>
-                                    <Save size={16} className="shrink-0" />
-                                    <span>Update Profile</span>
-                                </>
-                            ) : (
-                                <>
-                                    <UserPlus size={16} className="shrink-0" />
-                                    <span>Complete Registration</span>
-                                </>
-                            )}
-                        </button>
-                    </div>
-                </form>
-            </div>
+            {/* Small reusable label styles */}
+            <style jsx>{`
+        .field-label {
+          display: block;
+          margin-bottom: 7px;
+          font-size: 11px;
+          line-height: 1;
+          font-weight: 700;
+          color: #64748b;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+      `}</style>
         </div>
     );
 }
+
+/* -------------------------------------------------------------------------- */
+/* PAGE                                                                       */
+/* -------------------------------------------------------------------------- */
 
 export default function AddEmployeePage() {
     return (
         <Suspense
             fallback={
-                <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
-                    <Loader2 size={36} className="animate-spin text-indigo-600" />
-                    <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
-                        Loading Form...
-                    </p>
+                <div className="min-h-[500px] flex items-center justify-center">
+                    <Loader2
+                        size={32}
+                        className="animate-spin text-indigo-600"
+                    />
                 </div>
             }
         >

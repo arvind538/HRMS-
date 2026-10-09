@@ -38,3 +38,5 @@ export const isTokenExpired = (token) => {
     if (!decoded?.exp) return true;
     return Date.now() >= decoded.exp * 1000;
 };
+
+export const getUser = getStoredUser;

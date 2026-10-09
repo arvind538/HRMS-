@@ -676,7 +676,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
 
                     {/* footer */}
                     <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-t border-slate-100 shrink-0">
-                        <button
+                        {/* <button
                             type="button"
                             onClick={() => onOpenFull(row._id)}
                             className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-indigo-600 transition cursor-pointer"
@@ -684,7 +684,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
                             <ExternalLink size={13} />
                             <span className="hidden sm:inline">Open full profile</span>
                             <span className="sm:hidden">Full profile</span>
-                        </button>
+                        </button> */}
 
                         <span className="hidden sm:block text-[11px] font-semibold text-slate-400">
                             Step {step} of {QV_STEPS.length}

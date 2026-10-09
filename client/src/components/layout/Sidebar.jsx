@@ -373,7 +373,7 @@ function SidebarContent({
                     </div>
                 ) : filteredMenu.length === 0 ? (
                     <p className="py-8 text-center text-xs text-slate-400">
-                        Koi menu nahi mila
+                        No menu found.
                     </p>
                 ) : (
                     filteredMenu.map((item) => (

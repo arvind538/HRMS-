@@ -5,11 +5,11 @@
 const pathOverrides = {
     // ---------- Dashboard ----------
     "/dashboard": ["admin", "hr", "manager", "employee"],
-    "/dashboard/analytics": ["admin", "hr"],
-    "/dashboard/employee-stats": ["admin", "hr"],
-    "/dashboard/attendance-summary": ["admin", "hr", "manager"],
-    "/dashboard/leave-summary": ["admin", "hr", "manager"],
-    "/dashboard/payroll-summary": ["admin", "hr"],
+    // "/dashboard/analytics": ["admin", "hr", "employee"],
+    // "/dashboard/employee-stats": ["admin", "hr", "employee"],
+    // "/dashboard/attendance-summary": ["admin", "hr", "manager", "employee"],
+    // "/dashboard/leave-summary": ["admin", "hr", "manager"],
+    // "/dashboard/payroll-summary": ["admin", "hr"],
 
     // ---------- Employee Management ----------
     "/employees": ["admin", "hr", "manager"],

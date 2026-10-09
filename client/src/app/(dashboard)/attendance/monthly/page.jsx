@@ -14,7 +14,6 @@ import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
-// Explicit privileged roles including manager variations
 const PRIVILEGED_ROLES = ["admin", "hr", "manager", "team_lead", "lead"];
 
 function AccessDeniedScreen({ role, router }) {
@@ -54,7 +53,6 @@ export default function MonthlyAttendance() {
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-  // Safe normalized role extraction
   const currentRole = useMemo(() => {
     if (!user) return null;
     const rawRole = user.role || user.userRole || user.type;
@@ -78,7 +76,6 @@ export default function MonthlyAttendance() {
 
       const params = { month: selectedMonth, year: selectedYear };
 
-      // Agar regular employee hai toh backend me bhi employeeId bhej sakein (optional agar backend support kare)
       if (!isPrivileged && user?._id) {
         params.employeeId = user._id;
       }
@@ -94,7 +91,15 @@ export default function MonthlyAttendance() {
         if (!empId) return;
 
         if (!employeeMap[empId]) {
-          const resolvedCode = empObj?.employeeId || empObj?.empId || empObj?.code || (typeof empId === 'string' ? empId.slice(-6) : "—");
+          // Properly resolve the employee ID / Code with multiple fallbacks
+          const resolvedCode =
+            empObj?.employeeId ||
+            empObj?.empId ||
+            empObj?.code ||
+            empObj?.staffId ||
+            user?.employeeId ||
+            user?.empId ||
+            "EMP-001";
 
           employeeMap[empId] = {
             employee: empObj ? { ...empObj, employeeId: resolvedCode } : { _id: empId, name: user?.name || "Staff Member", employeeId: resolvedCode },
@@ -191,17 +196,14 @@ export default function MonthlyAttendance() {
     }
   };
 
-  // STRICT FILTER: Agar employee login hai toh sirf usi ka record dikhega, dusro ka nahi!
   const visibleList = useMemo(() => {
     if (!isPrivileged) {
-      // Current logged-in user ki ID match karne wala record hi filter karein
       return groupedData.filter((item) => {
         const itemEmpId = item.employee?._id || item.employee?.id;
         return itemEmpId === user?._id || (item.employee?.name && user?.name && item.employee.name.toLowerCase() === user.name.toLowerCase());
       });
     }
 
-    // Admin ke liye search term filter kaam karega
     const q = searchTerm.toLowerCase();
     return groupedData.filter((item) => {
       const name = (item.employee?.name || '').toLowerCase();
@@ -233,7 +235,6 @@ export default function MonthlyAttendance() {
 
   return (
     <div className="w-full space-y-5 animate-in fade-in duration-300 pb-12 font-sans">
-
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div>
@@ -354,7 +355,7 @@ export default function MonthlyAttendance() {
               ) : (
                 visibleList.map((item, index) => {
                   const empName = item.employee?.name || item.employee?.username || "Staff Member";
-                  const empCode = item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?._id?.slice(-6) || "—";
+                  const empCode = item.employee?.employeeId || item.employee?.empId || item.employee?.code || item.employee?.staffId || "EMP-001";
 
                   return (
                     <tr key={item.employee._id || index} className="hover:bg-indigo-50/40 transition-all duration-150 group">
@@ -363,7 +364,7 @@ export default function MonthlyAttendance() {
                           <span className="text-xs text-slate-400 font-medium">{index + 1}.</span>
                           <div className="overflow-hidden">
                             <div className="font-semibold text-slate-900 truncate max-w-[140px]" title={empName}>{empName}</div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">{item.employee?.department || empCode}</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">{empCode}</div>
                           </div>
                         </div>
                       </td>
@@ -407,7 +408,6 @@ export default function MonthlyAttendance() {
           </span>
         </div>
       </div>
-
     </div>
   );
 }

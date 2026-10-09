@@ -41,6 +41,7 @@ const holidayRoutes = require("./routes/holidayRoutes");
 const designationRoutes = require("./routes/designationRoutes");
 
 const app = express();
+app.set("trust proxy", 1); // Render par zaruri, warna rate limit sab users ko ek hi IP maanta hai
 connectDB();
 
 app.use(

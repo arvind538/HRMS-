@@ -47,11 +47,11 @@ export const menuConfig = [
         icon: LayoutDashboard,
         children: [
             { label: "Overview", href: "/dashboard" },
-            { label: "HR Analytics", href: "/dashboard/analytics" },
-            { label: "Employee Statistics", href: "/dashboard/employee-stats" },
-            { label: "Attendance Summary", href: "/dashboard/attendance-summary" },
-            { label: "Leave Summary", href: "/dashboard/leave-summary" },
-            { label: "Payroll Summary", href: "/dashboard/payroll-summary" },
+            // { label: "HR Analytics", href: "/dashboard/analytics" },
+            // { label: "Employee Statistics", href: "/dashboard/employee-stats" },
+            // { label: "Attendance Summary", href: "/dashboard/attendance-summary" },
+            // { label: "Leave Summary", href: "/dashboard/leave-summary" },
+            // { label: "Payroll Summary", href: "/dashboard/payroll-summary" },
         ],
     },
     {

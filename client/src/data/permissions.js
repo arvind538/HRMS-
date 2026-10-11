@@ -19,7 +19,7 @@ const pathOverrides = {
     // "/employees/documents": ["admin", "hr"],
     "/employees/id-cards": ["admin", "hr"],
     "/employees/emergency-contacts": ["admin", "hr"],
-    "/employees/history": ["admin", "hr"],
+    "/employees/history": ["admin"],
     "/employees/exit": ["admin", "hr"],
 
     // ---------- Organization ----------

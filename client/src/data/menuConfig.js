@@ -46,7 +46,7 @@ export const menuConfig = [
         label: "Dashboard",
         icon: LayoutDashboard,
         children: [
-            { label: "Overview", href: "/dashboard" },
+            { label: "overview", href: "/dashboard" },
             // { label: "HR Analytics", href: "/dashboard/analytics" },
             // { label: "Employee Statistics", href: "/dashboard/employee-stats" },
             // { label: "Attendance Summary", href: "/dashboard/attendance-summary" },
@@ -104,7 +104,7 @@ export const menuConfig = [
         children: [
             { label: "Attendance Dashboard", href: "/attendance" },
             { label: "Daily Attendance", href: "/attendance/daily" },
-            { label: "Monthly Attendance ", href: "/attendance/monthly" },
+            { label: "Attendance Details ", href: "/attendance/monthly" },
             // { label: "Check In / Check Out", href: "/attendance/check-in-out" },
 
             // { label: "Biometric Attendance", href: "/attendance/biometric" },

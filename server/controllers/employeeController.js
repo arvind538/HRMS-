@@ -9,6 +9,9 @@ const ROLES = ["Employee", "Manager", "HR", "Admin"];
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,32}$/;
 const PASSWORD_MESSAGE =
     "Password must be 8-32 characters with an uppercase letter, a lowercase letter and a number.";
+const EMAIL_REGEX = /^\S+@\S+\.\S+$/;
+const AADHAAR_REGEX = /^[2-9]\d{11}$/;
+const PAN_REGEX = /^[A-Z]{5}\d{4}[A-Z]$/;
 const CI = { locale: "en", strength: 2 }; // case-insensitive email match
 
 /* ----------------------------- helpers ----------------------------- */
@@ -16,6 +19,8 @@ const CI = { locale: "en", strength: 2 }; // case-insensitive email match
 const str = (v) => (v === undefined || v === null ? "" : String(v).trim());
 const rawStr = (v) => (v === undefined || v === null ? "" : String(v)); // base64 and passwords (no trim)
 const lower = (v) => str(v).toLowerCase();
+const upper = (v) => str(v).toUpperCase();
+const digits = (v) => str(v).replace(/\D/g, "");
 
 // id ya {_id} object ho to usse plain string bana do
 const refString = (v) => {
@@ -36,6 +41,9 @@ const normalizeStatus = (v) => {
 };
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/* Fields only admin and HR may see */
+const SENSITIVE_FIELDS = ["salary", "bankDetails", "documents", "idProofNumber", "aadhaarNumber", "panNumber"];
 
 /* ------------------------- role and access ------------------------- */
 
@@ -81,7 +89,7 @@ const findLinkedUser = async (employee) => {
     const byRef = await User.findOne({ employee: employee._id });
     if (byRef) return byRef;
 
-    const emails = [employee.email, employee.loginEmail].map(lower).filter(Boolean);
+    const emails = [employee.loginEmail, employee.email].map(lower).filter(Boolean);
     for (const email of emails) {
         const byEmail = await findUserByEmail(email);
         if (byEmail && (!byEmail.employee || String(byEmail.employee) === String(employee._id))) {
@@ -154,7 +162,7 @@ const buildEmployeeData = (body = {}) => {
     const flatOrNested = (flat, nested) => (body[flat] !== undefined ? body[flat] : nested);
 
     /* Personal */
-    setIf("employeeId", body.employeeId, (v) => str(v).toUpperCase(), true);
+    setIf("employeeId", body.employeeId, upper, true);
     setIf("firstName", body.firstName);
     setIf("lastName", body.lastName);
     setIf("name", body.name, str, true);
@@ -162,10 +170,10 @@ const buildEmployeeData = (body = {}) => {
         const full = `${str(body.firstName)} ${str(body.lastName)}`.trim();
         if (full) data.name = full;
     }
-    setIf("email", body.email, (v) => str(v).toLowerCase(), true);
-    setIf("loginEmail", body.loginEmail, (v) => str(v).toLowerCase());
+    setIf("email", body.email, lower, true);
+    setIf("loginEmail", body.loginEmail, lower, true);
     setIf("phone", body.phone);
-    setIf("gender", body.gender, (v) => str(v).toLowerCase(), true);
+    setIf("gender", body.gender, lower, true);
     if (data.gender && !GENDERS.includes(data.gender)) delete data.gender;
     setIf("timeZone", body.timeZone);
     setIf("avatar", body.avatar, rawStr);
@@ -194,13 +202,17 @@ const buildEmployeeData = (body = {}) => {
     /* Identity */
     setIf("nationalIdType", body.nationalIdType);
     setIf("nationalIdOther", body.nationalIdOther);
-    setIf("idProofNumber", body.idProofNumber !== undefined ? body.idProofNumber : body.nationalId);
+    setIf("aadhaarNumber", body.aadhaarNumber, digits);
+    setIf("panNumber", body.panNumber, upper);
+    setIf("idProofNumber", body.idProofNumber !== undefined ? body.idProofNumber : body.nationalId, upper);
+    // Older forms only sent one ID number. The Aadhaar number is the main ID.
+    if (data.aadhaarNumber && data.idProofNumber === undefined) data.idProofNumber = data.aadhaarNumber;
 
     /* Bank */
     ["accountName", "bankName", "branchName", "accountNumber"].forEach((k) =>
         setIf(`bankDetails.${k}`, flatOrNested(k, bank[k]))
     );
-    setIf("bankDetails.ifscCode", flatOrNested("ifscCode", bank.ifscCode), (v) => str(v).toUpperCase());
+    setIf("bankDetails.ifscCode", flatOrNested("ifscCode", bank.ifscCode), upper);
 
     /* Documents (base64 images) */
     [
@@ -208,6 +220,8 @@ const buildEmployeeData = (body = {}) => {
         "nationalIdFrontFileData",
         "nationalIdBackFileName",
         "nationalIdBackFileData",
+        "panCardFileName",
+        "panCardFileData",
         "passportPhotoFileName",
         "passportPhotoData",
     ].forEach((k) => setIf(`documents.${k}`, docs[k] !== undefined ? docs[k] : body[k], rawStr));
@@ -215,18 +229,58 @@ const buildEmployeeData = (body = {}) => {
     return data;
 };
 
-// employeeId / email / ID document number duplicate check
+/* Format checks done on the server, because the browser can be bypassed */
+const validateInput = (data, isCreate) => {
+    if (data.email && !EMAIL_REGEX.test(data.email)) return "Please enter a valid personal email address.";
+    if (data.loginEmail && !EMAIL_REGEX.test(data.loginEmail)) return "Please enter a valid login email address.";
+
+    if (isCreate || data.aadhaarNumber) {
+        if (!AADHAAR_REGEX.test(data.aadhaarNumber || "")) {
+            return "Aadhaar number must be 12 digits and cannot start with 0 or 1.";
+        }
+    }
+    if (isCreate || data.panNumber) {
+        if (!PAN_REGEX.test(data.panNumber || "")) {
+            return "Enter a valid PAN number (for example, ABCDE1234F).";
+        }
+    }
+    return null;
+};
+
+// employeeId / emails / Aadhaar / PAN duplicate check
 const findDuplicate = async (data, excludeId) => {
     const notSelf = excludeId ? { _id: { $ne: excludeId } } : {};
-    const checks = [
-        ["employeeId", "Employee ID"],
-        ["email", "Email"],
-        ["idProofNumber", "Document ID number"],
-    ];
-    for (const [field, label] of checks) {
-        if (!data[field]) continue;
-        const dup = await Employee.exists({ [field]: data[field], ...notSelf });
-        if (dup) return `${label} "${data[field]}" is already registered with another employee.`;
+    const checks = [];
+
+    if (data.employeeId) checks.push([{ employeeId: data.employeeId }, "Employee ID", data.employeeId]);
+    if (data.email) checks.push([{ email: data.email }, "Personal email", data.email]);
+    if (data.loginEmail) {
+        checks.push([
+            { $or: [{ loginEmail: data.loginEmail }, { email: data.loginEmail }] },
+            "Login email",
+            data.loginEmail,
+        ]);
+    }
+    if (data.aadhaarNumber) {
+        checks.push([
+            { $or: [{ aadhaarNumber: data.aadhaarNumber }, { idProofNumber: data.aadhaarNumber }] },
+            "Aadhaar number",
+            data.aadhaarNumber,
+        ]);
+    } else if (data.idProofNumber) {
+        checks.push([{ idProofNumber: data.idProofNumber }, "Document ID number", data.idProofNumber]);
+    }
+    if (data.panNumber) {
+        checks.push([
+            { $or: [{ panNumber: data.panNumber }, { idProofNumber: data.panNumber }] },
+            "PAN number",
+            data.panNumber,
+        ]);
+    }
+
+    for (const [filter, label, value] of checks) {
+        const dup = await Employee.exists({ ...filter, ...notSelf });
+        if (dup) return `${label} "${value}" is already registered with another employee.`;
     }
     return null;
 };
@@ -250,6 +304,10 @@ const createEmployee = async (req, res) => {
         if (missing.length) {
             return res.status(400).json({ message: `Required fields missing: ${missing.join(", ")}` });
         }
+
+        const invalid = validateInput(data, true);
+        if (invalid) return res.status(400).json({ message: invalid });
+
         if (!PASSWORD_REGEX.test(password)) {
             return res.status(400).json({ message: PASSWORD_MESSAGE });
         }
@@ -260,7 +318,7 @@ const createEmployee = async (req, res) => {
         const dupMessage = await findDuplicate(data);
         if (dupMessage) return res.status(409).json({ message: dupMessage });
 
-        if (await loginEmailTaken(data.email)) {
+        if (await loginEmailTaken(data.loginEmail)) {
             return res.status(409).json({ message: "A login account with this email already exists." });
         }
 
@@ -272,7 +330,7 @@ const createEmployee = async (req, res) => {
         try {
             await User.create({
                 name: saved.name,
-                email: saved.email,
+                email: saved.loginEmail,
                 password: await hashPassword(password),
                 role: userRoleFrom(saved.role),
                 employee: saved._id,
@@ -286,12 +344,16 @@ const createEmployee = async (req, res) => {
 
         await logActivity(req, `Created new employee profile and login: ${saved.name} (${saved.employeeId})`);
 
+        // The response does not need the heavy base64 documents
+        const out = saved.toObject();
+        delete out.documents;
+
         return res.status(201).json({
             success: true,
             message: "Employee registered successfully. Login account created.",
             loginCreated: true,
-            employee: saved,
-            data: saved,
+            employee: out,
+            data: out,
         });
     } catch (error) {
         return handleError(res, error, "Failed to save employee.");
@@ -308,12 +370,21 @@ const updateEmployee = async (req, res) => {
             return res.status(404).json({ message: "Employee record not found." });
         }
 
-        const current = await Employee.findById(id).select("_id name email loginEmail employeeId role employeeStatus");
+        const current = await Employee.findById(id).select(
+            "_id name email loginEmail employeeId role employeeStatus"
+        );
         if (!current) return res.status(404).json({ message: "Employee record not found." });
 
         const data = buildEmployeeData(req.body || {});
         if (req.files?.avatar?.[0]) data.avatar = `/uploads/${req.files.avatar[0].filename}`;
-        if (data.email && !data.loginEmail) data.loginEmail = data.email; // keep login email in sync
+
+        // Old records without a login email: use the personal email
+        if (!data.loginEmail && !current.loginEmail && (data.email || current.email)) {
+            data.loginEmail = data.email || current.email;
+        }
+
+        const invalid = validateInput(data, false);
+        if (invalid) return res.status(400).json({ message: invalid });
 
         if (data.role && needsAdmin(data.role) && data.role !== current.role && roleOf(req) !== "admin") {
             return deny(res, "Only an admin can assign the Admin or HR role.");
@@ -329,11 +400,15 @@ const updateEmployee = async (req, res) => {
         }
 
         const linkedUser = await findLinkedUser(current);
-        const emailChanged = data.email && data.email !== lower(linkedUser?.email || current.email);
-        if (emailChanged && (await loginEmailTaken(data.email, linkedUser?._id))) {
+        const loginEmailChanged =
+            data.loginEmail && data.loginEmail !== lower(linkedUser?.email || current.loginEmail || current.email);
+
+        if (loginEmailChanged && (await loginEmailTaken(data.loginEmail, linkedUser?._id))) {
             return res.status(409).json({ message: "A login account with this email already exists." });
         }
-        if (!linkedUser && newPassword && (await loginEmailTaken(data.email || current.email))) {
+
+        const newLoginEmail = data.loginEmail || current.loginEmail || data.email || current.email;
+        if (!linkedUser && newPassword && (await loginEmailTaken(newLoginEmail))) {
             return res.status(409).json({ message: "A login account with this email already exists." });
         }
 
@@ -353,7 +428,7 @@ const updateEmployee = async (req, res) => {
 
             if (!linkedUser.employee) set.employee = updated._id;
             if (data.name) set.name = data.name;
-            if (data.email) set.email = data.email;
+            if (loginEmailChanged) set.email = data.loginEmail;
             // Never let someone lock themselves out or change their own role by mistake
             if (data.role && !editingOwnLogin) set.role = userRoleFrom(data.role);
             if (data.employeeStatus && !editingOwnLogin) set.isActive = isLoginActive(data.employeeStatus);
@@ -374,7 +449,7 @@ const updateEmployee = async (req, res) => {
             // Older employee who never had a login: create it now
             await User.create({
                 name: updated.name,
-                email: updated.email,
+                email: updated.loginEmail || updated.email,
                 password: await hashPassword(newPassword),
                 role: userRoleFrom(updated.role),
                 employee: updated._id,
@@ -385,11 +460,14 @@ const updateEmployee = async (req, res) => {
 
         await logActivity(req, `Updated employee profile: ${updated.name} (${updated.employeeId})`);
 
+        const out = updated.toObject();
+        delete out.documents;
+
         return res.status(200).json({
             success: true,
             message: `Employee updated successfully.${loginMessage}`,
-            employee: updated,
-            data: updated,
+            employee: out,
+            data: out,
         });
     } catch (error) {
         return handleError(res, error, "Failed to update employee profile.");
@@ -414,18 +492,18 @@ const getEmployees = async (req, res, next) => {
         const { status, department, search } = req.query;
         const filter = {};
 
-        if (status) filter.employeeStatus = status;
-        if (department) filter.department = department;
+        if (status) filter.employeeStatus = String(status);
+        if (department) filter.department = String(department);
         if (search && String(search).trim()) {
             const rx = new RegExp(escapeRegex(String(search).trim()), "i");
-            filter.$or = [{ name: rx }, { email: rx }, { employeeId: rx }];
+            filter.$or = [{ name: rx }, { email: rx }, { loginEmail: rx }, { employeeId: rx }];
         }
 
         // Heavy base64 documents and bank details are never needed in the list.
-        // Managers also do not see salary or ID numbers.
+        // Managers also do not see salary, Aadhaar or PAN numbers.
         const hidden = canManage(req)
             ? "-documents -bankDetails"
-            : "-documents -bankDetails -salary -idProofNumber";
+            : "-documents -bankDetails -salary -idProofNumber -aadhaarNumber -panNumber";
 
         const employees = await Employee.find(filter).select(hidden).sort({ createdAt: -1 });
 
@@ -435,22 +513,42 @@ const getEmployees = async (req, res, next) => {
     }
 };
 
-// @route GET /api/employees/profile  (logged-in user's own profile)
+
+// @route GET /api/employees/profile and /api/employees/me  (logged-in user's own profile)
 const getMyProfile = async (req, res, next) => {
     try {
         const employee = await findMyEmployee(req);
+        if (employee) return res.status(200).json(employee);
 
-        if (!employee) {
-            return res.status(404).json({
-                message: "Employee profile not found. Please contact HR to link your profile.",
-            });
-        }
-
-        return res.status(200).json(employee);
+        // No linked employee profile (admin, HR, or an account that is not linked yet):
+        // return the login details instead of a 404, so the app keeps working.
+        return res.status(200).json({
+            _id: req.user._id,
+            name: req.user.name,
+            email: req.user.email,
+            role: req.user.role,
+            hasEmployeeProfile: false,
+        });
     } catch (err) {
         next(err);
     }
 };
+// @route GET /api/employees/profile and /api/employees/me  (logged-in user's own profile)
+// const getMyProfile = async (req, res, next) => {
+//     try {
+//         const employee = await findMyEmployee(req);
+
+//         if (!employee) {
+//             return res.status(404).json({
+//                 message: "Employee profile not found. Please contact HR to link your profile.",
+//             });
+//         }
+
+//         return res.status(200).json(employee);
+//     } catch (err) {
+//         next(err);
+//     }
+// };
 
 // @route GET /api/employees/:id
 const getEmployeeById = async (req, res, next) => {
@@ -473,7 +571,7 @@ const getEmployeeById = async (req, res, next) => {
         let out = employee;
         if (!manage && !self) {
             out = employee.toObject();
-            ["salary", "bankDetails", "documents", "idProofNumber"].forEach((k) => delete out[k]);
+            SENSITIVE_FIELDS.forEach((k) => delete out[k]);
         }
 
         return res.status(200).json({ success: true, data: out, employee: out });
@@ -543,7 +641,7 @@ const exitEmployee = async (req, res, next) => {
                 },
             },
             { returnDocument: "after" }
-        );
+        ).select("-documents");
 
         // Login is switched off, the history stays
         if (linkedUser) await User.updateOne({ _id: linkedUser._id }, { $set: { isActive: false } });

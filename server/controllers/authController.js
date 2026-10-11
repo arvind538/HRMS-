@@ -25,16 +25,34 @@ const hashToken = (token) => crypto.createHash("sha256").update(String(token)).d
 
 const cleanEmail = (v) => String(v ?? "").trim().slice(0, 254);
 
+// a***@gmail.com : safe to write in logs
+const maskEmail = (e) => String(e || "").replace(/^(.).*(@.*)$/, "$1***$2");
+
 const findUserByEmail = (email) => User.findOne({ email }).collation(CI);
 
-/* Finds the login account for an email. Also checks the employee profile email. */
-async function findAccountByEmail(email) {
-    const user = await findUserByEmail(email);
-    if (user) return user;
+/*
+ * Finds the login account for an email and the employee profile that belongs to it.
+ * The email can be the company login email or the personal email.
+ */
+async function findAccount(email) {
+    let user = await findUserByEmail(email);
+    let employee = null;
 
-    const emp = await Employee.findOne({ $or: [{ email }, { loginEmail: email }] }).select("_id");
-    if (!emp) return null;
-    return User.findOne({ employee: emp._id });
+    if (!user) {
+        employee = await Employee.findOne({ $or: [{ email }, { loginEmail: email }] }).select("_id name email");
+        if (!employee) return null;
+        user = await User.findOne({ employee: employee._id });
+        return user ? { user, employee } : null;
+    }
+
+    if (user.employee) {
+        employee = await Employee.findById(user.employee).select("_id name email");
+    }
+    if (!employee) {
+        const mail = String(user.email || "").toLowerCase();
+        employee = await Employee.findOne({ $or: [{ email: mail }, { loginEmail: mail }] }).select("_id name email");
+    }
+    return { user, employee };
 }
 
 // @route POST /api/auth/login
@@ -126,7 +144,10 @@ exports.forgotPassword = async (req, res, next) => {
             return res.status(400).json({ message: "Please enter a valid email address." });
         }
 
-        const user = await findAccountByEmail(email.toLowerCase());
+        const found = await findAccount(email.toLowerCase());
+        const user = found?.user;
+
+        if (!user) console.log("Forgot password: no account found for", maskEmail(email));
 
         const disabled = user && user.isActive === false;
         const sentRecently =
@@ -147,25 +168,30 @@ exports.forgotPassword = async (req, res, next) => {
                 }
             );
 
+            // The link goes to the personal email. If there is none, the login email is used.
+            const recipient = found.employee?.email || user.email;
+
             const baseUrl = String(process.env.FRONTEND_URL || "").replace(/\/$/, "");
             const link = `${baseUrl}/reset-password/${rawToken}`;
             const mail = resetPasswordEmail({ name: user.name, link, minutes: RESET_MINUTES });
 
             // Not awaited on purpose: response time is the same whether the email exists or not
-            sendEmail({ to: user.email, ...mail }).catch(async (mailErr) => {
-                console.error("Reset email failed:", mailErr.message);
-                // Mail was not sent, so the token is useless and the user can retry immediately
-                await User.updateOne(
-                    { _id: user._id },
-                    {
-                        $unset: {
-                            passwordResetToken: "",
-                            passwordResetExpires: "",
-                            passwordResetRequestedAt: "",
-                        },
-                    }
-                ).catch(() => { });
-            });
+            sendEmail({ to: recipient, ...mail })
+                .then(() => console.log("Reset email accepted for", maskEmail(recipient), "| link base:", baseUrl))
+                .catch(async (mailErr) => {
+                    console.error("Reset email failed:", mailErr.message);
+                    // Mail was not sent, so the token is useless and the user can retry immediately
+                    await User.updateOne(
+                        { _id: user._id },
+                        {
+                            $unset: {
+                                passwordResetToken: "",
+                                passwordResetExpires: "",
+                                passwordResetRequestedAt: "",
+                            },
+                        }
+                    ).catch(() => { });
+                });
         }
 
         // Same response for every case

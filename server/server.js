@@ -5,6 +5,9 @@ try {
     console.warn("DNS servers could not be set:", err.message);
 }
 
+// const dns = require("dns");
+// dns.setServers(['8.8.8.8', '8.8.4.4']);
+
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");

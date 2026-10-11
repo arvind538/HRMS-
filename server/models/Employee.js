@@ -13,6 +13,7 @@ const employeeSchema = new mongoose.Schema(
         firstName: { type: String, trim: true },
         lastName: { type: String, trim: true },
         name: { type: String, required: true, trim: true },
+        // Personal email. Password reset links are sent here.
         email: {
             type: String,
             required: true,
@@ -20,7 +21,7 @@ const employeeSchema = new mongoose.Schema(
             lowercase: true,
             trim: true,
         },
-        // login system me use hota ho to rakho, warna hata sakte ho
+        // Company login email (the User account uses this email to log in)
         loginEmail: { type: String, lowercase: true, trim: true },
         phone: { type: String, trim: true },
         gender: {
@@ -51,21 +52,25 @@ const employeeSchema = new mongoose.Schema(
         },
         salary: { type: Number, default: 0 },
 
-        /* ---------- Exit (list page se status change ke liye) ---------- */
+        /* ---------- Exit ---------- */
         exitDate: { type: Date },
         exitReason: { type: String, trim: true },
 
         /* ---------- Identity ---------- */
         nationalIdType: { type: String, trim: true },
         nationalIdOther: { type: String, trim: true },
-        idProofNumber: { type: String, trim: true }, // unique NAHI rakha
+        idProofNumber: { type: String, trim: true, uppercase: true }, // old field, now holds the Aadhaar number
+        aadhaarNumber: { type: String, trim: true },
+        panNumber: { type: String, trim: true, uppercase: true },
 
-        /* ---------- Documents (images base64) ---------- */
+        /* ---------- Documents (images as base64) ---------- */
         documents: {
-            nationalIdFrontFileName: { type: String, default: "" },
+            nationalIdFrontFileName: { type: String, default: "" }, // Aadhaar front
             nationalIdFrontFileData: { type: String, default: "" },
-            nationalIdBackFileName: { type: String, default: "" },
+            nationalIdBackFileName: { type: String, default: "" }, // Aadhaar back
             nationalIdBackFileData: { type: String, default: "" },
+            panCardFileName: { type: String, default: "" },
+            panCardFileData: { type: String, default: "" },
             passportPhotoFileName: { type: String, default: "" },
             passportPhotoData: { type: String, default: "" },
         },
@@ -84,8 +89,6 @@ const employeeSchema = new mongoose.Schema(
 
 module.exports =
     mongoose.models.Employee || mongoose.model("Employee", employeeSchema);
-
-
 
 
 // const mongoose = require("mongoose");

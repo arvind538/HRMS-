@@ -11,6 +11,11 @@ const pathOverrides = {
     // "/dashboard/leave-summary": ["admin", "hr", "manager"],
     // "/dashboard/payroll-summary": ["admin", "hr"],
 
+    // --------------Tasks----------------
+    "/tasks": ["admin", "hr", "manager"],
+
+
+
     // ---------- Employee Management ----------
     "/employees": ["admin", "hr", "manager"],
     "/employees/add": ["admin", "hr"],
@@ -23,7 +28,7 @@ const pathOverrides = {
     "/employees/exit": ["admin", "hr"],
 
     // ---------- Organization ----------
-    "/organization/company": ["admin", "hr"],
+    "/organization/company": ["admin", "hr", "manager", "employee"],
     "/organization/branches": ["admin", "hr"],
     "/organization/departments": ["admin", "hr", "manager"],
     "/organization/designations": ["admin", "hr"],
@@ -63,7 +68,7 @@ const pathOverrides = {
     "/leave/policies": ["admin", "hr"],
     "/leave/apply": ["admin", "hr", "manager", "employee"],
     "/leave/requests": ["admin", "hr", "manager"],
-    "/leave/approval": ["admin", "hr", "manager"],
+    "/leave/approval": ["admin", "hr"],
     "/leave/balance": ["admin", "hr", "manager", "employee"],
     "/leave/holidays": ["admin", "hr", "manager", "employee"],
     "/leave/reports": ["admin", "hr"],
@@ -75,11 +80,12 @@ const pathOverrides = {
     "/payroll/employee-salary": ["admin", "hr"],
     "/payroll/generate": ["admin", "hr"],
     "/payroll/processing": ["admin", "hr"],
-    "/payroll/payslips": ["admin", "hr"],
+    "/payroll/payslips": ["admin", "hr", "manager", "employee"],
     "/payroll/bonuses": ["admin", "hr"],
     "/payroll/deductions": ["admin", "hr"],
     "/payroll/loans": ["admin", "hr"],
-    "/payroll/reimbursements": ["admin", "hr"],
+    // "/payroll/reimbursements": ["admin", "hr"],
+    "/payroll/reimbursements": ["admin", "hr", "manager", "employee"],
     "/payroll/tax": ["admin", "hr"],
     "/payroll/reports": ["admin", "hr"],
 
@@ -144,7 +150,7 @@ const pathOverrides = {
     "/communication/messages": ["admin", "hr", "manager", "employee"],
     "/communication/email": ["admin", "hr"],
     "/communication/sms": ["admin", "hr"],
-    "/communication/circulars": ["admin", "hr", "manager", "employee"],
+    // "/communication/circulars": ["admin", "hr", "manager", "employee"],
 
     // ---------- Employee Self Service (sabke liye) ----------
     "/self-service/profile": ["admin", "hr", "manager", "employee"],
@@ -198,7 +204,7 @@ const pathOverrides = {
     "/users/roles": ["admin"],
     "/users/permissions": ["admin"],
     "/users/login-history": ["admin"],
-    "/users/activity-logs": ["admin"],
+    // "/users/activity-logs": ["admin"],
 
     // ---------- Help & Support (sabke liye) ----------
     "/help": ["admin", "hr", "manager", "employee"],

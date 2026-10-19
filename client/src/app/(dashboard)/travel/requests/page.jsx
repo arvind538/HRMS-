@@ -91,12 +91,7 @@ export default function TravelRequestsPage() {
   ];
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Travel Requests</h1>
-        <p className="text-sm text-slate-500 mt-1">Naya travel request submit karein aur apni history track karein</p>
-      </div>
-
+    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-4 lg:px-6 py-6">
       {/* Travel Form */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 transition-all">
         <h3 className="font-semibold text-slate-800 mb-5 text-sm sm:text-base flex items-center gap-2">

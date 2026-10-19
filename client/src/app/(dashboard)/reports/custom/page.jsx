@@ -66,17 +66,17 @@ export default function CustomReportsPage() {
   return (
     <div className="space-y-4 p-4 max-w-7xl mx-auto">
       {/* Page Header */}
-      <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/85 shadow-xs transition-all">
+      {/* <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/85 shadow-xs transition-all">
         <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Custom Reports Builder</h1>
         <p className="text-sm text-gray-500 mt-1">
           Create custom reports using your choice of filters (date range, department, role)
         </p>
-      </div>
+      </div> */}
 
       {/* Filter Builder Form */}
       <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-4 text-indigo-600 font-semibold">
-          <Filter className="w-5 h-5" />
+        <div className="flex items-center gap-2 mb-4 text-indigo-600 font-extrabold">
+          <Filter className="w-10 h-6 " />
           <span>Report Filters</span>
         </div>
 

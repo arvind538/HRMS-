@@ -42,13 +42,14 @@ const normalizeStatus = (v) => {
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/* Fields only admin and HR may see */
+/* Fields that managers must not see (admin and HR can) */
 const SENSITIVE_FIELDS = ["salary", "bankDetails", "documents", "idProofNumber", "aadhaarNumber", "panNumber"];
 
 /* ------------------------- role and access ------------------------- */
 
 const roleOf = (req) => lower(req.user?.role);
-const canManage = (req) => ["admin", "hr"].includes(roleOf(req)); // create, update, delete, exit
+const isAdmin = (req) => roleOf(req) === "admin"; // login access (login email, password, role) is admin only
+const canManage = (req) => ["admin", "hr"].includes(roleOf(req)); // profile: create, update, delete, exit
 const deny = (res, message = "You are not allowed to perform this action.") =>
     res.status(403).json({ message });
 
@@ -64,15 +65,26 @@ const isSelf = (req, emp) => {
 };
 
 // Logged-in user's own employee profile
-const findMyEmployee = async (req) => {
+// const findMyEmployee = async (req) => {
+//     const linked = req.user?.employee ? req.user.employee._id || req.user.employee : null;
+//     if (linked && mongoose.isValidObjectId(linked)) {
+//         const byLink = await Employee.findById(linked);
+//         if (byLink) return byLink;
+//     }
+//     const email = lower(req.user?.email);
+//     if (!email) return null;
+//     return Employee.findOne({ $or: [{ email }, { loginEmail: email }] });
+// };
+
+const findMyEmployee = async (req, select = "") => {
     const linked = req.user?.employee ? req.user.employee._id || req.user.employee : null;
     if (linked && mongoose.isValidObjectId(linked)) {
-        const byLink = await Employee.findById(linked);
+        const byLink = await Employee.findById(linked).select(select);
         if (byLink) return byLink;
     }
     const email = lower(req.user?.email);
     if (!email) return null;
-    return Employee.findOne({ $or: [{ email }, { loginEmail: email }] });
+    return Employee.findOne({ $or: [{ email }, { loginEmail: email }] }).select(select);
 };
 
 /* --------------------------- login account --------------------------- */
@@ -102,7 +114,6 @@ const findLinkedUser = async (employee) => {
 const hashPassword = (password) => bcrypt.hash(password, 10);
 const userRoleFrom = (role) => lower(role || "Employee");
 const isLoginActive = (status) => !["inactive", "exited"].includes(lower(status));
-const needsAdmin = (role) => ["Admin", "HR"].includes(role);
 
 /* ------------------------------ misc ------------------------------ */
 
@@ -288,17 +299,26 @@ const findDuplicate = async (data, excludeId) => {
 /* ----------------------------- handlers ----------------------------- */
 
 // @route POST /api/employees  (admin / hr)
+// Admin: profile + login account. HR: profile only (the admin adds the login later).
 const createEmployee = async (req, res) => {
     let saved = null;
     try {
         if (!canManage(req)) return deny(res, "Only admin or HR can add employees.");
+        const admin = isAdmin(req);
 
         const data = buildEmployeeData(req.body || {});
-        const password = rawStr(req.body?.password);
+        const password = admin ? rawStr(req.body?.password) : "";
 
         if (req.files?.avatar?.[0]) data.avatar = `/uploads/${req.files.avatar[0].filename}`;
         if (!data.employeeId) data.employeeId = await generateEmployeeId();
-        if (!data.loginEmail && data.email) data.loginEmail = data.email;
+
+        // Login access (login email, password, role) is created by the admin only
+        if (admin) {
+            if (!data.loginEmail && data.email) data.loginEmail = data.email;
+        } else {
+            delete data.loginEmail;
+            delete data.role;
+        }
 
         const missing = ["name", "email", "designation", "department"].filter((k) => !data[k]);
         if (missing.length) {
@@ -308,17 +328,14 @@ const createEmployee = async (req, res) => {
         const invalid = validateInput(data, true);
         if (invalid) return res.status(400).json({ message: invalid });
 
-        if (!PASSWORD_REGEX.test(password)) {
+        if (admin && !PASSWORD_REGEX.test(password)) {
             return res.status(400).json({ message: PASSWORD_MESSAGE });
-        }
-        if (needsAdmin(data.role) && roleOf(req) !== "admin") {
-            return deny(res, "Only an admin can create Admin or HR accounts.");
         }
 
         const dupMessage = await findDuplicate(data);
         if (dupMessage) return res.status(409).json({ message: dupMessage });
 
-        if (await loginEmailTaken(data.loginEmail)) {
+        if (admin && (await loginEmailTaken(data.loginEmail))) {
             return res.status(409).json({ message: "A login account with this email already exists." });
         }
 
@@ -326,23 +343,30 @@ const createEmployee = async (req, res) => {
         for (const [path, value] of Object.entries(data)) employee.set(path, value);
         saved = await employee.save();
 
-        // Login account for the employee. If this fails, the profile is rolled back (no half-created data).
-        try {
-            await User.create({
-                name: saved.name,
-                email: saved.loginEmail,
-                password: await hashPassword(password),
-                role: userRoleFrom(saved.role),
-                employee: saved._id,
-                isActive: isLoginActive(saved.employeeStatus),
-            });
-        } catch (userErr) {
-            await Employee.deleteOne({ _id: saved._id }).catch(() => { });
-            saved = null;
-            throw userErr;
+        // Only the admin creates the login account. If it fails, the profile is rolled back (no half-created data).
+        if (admin) {
+            try {
+                await User.create({
+                    name: saved.name,
+                    email: saved.loginEmail,
+                    password: await hashPassword(password),
+                    role: userRoleFrom(saved.role),
+                    employee: saved._id,
+                    isActive: isLoginActive(saved.employeeStatus),
+                });
+            } catch (userErr) {
+                await Employee.deleteOne({ _id: saved._id }).catch(() => { });
+                saved = null;
+                throw userErr;
+            }
         }
 
-        await logActivity(req, `Created new employee profile and login: ${saved.name} (${saved.employeeId})`);
+        await logActivity(
+            req,
+            admin
+                ? `Created new employee profile and login: ${saved.name} (${saved.employeeId})`
+                : `Created new employee profile: ${saved.name} (${saved.employeeId})`
+        );
 
         // The response does not need the heavy base64 documents
         const out = saved.toObject();
@@ -350,8 +374,10 @@ const createEmployee = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: "Employee registered successfully. Login account created.",
-            loginCreated: true,
+            message: admin
+                ? "Employee registered successfully. Login account created."
+                : "Employee profile saved. An admin must add the login access before this employee can log in.",
+            loginCreated: admin,
             employee: out,
             data: out,
         });
@@ -361,9 +387,11 @@ const createEmployee = async (req, res) => {
 };
 
 // @route PUT /api/employees/:id  (admin / hr)
+// Login email, password and role can be changed by the admin only.
 const updateEmployee = async (req, res) => {
     try {
         if (!canManage(req)) return deny(res, "Only admin or HR can update employees.");
+        const admin = isAdmin(req);
 
         const { id } = req.params;
         if (!mongoose.isValidObjectId(id)) {
@@ -378,30 +406,33 @@ const updateEmployee = async (req, res) => {
         const data = buildEmployeeData(req.body || {});
         if (req.files?.avatar?.[0]) data.avatar = `/uploads/${req.files.avatar[0].filename}`;
 
-        // Old records without a login email: use the personal email
-        if (!data.loginEmail && !current.loginEmail && (data.email || current.email)) {
+        if (!admin) {
+            // HR can never touch the login email or the role
+            delete data.loginEmail;
+            delete data.role;
+        } else if (!data.loginEmail && !current.loginEmail && (data.email || current.email)) {
+            // Old records without a login email: use the personal email
             data.loginEmail = data.email || current.email;
         }
 
         const invalid = validateInput(data, false);
         if (invalid) return res.status(400).json({ message: invalid });
 
-        if (data.role && needsAdmin(data.role) && data.role !== current.role && roleOf(req) !== "admin") {
-            return deny(res, "Only an admin can assign the Admin or HR role.");
-        }
-
         const dupMessage = await findDuplicate(data, id);
         if (dupMessage) return res.status(409).json({ message: dupMessage });
 
         /* Check everything about the login account BEFORE saving anything */
-        const newPassword = rawStr(req.body?.password);
+        const newPassword = admin ? rawStr(req.body?.password) : "";
         if (newPassword && !PASSWORD_REGEX.test(newPassword)) {
             return res.status(400).json({ message: PASSWORD_MESSAGE });
         }
 
         const linkedUser = await findLinkedUser(current);
-        const loginEmailChanged =
-            data.loginEmail && data.loginEmail !== lower(linkedUser?.email || current.loginEmail || current.email);
+        const loginEmailChanged = Boolean(
+            admin &&
+            data.loginEmail &&
+            data.loginEmail !== lower(linkedUser?.email || current.loginEmail || current.email)
+        );
 
         if (loginEmailChanged && (await loginEmailTaken(data.loginEmail, linkedUser?._id))) {
             return res.status(409).json({ message: "A login account with this email already exists." });
@@ -423,15 +454,23 @@ const updateEmployee = async (req, res) => {
         let loginMessage = "";
         if (linkedUser) {
             const editingOwnLogin = String(linkedUser._id) === requesterId(req);
+            const statusChanged = Boolean(data.employeeStatus && data.employeeStatus !== current.employeeStatus);
             const set = {};
             const unset = {};
 
             if (!linkedUser.employee) set.employee = updated._id;
             if (data.name) set.name = data.name;
             if (loginEmailChanged) set.email = data.loginEmail;
-            // Never let someone lock themselves out or change their own role by mistake
+            // Role is admin only (it is already removed from the data for HR)
             if (data.role && !editingOwnLogin) set.role = userRoleFrom(data.role);
-            if (data.employeeStatus && !editingOwnLogin) set.isActive = isLoginActive(data.employeeStatus);
+
+            // The login follows the employee status only when the status really changed.
+            // HR can switch a login off (Inactive / Exited) but cannot switch it back on.
+            if (statusChanged && !editingOwnLogin) {
+                const active = isLoginActive(data.employeeStatus);
+                if (admin || !active) set.isActive = active;
+            }
+
             if (newPassword) {
                 set.password = await hashPassword(newPassword);
                 set.passwordChangedAt = new Date(); // old logins stop working
@@ -446,7 +485,7 @@ const updateEmployee = async (req, res) => {
             if (Object.keys(unset).length) update.$unset = unset;
             if (Object.keys(update).length) await User.updateOne({ _id: linkedUser._id }, update);
         } else if (newPassword) {
-            // Older employee who never had a login: create it now
+            // Employee who never had a login (for example, added by HR): the admin creates it now
             await User.create({
                 name: updated.name,
                 email: updated.loginEmail || updated.email,
@@ -462,6 +501,7 @@ const updateEmployee = async (req, res) => {
 
         const out = updated.toObject();
         delete out.documents;
+        if (!admin) delete out.loginEmail;
 
         return res.status(200).json({
             success: true,
@@ -496,14 +536,15 @@ const getEmployees = async (req, res, next) => {
         if (department) filter.department = String(department);
         if (search && String(search).trim()) {
             const rx = new RegExp(escapeRegex(String(search).trim()), "i");
-            filter.$or = [{ name: rx }, { email: rx }, { loginEmail: rx }, { employeeId: rx }];
+            filter.$or = [{ name: rx }, { email: rx }, { employeeId: rx }];
+            if (isAdmin(req)) filter.$or.push({ loginEmail: rx }); // login email is searchable by the admin only
         }
 
         // Heavy base64 documents and bank details are never needed in the list.
-        // Managers also do not see salary, Aadhaar or PAN numbers.
-        const hidden = canManage(req)
-            ? "-documents -bankDetails"
-            : "-documents -bankDetails -salary -idProofNumber -aadhaarNumber -panNumber";
+        // Only the admin sees the login email. Managers also do not see salary, Aadhaar or PAN numbers.
+        let hidden = "-documents -bankDetails";
+        if (!isAdmin(req)) hidden += " -loginEmail";
+        if (!canManage(req)) hidden += " -salary -idProofNumber -aadhaarNumber -panNumber";
 
         const employees = await Employee.find(filter).select(hidden).sort({ createdAt: -1 });
 
@@ -512,7 +553,6 @@ const getEmployees = async (req, res, next) => {
         next(err);
     }
 };
-
 
 // @route GET /api/employees/profile and /api/employees/me  (logged-in user's own profile)
 const getMyProfile = async (req, res, next) => {
@@ -533,22 +573,72 @@ const getMyProfile = async (req, res, next) => {
         next(err);
     }
 };
-// @route GET /api/employees/profile and /api/employees/me  (logged-in user's own profile)
-// const getMyProfile = async (req, res, next) => {
-//     try {
-//         const employee = await findMyEmployee(req);
 
-//         if (!employee) {
-//             return res.status(404).json({
-//                 message: "Employee profile not found. Please contact HR to link your profile.",
-//             });
-//         }
+// @route PUT /api/employees/me   (a person edits their own contact details)
+const updateMyProfile = async (req, res, next) => {
+    try {
+        const me = await findMyEmployee(req);
+        if (!me) {
+            return res.status(404).json({ message: "Your employee profile is not linked yet. Please contact HR." });
+        }
 
-//         return res.status(200).json(employee);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
+        const set = {};
+
+        if (req.body.phone !== undefined) {
+            const phone = digits(req.body.phone).slice(-10);
+            if (!/^[6-9]\d{9}$/.test(phone)) {
+                return res.status(400).json({ message: "Enter a valid 10-digit mobile number starting with 6, 7, 8 or 9." });
+            }
+            set.phone = phone;
+        }
+        if (req.body.address !== undefined) {
+            const address = str(req.body.address);
+            if (address.length < 5 || address.length > 200) {
+                return res.status(400).json({ message: "Address must be 5 to 200 characters." });
+            }
+            set.address = address;
+        }
+        ["city", "state"].forEach((key) => {
+            if (req.body[key] !== undefined) set[key] = str(req.body[key]);
+        });
+        if (req.body.pincode !== undefined) {
+            const pincode = digits(req.body.pincode);
+            if (!/^[1-9]\d{5}$/.test(pincode)) {
+                return res.status(400).json({ message: "Pincode must be exactly 6 digits." });
+            }
+            set.pincode = pincode;
+        }
+
+        if (!Object.keys(set).length) return res.status(400).json({ message: "There is nothing to update." });
+
+        const updated = await Employee.findByIdAndUpdate(
+            me._id,
+            { $set: set },
+            { returnDocument: "after", runValidators: true }
+        ).select("-documents");
+
+        return res.status(200).json({ success: true, message: "Profile updated successfully.", employee: updated });
+    } catch (err) {
+        next(err);
+    }
+};
+// @route GET /api/employees/me  (dashboard ke liye halka: documents aur bank nahi)
+const getMe = async (req, res, next) => {
+    try {
+        const employee = await findMyEmployee(req, "-documents -bankDetails");
+        if (employee) return res.status(200).json(employee);
+
+        return res.status(200).json({
+            _id: req.user._id,
+            name: req.user.name,
+            email: req.user.email,
+            role: req.user.role,
+            hasEmployeeProfile: false,
+        });
+    } catch (err) {
+        next(err);
+    }
+};
 
 // @route GET /api/employees/:id
 const getEmployeeById = async (req, res, next) => {
@@ -567,11 +657,17 @@ const getEmployeeById = async (req, res, next) => {
             return deny(res, "You can only view your own profile.");
         }
 
-        // A manager viewing someone else does not get salary, bank, ID details or documents
         let out = employee;
         if (!manage && !self) {
+            // A manager viewing someone else does not get salary, bank, ID details or documents
             out = employee.toObject();
             SENSITIVE_FIELDS.forEach((k) => delete out[k]);
+        }
+
+        // The login email is shown to the admin and to the employee themselves only
+        if (!isAdmin(req) && !self) {
+            if (out === employee) out = employee.toObject();
+            delete out.loginEmail;
         }
 
         return res.status(200).json({ success: true, data: out, employee: out });
@@ -580,7 +676,7 @@ const getEmployeeById = async (req, res, next) => {
     }
 };
 
-// @route DELETE /api/employees/:id  (admin / hr)
+// @route DELETE /api/employees/:id  (admin / hr, the route allows admin only)
 const deleteEmployee = async (req, res, next) => {
     try {
         if (!canManage(req)) return deny(res, "Only admin or HR can delete employees.");
@@ -597,7 +693,7 @@ const deleteEmployee = async (req, res, next) => {
             if (String(linkedUser._id) === requesterId(req)) {
                 return deny(res, "You cannot delete your own account.");
             }
-            if (linkedUser.role === "admin" && roleOf(req) !== "admin") {
+            if (linkedUser.role === "admin" && !isAdmin(req)) {
                 return deny(res, "Only an admin can delete an admin account.");
             }
         }
@@ -641,7 +737,7 @@ const exitEmployee = async (req, res, next) => {
                 },
             },
             { returnDocument: "after" }
-        ).select("-documents");
+        ).select(isAdmin(req) ? "-documents" : "-documents -loginEmail");
 
         // Login is switched off, the history stays
         if (linkedUser) await User.updateOne({ _id: linkedUser._id }, { $set: { isActive: false } });
@@ -657,7 +753,9 @@ const exitEmployee = async (req, res, next) => {
 module.exports = {
     getEmployees,
     getMyProfile,
-    getMe: getMyProfile,
+    updateMyProfile,
+    // getMe: getMyProfile,
+    getMe,
     getEmployeeById,
     getEmployee: getEmployeeById,
     createEmployee,

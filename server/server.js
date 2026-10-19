@@ -1,15 +1,16 @@
-const dns = require("dns");
-try {
-    dns.setServers(["8.8.8.8", "8.8.4.4"]);
-} catch (err) {
-    console.warn("DNS servers could not be set:", err.message);
-}
-
 // const dns = require("dns");
-// dns.setServers(['8.8.8.8', '8.8.4.4']);
+// try {
+//     dns.setServers(["8.8.8.8", "8.8.4.4"]);
+// } catch (err) {
+//     console.warn("DNS servers could not be set:", err.message);
+// }
+
+const dns = require("dns");
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 require("dotenv").config();
 const express = require("express");
+const path = require("path");
 const cors = require("cors");
 const connectDB = require("./config/db");
 const { errorHandler, notFound } = require("./middleware/errorMiddleware");
@@ -46,6 +47,8 @@ const branchRoutes = require("./routes/branchRoutes");
 const orgChartRoutes = require("./routes/orgChartRoutes");
 const holidayRoutes = require("./routes/holidayRoutes");
 const designationRoutes = require("./routes/designationRoutes");
+const taskRoutes = require("./routes/taskRoutes");
+const supportRoutes = require("./routes/supportRoutes");
 
 /* -------------------------------------------------------------------------- */
 /* STARTUP CHECKS                                                             */
@@ -131,18 +134,23 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 /* -------------------------------------------------------------------------- */
 /* ROUTES                                                                     */
 /* -------------------------------------------------------------------------- */
-
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.get("/", (req, res) => res.json({ status: "OK", service: "HRMS API" }));
 app.get("/api/health", (req, res) => res.json({ status: "OK" }));
 
 // More specific paths must come before their parent paths
+
+app.use("/api/support", supportRoutes);
+app.use("/api/emails", require("./routes/emailRoutes"));
+app.use("/api/sms", require("./routes/smsRoutes"));
+app.use("/api/tasks", taskRoutes);
 app.use("/api/designations", designationRoutes);
 app.use("/api/holiday", holidayRoutes);
 app.use("/api/organization/chart", orgChartRoutes);
 app.use("/api/organization/branches", branchRoutes);
 app.use("/api/biometric", biometricRoutes);
-app.use("/api/sms", smsRoutes);
-app.use("/api/emails", emailRoutes);
+// app.use("/api/sms", smsRoutes);
+// app.use("/api/emails", emailRoutes);
 app.use("/api/payroll/employee-salaries", employeeSalaryRoutes);
 app.use("/api/payroll/components", salaryComponentRoutes);
 app.use("/api/payroll/salary-structures", salaryStructureRoutes);

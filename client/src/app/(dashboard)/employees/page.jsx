@@ -38,10 +38,13 @@ import {
     ChevronRight,
     ExternalLink,
     RefreshCw,
+    Camera,
+    Lock,
     Image as ImageIcon,
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
+import { useAuth } from "@/context/AuthContext";
 
 /* ----------------------------- helpers ----------------------------- */
 
@@ -155,9 +158,9 @@ const getSalaryValue = (emp) => {
     return Number.isFinite(n) ? n : null;
 };
 
-// Yahan sirf ek line change karke poore page ki currency badal sakte ho
+// Change these two values to change the currency of the whole page
 const CURRENCY = {
-    symbol: "₹",     // "$" ya "€" bhi kar sakte ho
+    symbol: "₹", // "$" or "€" also work
     locale: "en-IN", // "en-US" for $
 };
 
@@ -214,8 +217,9 @@ const MENU_HEIGHT = 250;
 /* ------------------- quick view popup (helpers + UI) ------------------- */
 
 const QV_NA = "Not provided";
+const PAN_RE = /^[A-Z]{5}\d{4}[A-Z]$/;
 
-// dot-path support: pehli non-empty primitive value
+// dot-path support: first non-empty primitive value
 const qvPick = (obj, paths) => {
     if (!obj) return "";
     for (const p of paths) {
@@ -232,6 +236,12 @@ const qvTitleCase = (s) =>
 
 const qvMask = (n) => (n && n.length > 4 ? `${"•".repeat(Math.max(n.length - 4, 4))}${n.slice(-4)}` : n);
 
+/* Document number formats */
+const digitsOnly = (v) => String(v || "").replace(/\D/g, "");
+const formatAadhaar = (n) => n.replace(/(\d{4})(?=\d)/g, "$1 "); // 234567890123 -> 2345 6789 0123
+const maskAadhaar = (n) => (n.length > 4 ? `XXXX XXXX ${n.slice(-4)}` : n);
+const maskPan = (p) => (p.length > 4 ? `${"X".repeat(p.length - 4)}${p.slice(-4)}` : p);
+
 const QV_TINTS = {
     indigo: "bg-indigo-50 text-indigo-600",
     sky: "bg-sky-50 text-sky-600",
@@ -239,6 +249,12 @@ const QV_TINTS = {
     rose: "bg-rose-50 text-rose-600",
     amber: "bg-amber-50 text-amber-600",
     violet: "bg-violet-50 text-violet-600",
+};
+
+const QV_STATUS = {
+    complete: { label: "Complete", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    partial: { label: "Incomplete", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+    missing: { label: "Missing", cls: "bg-rose-50 text-rose-700 border-rose-200" },
 };
 
 const QV_STEPS = [
@@ -269,6 +285,20 @@ function QvItem({ icon: Icon, label, value, tint = "indigo", mono = false, wide 
     );
 }
 
+function QvEyeButton({ shown, onClick }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer"
+            title={shown ? "Hide" : "Show"}
+            aria-label={shown ? "Hide number" : "Show number"}
+        >
+            {shown ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+    );
+}
+
 function QvImage({ label, src, fileName, onOpen }) {
     return (
         <div className="min-w-0">
@@ -280,7 +310,7 @@ function QvImage({ label, src, fileName, onOpen }) {
                     className="group block w-full text-left cursor-pointer"
                     title="Click to enlarge"
                 >
-                    <div className="h-24 sm:h-36 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+                    <div className="h-28 sm:h-40 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
                         <img
                             src={src}
                             alt={label}
@@ -290,11 +320,45 @@ function QvImage({ label, src, fileName, onOpen }) {
                     {fileName && <p className="text-[10px] text-slate-400 mt-1 truncate">{fileName}</p>}
                 </button>
             ) : (
-                <div className="h-24 sm:h-36 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 flex flex-col items-center justify-center gap-1 text-slate-400">
+                <div className="h-28 sm:h-40 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 flex flex-col items-center justify-center gap-1 text-slate-400">
                     <ImageIcon size={16} />
                     <span className="text-[11px] font-medium">{QV_NA}</span>
                 </div>
             )}
+        </div>
+    );
+}
+
+/* One document block: title, status chip and its content */
+function QvDocCard({ icon: Icon, title, subtitle, status, tint = "indigo", children }) {
+    const s = QV_STATUS[status] || QV_STATUS.missing;
+    return (
+        <section className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${QV_TINTS[tint]}`}>
+                        <Icon size={16} />
+                    </div>
+                    <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">{title}</p>
+                        {subtitle && <p className="text-[11px] text-slate-400 truncate">{subtitle}</p>}
+                    </div>
+                </div>
+                <span className={`shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full border ${s.cls}`}>{s.label}</span>
+            </div>
+            {children}
+        </section>
+    );
+}
+
+function QvRestricted({ text }) {
+    return (
+        <div className="py-10 sm:py-14 text-center space-y-3">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center">
+                <Lock size={20} />
+            </div>
+            <p className="text-sm font-bold text-slate-700">Restricted information</p>
+            <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">{text}</p>
         </div>
     );
 }
@@ -310,6 +374,9 @@ function QvSkeleton({ count = 4 }) {
 }
 
 function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, onOpenFull }) {
+    const { user: authUser } = useAuth();
+    const canSeeSensitive = ["admin", "hr"].includes(String(authUser?.role || "").toLowerCase());
+
     const [open, setOpen] = useState(false);
     const [step, setStep] = useState(1);
     const [dir, setDir] = useState(1);
@@ -318,6 +385,8 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
     const [reloadKey, setReloadKey] = useState(0);
     const [lightbox, setLightbox] = useState(null);
     const [showAcc, setShowAcc] = useState(false);
+    const [revealId, setRevealId] = useState(false);
+    const [revealPan, setRevealPan] = useState(false);
     const [managerName, setManagerName] = useState("");
 
     /* open animation + body scroll lock */
@@ -336,7 +405,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
         setTimeout(onClose, 200);
     }, [onClose]);
 
-    /* full employee (list API me documents/bank nahi aate) */
+    /* full employee (the list API does not send documents or bank details) */
     useEffect(() => {
         let alive = true;
         setDetail(null);
@@ -360,7 +429,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
     const emp = useMemo(() => ({ ...row, ...(detail || {}) }), [row, detail]);
     const loadingDetail = !detail && !failed;
 
-    /* reporting manager (name string ya ObjectId dono) */
+    /* reporting manager (name string or ObjectId) */
     useEffect(() => {
         setManagerName("");
         const mgr = emp.reportingManager ?? emp.manager;
@@ -396,7 +465,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
         [step]
     );
 
-    /* keyboard: Esc, ← → */
+    /* keyboard: Esc, left and right arrows */
     useEffect(() => {
         const onKey = (e) => {
             if (e.key === "Escape") {
@@ -432,12 +501,43 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
     const avatar =
         emp.avatar || emp.profilePhotoData || emp.documents?.passportPhotoData || emp.photo || "";
 
+    /*
+     * Documents.
+     * New records have separate Aadhaar and PAN fields.
+     * Older records stored a single "national ID" (idProofNumber), so that number is sorted out here:
+     * Aadhaar, PAN or another ID (Voter ID, Driving License...).
+     */
     const idTypeRaw = qvPick(emp, ["nationalIdType", "documents.nationalIdType"]);
     const idType =
         idTypeRaw === "Other Official ID" ? qvPick(emp, ["nationalIdOther", "documents.nationalIdOther"]) || idTypeRaw : idTypeRaw;
-    const idNumber = qvPick(emp, ["nationalId", "idProofNumber"]);
-    const front = qvPick(emp, ["documents.nationalIdFrontFileData", "nationalIdFrontFileData"]);
-    const back = qvPick(emp, ["documents.nationalIdBackFileData", "nationalIdBackFileData"]);
+    const legacyNumber = qvPick(emp, ["nationalId", "idProofNumber"]).toUpperCase().replace(/\s/g, "");
+    const savedAadhaar = digitsOnly(qvPick(emp, ["aadhaarNumber"]));
+    const savedPan = qvPick(emp, ["panNumber"]).toUpperCase();
+
+    const legacyIsPan = /pan/i.test(idType) || (!idType && PAN_RE.test(legacyNumber));
+    const legacyIsAadhaar = /aadhaa?r/i.test(idType) || (!idType && /^\d{12}$/.test(legacyNumber));
+    const legacyOther = Boolean(legacyNumber) && !legacyIsPan && !legacyIsAadhaar && !savedAadhaar;
+
+    const aadhaarNumber = savedAadhaar || (legacyIsAadhaar ? digitsOnly(legacyNumber) : "");
+    const panNumber = savedPan || (legacyIsPan && !savedAadhaar ? legacyNumber : "");
+
+    const idIsAadhaar = !legacyOther;
+    const idCardLabel = legacyOther ? idType || "National ID" : "Aadhaar Card";
+    const idCardNumber = legacyOther ? legacyNumber : aadhaarNumber;
+
+    const frontRaw = qvPick(emp, ["documents.nationalIdFrontFileData", "nationalIdFrontFileData"]);
+    const backRaw = qvPick(emp, ["documents.nationalIdBackFileData", "nationalIdBackFileData"]);
+    const frontNameRaw = qvPick(emp, ["documents.nationalIdFrontFileName"]);
+    const backNameRaw = qvPick(emp, ["documents.nationalIdBackFileName"]);
+    const panFileNew = qvPick(emp, ["documents.panCardFileData", "panCardFileData"]);
+
+    // Old record whose only ID was a PAN card: its image is the PAN image, not an Aadhaar image
+    const panOnlyLegacy = legacyIsPan && !savedAadhaar && !panFileNew;
+    const panImage = panFileNew || (panOnlyLegacy ? frontRaw : "");
+    const panFileName = qvPick(emp, ["documents.panCardFileName"]) || (panOnlyLegacy ? frontNameRaw : "");
+    const idFront = panOnlyLegacy ? "" : frontRaw;
+    const idBack = panOnlyLegacy ? "" : backRaw;
+
     const photo = qvPick(emp, ["documents.passportPhotoData", "passportPhotoData", "profilePhotoData"]) || avatar;
 
     const bank = {
@@ -452,7 +552,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
     const detailGate = (count) =>
         failed ? (
             <div className="py-10 text-center space-y-3">
-                <p className="text-sm font-semibold text-slate-700">Details load nahi ho payi.</p>
+                <p className="text-sm font-semibold text-slate-700">Unable to load the details.</p>
                 <button
                     type="button"
                     onClick={() => setReloadKey((k) => k + 1)}
@@ -494,36 +594,94 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
         }
 
         if (step === 3) {
+            if (!canSeeSensitive) {
+                return <QvRestricted text="Aadhaar, PAN and other identity documents are visible only to admin and HR." />;
+            }
             if (loadingDetail || failed) return detailGate(3);
-            const has = !!idNumber;
-            return (
-                <div className="space-y-3">
-                    <div className="relative flex items-center gap-3 p-3 rounded-2xl border border-slate-200/80 bg-white">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${QV_TINTS.indigo}`}>
-                            <IdCard size={16} />
-                        </div>
-                        <div className="min-w-0 pr-7">
-                            <p className="text-[11px] font-semibold text-slate-500">{idType || "National ID"}</p>
-                            <p className={`text-xs mt-0.5 truncate ${has ? "font-mono uppercase text-slate-800 font-semibold" : "text-slate-400 font-medium"}`}>
-                                {idNumber || QV_NA}
-                            </p>
-                        </div>
-                        <span
-                            className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full flex items-center justify-center text-white ${has ? "bg-emerald-500" : "bg-red-500"}`}
-                        >
-                            {has ? <Check size={10} strokeWidth={3} /> : <X size={10} strokeWidth={3} />}
-                        </span>
-                    </div>
 
-                    <div className="grid grid-cols-3 gap-2.5 sm:gap-3">
-                        <QvImage label="ID Front" src={front} fileName={qvPick(emp, ["documents.nationalIdFrontFileName"])} onOpen={setLightbox} />
-                        <QvImage label="ID Back" src={back} fileName={qvPick(emp, ["documents.nationalIdBackFileName"])} onOpen={setLightbox} />
-                        <QvImage label="Passport Photo" src={photo} fileName={qvPick(emp, ["documents.passportPhotoFileName"])} onOpen={setLightbox} />
+            const idCount = [idFront, idBack].filter(Boolean).length;
+            const idStatus = idCardNumber && idCount === 2 ? "complete" : idCardNumber || idCount ? "partial" : "missing";
+            const panStatus = panNumber && panImage ? "complete" : panNumber || panImage ? "partial" : "missing";
+
+            const idShown = !idCardNumber
+                ? ""
+                : revealId
+                    ? idIsAadhaar ? formatAadhaar(idCardNumber) : idCardNumber
+                    : idIsAadhaar ? maskAadhaar(idCardNumber) : qvMask(idCardNumber);
+            const panShown = !panNumber ? "" : revealPan ? panNumber : maskPan(panNumber);
+
+            return (
+                <div className="space-y-3 sm:space-y-4">
+                    {/* Aadhaar (or the older ID type) */}
+                    <QvDocCard
+                        icon={IdCard}
+                        title={idCardLabel}
+                        subtitle="Number and both sides of the card"
+                        status={idStatus}
+                        tint="indigo"
+                    >
+                        <QvItem
+                            icon={Hash}
+                            label={idIsAadhaar ? "Aadhaar Number" : `${idCardLabel} Number`}
+                            value={idShown}
+                            tint="indigo"
+                            mono
+                            wide
+                            action={
+                                idCardNumber ? <QvEyeButton shown={revealId} onClick={() => setRevealId((s) => !s)} /> : null
+                            }
+                        />
+                        <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                            <QvImage label="Front Side" src={idFront} fileName={frontNameRaw} onOpen={setLightbox} />
+                            <QvImage label="Back Side" src={idBack} fileName={backNameRaw} onOpen={setLightbox} />
+                        </div>
+                    </QvDocCard>
+
+                    {/* PAN and photo */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 items-start">
+                        <QvDocCard
+                            icon={FileText}
+                            title="PAN Card"
+                            subtitle="Number and card image"
+                            status={panStatus}
+                            tint="sky"
+                        >
+                            <QvItem
+                                icon={Hash}
+                                label="PAN Number"
+                                value={panShown}
+                                tint="sky"
+                                mono
+                                wide
+                                action={
+                                    panNumber ? <QvEyeButton shown={revealPan} onClick={() => setRevealPan((s) => !s)} /> : null
+                                }
+                            />
+                            <QvImage label="PAN Card Image" src={panImage} fileName={panFileName} onOpen={setLightbox} />
+                        </QvDocCard>
+
+                        <QvDocCard
+                            icon={Camera}
+                            title="Passport Photo"
+                            subtitle="Profile photograph"
+                            status={photo ? "complete" : "missing"}
+                            tint="violet"
+                        >
+                            <QvImage
+                                label="Photo"
+                                src={photo}
+                                fileName={qvPick(emp, ["documents.passportPhotoFileName"])}
+                                onOpen={setLightbox}
+                            />
+                        </QvDocCard>
                     </div>
                 </div>
             );
         }
 
+        if (!canSeeSensitive) {
+            return <QvRestricted text="Bank details are visible only to admin and HR." />;
+        }
         if (loadingDetail || failed) return detailGate(5);
         return (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -536,18 +694,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
                     value={bank.accountNumber ? (showAcc ? bank.accountNumber : qvMask(bank.accountNumber)) : ""}
                     tint="indigo"
                     mono
-                    action={
-                        bank.accountNumber && (
-                            <button
-                                type="button"
-                                onClick={() => setShowAcc((s) => !s)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer"
-                                title={showAcc ? "Hide" : "Show"}
-                            >
-                                {showAcc ? <EyeOff size={14} /> : <Eye size={14} />}
-                            </button>
-                        )
-                    }
+                    action={bank.accountNumber ? <QvEyeButton shown={showAcc} onClick={() => setShowAcc((s) => !s)} /> : null}
                 />
                 <QvItem icon={Hash} label="IFSC Code" value={bank.ifscCode} tint="amber" mono wide />
             </div>
@@ -573,7 +720,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
                 <div
                     role="dialog"
                     aria-modal="true"
-                    className={`w-full sm:max-w-3xl max-h-[94vh] sm:max-h-[92vh] flex flex-col bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl transition-all duration-200 ease-out ${open ? "opacity-100 translate-y-0 sm:scale-100" : "opacity-0 translate-y-6 sm:translate-y-0 sm:scale-95"}`}
+                    className={`w-full sm:max-w-3xl max-h-[94dvh] sm:max-h-[92dvh] flex flex-col bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl transition-all duration-200 ease-out ${open ? "opacity-100 translate-y-0 sm:scale-100" : "opacity-0 translate-y-6 sm:translate-y-0 sm:scale-95"}`}
                 >
                     {/* header */}
                     <div className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 pt-4 sm:pt-5 pb-4 border-b border-slate-100 shrink-0">
@@ -666,7 +813,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
                     </div>
 
                     {/* body */}
-                    <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-4 sm:py-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         <div className="sm:min-h-[310px]">
                             <div key={step} style={{ animation: "qvSlide 260ms ease both", "--qv-x": `${dir * 16}px` }}>
                                 {renderStep()}
@@ -675,7 +822,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
                     </div>
 
                     {/* footer */}
-                    <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-t border-slate-100 shrink-0">
+                    <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-t border-slate-100 shrink-0 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
                         {/* <button
                             type="button"
                             onClick={() => onOpenFull(row._id)}
@@ -690,7 +837,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
                             Step {step} of {QV_STEPS.length}
                         </span>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 ml-auto">
                             <button
                                 type="button"
                                 onClick={() => goStep(step - 1)}
@@ -721,7 +868,7 @@ function EmployeeQuickView({ row, resolveDept, resolveDesig, onClose, onEdit, on
                 </div>
             </div>
 
-            {/* image preview (panel ke bahar, taaki transform me fixed na fase) */}
+            {/* image preview (outside the panel, so the fixed position is not affected by its transform) */}
             {lightbox && (
                 <div
                     className="fixed inset-0 z-[90] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4"
@@ -1154,7 +1301,7 @@ export default function EmployeesPage() {
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 placeholder="Enter Employee Name"
-                                className="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 outline-none transition focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
+                                className="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-sm text-slate-700 placeholder:text-slate-400 outline-none transition focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
                             />
                             {search && (
                                 <button
@@ -1287,7 +1434,7 @@ export default function EmployeesPage() {
                             <Users size={22} />
                         </div>
                         <p className="text-sm font-semibold text-slate-700">No employees found</p>
-                        <p className="text-xs text-slate-400">Search ya filters change karke dekho.</p>
+                        <p className="text-xs text-slate-400">Try changing the search or the filters.</p>
                         {activeFilterCount > 0 && (
                             <button
                                 type="button"
@@ -1446,7 +1593,7 @@ export default function EmployeesPage() {
                 )}
             </div>
 
-            {/* Floating action menu (fixed => table overflow me clip nahi hoga) */}
+            {/* Floating action menu (fixed, so the table overflow does not clip it) */}
             {menu && menuEmployee && (
                 <div
                     data-row-menu

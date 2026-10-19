@@ -4,6 +4,7 @@ const router = express.Router();
 const {
     login,
     getMe,
+    updateMe,
     forgotPassword,
     verifyResetToken,
     resetPassword,
@@ -32,6 +33,8 @@ router.get("/me", protect, getMe);
 router.post("/forgot-password", limiter(5, "Too many requests. Please try again after 15 minutes."), forgotPassword);
 router.get("/reset-password/:token/verify", limiter(30, "Too many requests. Please try again later."), verifyResetToken);
 router.post("/reset-password/:token", limiter(10, "Too many attempts. Please try again later."), resetPassword);
+
+router.put("/me", protect, limiter(30, "Too many update requests. Please try again later."), updateMe); // <-- new
 
 module.exports = router;
 

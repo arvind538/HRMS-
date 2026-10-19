@@ -1,3 +1,4 @@
+// src/app/(dashboard)/reports/shifts/page.jsx
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
@@ -7,58 +8,173 @@ import {
   BarChart3,
   Clock,
   RefreshCw,
-  ArrowUpRight,
   X,
   Calendar,
   Search,
   ChevronRight,
   UserCheck,
   Moon,
-  Sun
+  Sun,
+  CalendarX,
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
+
+/* ------------------------------ helpers ------------------------------ */
+
+// Local-timezone safe YYYY-MM-DD (toISOString UTC me convert karta hai, India me date ek din peeche ja sakti hai)
+const toInputDate = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const fmtDate = (v) => {
+  if (!v) return "";
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString();
+};
+
+const rosterDateText = (r) => {
+  if (r.date) return fmtDate(r.date) || "Scheduled";
+  if (r.startDate) {
+    const s = fmtDate(r.startDate);
+    const e = fmtDate(r.endDate || r.startDate);
+    return s && e ? `${s} - ${e}` : "Scheduled";
+  }
+  return "Scheduled";
+};
+
+const TONES = {
+  indigo: { box: "bg-indigo-600", hover: "hover:border-indigo-300" },
+  violet: { box: "bg-violet-600", hover: "hover:border-violet-300" },
+};
+
+/* ------------------------- slim stat card ------------------------- */
+
+function StatCard({ icon: Icon, value, unit, label, tone }) {
+  const t = TONES[tone];
+  return (
+    <div
+      className={`group flex items-center gap-3 bg-white px-3.5 py-3 rounded-2xl border border-slate-200/80 shadow-sm ${t.hover} hover:shadow-md hover:-translate-y-0.5 transition-all duration-200`}
+    >
+      <div className={`w-10 h-10 shrink-0 rounded-xl ${t.box} text-white flex items-center justify-center shadow-sm`}>
+        <Icon size={18} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xl font-extrabold leading-tight text-slate-900 font-mono">
+          {value}
+          {unit && <span className="ml-1 text-[11px] font-semibold text-slate-400 font-sans">{unit}</span>}
+        </p>
+        <p className="text-[11px] text-slate-500 font-medium truncate">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------- animated modal (reusable) --------------------- */
+
+function Modal({ open, onClose, children }) {
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      const id = requestAnimationFrame(() =>
+        requestAnimationFrame(() => setVisible(true))
+      );
+      return () => cancelAnimationFrame(id);
+    }
+    setVisible(false);
+    const t = setTimeout(() => setMounted(false), 250);
+    return () => clearTimeout(t);
+  }, [open]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [mounted, onClose]);
+
+  if (!mounted) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        onClick={onClose}
+        className={`absolute inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity duration-300 ${visible ? "opacity-100" : "opacity-0"}`}
+      />
+      <div
+        className={`relative w-full sm:max-w-2xl bg-white shadow-2xl rounded-t-3xl sm:rounded-3xl max-h-[90vh] flex flex-col overflow-hidden transition-all duration-300 ease-out ${visible
+          ? "opacity-100 translate-y-0 sm:scale-100"
+          : "opacity-0 translate-y-8 sm:translate-y-0 sm:scale-95"
+          }`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- page -------------------------------- */
 
 export default function ShiftReportsPage() {
   const [shifts, setShifts] = useState([]);
   const [roster, setRoster] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Modal (selectedShift close ke baad bhi rakha hai taaki close animation me content na ude)
+  const [modalOpen, setModalOpen] = useState(false);
   const [selectedShift, setSelectedShift] = useState(null);
   const [modalSearch, setModalSearch] = useState("");
 
-  // Fetch real shift and roster information concurrently from backend
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const closeModal = useCallback(() => setModalOpen(false), []);
+
+  const openShift = (s) => {
+    setSelectedShift(s);
+    setModalSearch("");
+    setModalOpen(true);
+  };
+
+  // Shifts + roster (next 30 days) ek saath fetch
+  const fetchData = useCallback(async (isRefresh = false) => {
+    isRefresh ? setRefreshing(true) : setLoading(true);
     try {
-      const today = new Date().toISOString().split("T")[0];
-      const nextMonth = new Date();
-      nextMonth.setDate(nextMonth.getDate() + 30);
-      const endDate = nextMonth.toISOString().split("T")[0];
+      const start = new Date();
+      const end = new Date();
+      end.setDate(end.getDate() + 30);
 
       const [shiftsRes, rosterRes] = await Promise.all([
         api.get("/shifts"),
-        api.get("/shifts/roster", { params: { startDate: today, endDate } }),
+        api.get("/shifts/roster", {
+          params: { startDate: toInputDate(start), endDate: toInputDate(end) },
+        }),
       ]);
 
-      const shiftsData = Array.isArray(shiftsRes.data)
-        ? shiftsRes.data
-        : Array.isArray(shiftsRes.data?.data)
-          ? shiftsRes.data.data
-          : [];
+      const toList = (d) =>
+        Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
 
-      const rosterData = Array.isArray(rosterRes.data)
-        ? rosterRes.data
-        : Array.isArray(rosterRes.data?.data)
-          ? rosterRes.data.data
-          : [];
-
-      setShifts(shiftsData);
-      setRoster(rosterData);
+      setShifts(toList(shiftsRes.data));
+      setRoster(toList(rosterRes.data));
     } catch (err) {
       console.error("Shift reports fetch error:", err);
       toast.error("Failed to load shift performance reports.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -66,29 +182,17 @@ export default function ShiftReportsPage() {
     fetchData();
   }, [fetchData]);
 
-  // Modal ESC key listener
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        setSelectedShift(null);
-        setModalSearch("");
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  // Calculate shift-wise distribution counts and assigned roster records
+  // Shift-wise assigned roster
   const byShift = useMemo(() => {
     return shifts.map((s) => {
+      const sid = String(s._id || s.id || "");
       const assignedRoster = roster.filter((r) => {
         const shiftId = r.shift?._id || r.shift?.id || r.shift;
-        return shiftId === (s._id || s.id);
+        return String(shiftId || "") === sid;
       });
 
       return {
         ...s,
-        name: s.name,
         isNight: s.isNightShift || s.isNight,
         count: assignedRoster.length,
         assignedRoster,
@@ -98,267 +202,222 @@ export default function ShiftReportsPage() {
 
   const maxCount = Math.max(...byShift.map((s) => s.count), 1);
 
-  // Filter employees inside the detail modal
+  // Modal search
   const filteredRoster = useMemo(() => {
     if (!selectedShift) return [];
-    const query = modalSearch.toLowerCase().trim();
-    if (!query) return selectedShift.assignedRoster;
+    const q = modalSearch.toLowerCase().trim();
+    if (!q) return selectedShift.assignedRoster;
 
     return selectedShift.assignedRoster.filter((r) => {
-      const empName = (r.employee?.name || r.employeeName || "").toLowerCase();
-      const empEmail = (r.employee?.email || "").toLowerCase();
-      const empCode = (r.employee?.employeeId || r.employee?.code || "").toLowerCase();
-      return empName.includes(query) || empEmail.includes(query) || empCode.includes(query);
+      const emp = r.employee || {};
+      const name = String(emp.name || r.employeeName || "").toLowerCase();
+      const email = String(emp.email || "").toLowerCase();
+      const code = String(emp.employeeId || emp.code || "").toLowerCase();
+      return name.includes(q) || email.includes(q) || code.includes(q);
     });
   }, [selectedShift, modalSearch]);
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 px-4">
-        <Loader2 className="animate-spin text-indigo-600" size={38} />
+        <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+          <Loader2 className="animate-spin text-indigo-600" size={28} />
+        </div>
         <p className="text-sm text-slate-500 font-medium">Generating analytics reports...</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-4 sm:space-y-5 px-3 sm:px-4 lg:px-6 py-4 sm:py-6 transition-all duration-300">
-      {/* Header & Sync Controls */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
-        <div>
+    <div className="w-full max-w-7xl mx-auto space-y-3 sm:space-y-4 px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 bg-white px-4 py-3 sm:px-5 sm:py-4 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-sm">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-base sm:text-xl font-bold tracking-tight text-slate-900">
               Shift Reports & Analytics
             </h1>
-            <span className="bg-indigo-100 text-indigo-700 text-[11px] sm:text-xs font-semibold px-2.5 py-0.5 rounded-full">
+            <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
               30-Day Outlook
             </span>
           </div>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Analyze shift-wise employee allocation metrics. Click any shift row to inspect assigned personnel.
+          <p className="hidden sm:block text-xs text-slate-500 mt-0.5">
+            Shift-wise employee allocation. Kisi bhi shift row par click karke assigned personnel dekhein.
           </p>
         </div>
+
         <button
-          onClick={fetchData}
-          className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-medium px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm transition-all duration-300 hover:shadow group w-full sm:w-auto cursor-pointer active:scale-95"
+          onClick={() => fetchData(true)}
+          disabled={refreshing}
+          title="Refresh Data"
+          className="group shrink-0 inline-flex items-center justify-center gap-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 text-slate-700 font-semibold p-2.5 sm:px-4 sm:py-2 rounded-xl border border-slate-200 transition-all active:scale-95 cursor-pointer text-xs disabled:opacity-60"
         >
           <RefreshCw
-            size={16}
-            className="text-indigo-600 transition-transform duration-500 group-hover:rotate-180"
-          />{" "}
-          Refresh Data
+            size={14}
+            className={`text-indigo-600 transition-transform duration-500 ${refreshing ? "animate-spin" : "group-hover:rotate-180"}`}
+          />
+          <span className="hidden sm:inline">Refresh Data</span>
         </button>
       </div>
 
-      {/* Analytics Summary Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-        {/* Total Assignments Card */}
-        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs transition-all duration-300 hover:shadow-md hover:border-indigo-100 flex items-center justify-between group">
-          <div className="flex items-center gap-4">
-            <div className="p-3.5 bg-indigo-50 text-indigo-600 rounded-2xl transition-transform duration-300 group-hover:scale-110 shrink-0">
-              <Users size={22} className="sm:w-6 sm:h-6" />
-            </div>
-            <div>
-              <p className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Total Assignments
-              </p>
-              <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-0.5 sm:mt-1">
-                {roster.length}
-              </h3>
-            </div>
-          </div>
-          <span className="text-[11px] sm:text-xs font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0">
-            Active <ArrowUpRight size={14} />
-          </span>
-        </div>
-
-        {/* Active Shift Templates Card */}
-        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs transition-all duration-300 hover:shadow-md hover:border-violet-100 flex items-center justify-between group">
-          <div className="flex items-center gap-4">
-            <div className="p-3.5 bg-violet-50 text-violet-600 rounded-2xl transition-transform duration-300 group-hover:scale-110 shrink-0">
-              <Clock size={22} className="sm:w-6 sm:h-6" />
-            </div>
-            <div>
-              <p className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Shift Templates
-              </p>
-              <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-0.5 sm:mt-1">
-                {shifts.length}
-              </h3>
-            </div>
-          </div>
-          <span className="text-[11px] sm:text-xs font-semibold text-violet-600 bg-violet-50 px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0">
-            Configured <ArrowUpRight size={14} />
-          </span>
-        </div>
+      {/* Slim summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
+        <StatCard icon={Users} tone="indigo" value={roster.length} unit="assigned" label="Total Assignments" />
+        <StatCard icon={Clock} tone="violet" value={shifts.length} unit="templates" label="Shift Templates" />
       </div>
 
-      {/* Shift Distribution Visual Bars Container (Clickable Rows) */}
-      <div className="bg-white p-4 sm:p-6 lg:p-8 rounded-2xl border border-slate-200 shadow-xs transition-all duration-300 hover:shadow-md">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5 sm:mb-6">
-          <div className="flex items-center gap-2">
-            <BarChart3 size={18} className="text-indigo-600 shrink-0" />
-            <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-              Shift-wise Distribution Trends
-            </h3>
+      {/* Shift-wise distribution */}
+      <div className="bg-white p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-sm">
+        <div className="flex items-center justify-between gap-3 mb-3 sm:mb-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl shrink-0">
+              <BarChart3 size={18} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-900 text-sm sm:text-base tracking-tight truncate">
+                Shift-wise Distribution
+              </h3>
+              <p className="text-[11px] text-slate-500 truncate">
+                Row par click karke employee roster dekhein.
+              </p>
+            </div>
           </div>
-          <span className="text-[11px] sm:text-xs text-slate-400 font-medium">
-            Click any row to view employee roster details
+          <span className="shrink-0 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full font-mono">
+            {byShift.length} Shifts
           </span>
         </div>
 
         {byShift.length === 0 ? (
-          <div className="text-center py-12 text-slate-400 text-xs sm:text-sm">
-            No shift distribution data available for evaluation.
+          <div className="text-center py-10 px-4 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+            <BarChart3 className="w-9 h-9 text-slate-300 mx-auto mb-2" />
+            <p className="text-xs font-bold text-slate-700">No shift distribution data available</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Shift templates banne ke baad yahan dikhenge.</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {byShift.map((s) => (
-              <div
-                key={s._id || s.name}
-                onClick={() => setSelectedShift(s)}
-                tabIndex={0}
-                role="button"
-                onKeyDown={(e) => e.key === "Enter" && setSelectedShift(s)}
-                className="group flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-4 text-xs sm:text-sm bg-slate-50/70 hover:bg-indigo-50/40 p-3.5 sm:p-4 rounded-xl border border-slate-200/80 hover:border-indigo-300 hover:shadow-xs transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              <button
+                type="button"
+                key={s._id || s.id || s.name}
+                onClick={() => openShift(s)}
+                className="group w-full text-left flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 px-3 py-2.5 sm:px-4 rounded-xl border border-slate-200/70 bg-slate-50/40 hover:bg-white hover:border-indigo-300 hover:shadow-md active:scale-[0.99] transition-all duration-200 cursor-pointer focus:outline-hidden focus-visible:ring-2 focus-visible:ring-indigo-500/40"
               >
-                {/* Shift Name & Tag */}
-                <div className="w-full sm:w-48 font-semibold text-slate-800 truncate flex items-center justify-between sm:justify-start gap-2 shrink-0">
-                  <div className="flex items-center gap-2 truncate">
-                    <span
-                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${s.isNight ? "bg-violet-600" : "bg-indigo-600"
-                        }`}
-                    />
-                    <span className="truncate group-hover:text-indigo-900 transition-colors">
+                {/* Name + tag (+ count on mobile) */}
+                <div className="flex items-center justify-between gap-2 sm:w-56 shrink-0 min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${s.isNight ? "bg-violet-600" : "bg-indigo-600"}`} />
+                    <span className="font-bold text-xs sm:text-sm text-slate-800 group-hover:text-indigo-600 transition-colors truncate capitalize">
                       {s.name}
                     </span>
+                    {s.isNight ? (
+                      <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
+                        <Moon size={10} /> Night
+                      </span>
+                    ) : (
+                      <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                        <Sun size={10} /> Day
+                      </span>
+                    )}
                   </div>
-                  {s.isNight ? (
-                    <span className="text-[10px] text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded font-medium shrink-0 flex items-center gap-1">
-                      <Moon size={10} /> Night
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-medium shrink-0 flex items-center gap-1 sm:hidden">
-                      <Sun size={10} /> Day
-                    </span>
-                  )}
+                  <span className="text-[11px] font-semibold text-slate-500 sm:hidden shrink-0 font-mono">
+                    {s.count} emp
+                  </span>
                 </div>
 
-                {/* Progress Bar Track */}
-                <div className="flex-1 h-3 sm:h-3.5 bg-slate-200/70 rounded-full overflow-hidden p-0.5 shadow-inner w-full">
+                {/* Progress bar */}
+                <div className="flex-1 h-2 bg-slate-200/80 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all duration-700 ease-out ${s.isNight
-                      ? "bg-gradient-to-r from-violet-500 to-violet-600"
-                      : "bg-gradient-to-r from-indigo-500 to-indigo-600"
-                      }`}
-                    style={{ width: `${(s.count / maxCount) * 100}%` }}
+                    className={`h-full rounded-full transition-all duration-700 ease-out ${s.isNight ? "bg-violet-600" : "bg-indigo-600"}`}
+                    style={{ width: `${s.count > 0 ? Math.max((s.count / maxCount) * 100, 4) : 0}%` }}
                   />
                 </div>
 
-                {/* Count Badge & Arrow */}
-                <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                  <div className="text-xs font-bold text-slate-900 bg-white px-3 py-1 rounded-lg border border-slate-200 shadow-2xs">
-                    <span className="sm:hidden text-slate-400 font-normal">Assigned: </span>
-                    {s.count} <span className="text-slate-400 font-normal">Emp</span>
-                  </div>
-                  <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-2xs">
-                    <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-                  </div>
+                {/* Count (desktop) */}
+                <div className="hidden sm:flex items-center justify-end gap-2 w-32 shrink-0">
+                  <span className="text-xs font-bold text-slate-700 font-mono">
+                    {s.count} <span className="text-slate-400 font-normal font-sans">Emp</span>
+                  </span>
+                  <ChevronRight
+                    size={15}
+                    className="text-slate-300 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all"
+                  />
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Details View Modal on Shift Row Click */}
-      {selectedShift && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs transition-opacity"
-          onClick={() => {
-            setSelectedShift(null);
-            setModalSearch("");
-          }}
-        >
-          <div
-            className="bg-white w-full max-w-2xl rounded-3xl shadow-xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
-              <div className="flex items-center gap-3">
+      {/* Shift details popup (center on desktop, bottom sheet on mobile) */}
+      <Modal open={modalOpen} onClose={closeModal}>
+        {selectedShift && (
+          <>
+            {/* Header */}
+            <div className="px-4 py-3.5 sm:px-5 sm:py-4 border-b border-slate-100 flex items-center justify-between gap-3 bg-slate-50/60">
+              <div className="flex items-center gap-3 min-w-0">
                 <div
-                  className={`p-2.5 rounded-xl border shadow-2xs ${selectedShift.isNight
-                    ? "bg-violet-50 text-violet-600 border-violet-100"
-                    : "bg-indigo-50 text-indigo-600 border-indigo-100"
-                    }`}
+                  className={`p-2.5 rounded-xl text-white shrink-0 ${selectedShift.isNight ? "bg-violet-600" : "bg-indigo-600"}`}
                 >
-                  {selectedShift.isNight ? <Moon size={20} /> : <Sun size={20} />}
+                  {selectedShift.isNight ? <Moon size={18} /> : <Sun size={18} />}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-none">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate capitalize">
                       {selectedShift.name}
                     </h3>
                     {selectedShift.isNight && (
-                      <span className="text-2xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-semibold">
-                        Night Shift
+                      <span className="shrink-0 text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-semibold">
+                        Night
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Shift Details & Roster Allocations
-                  </p>
+                  <p className="text-[11px] sm:text-xs text-slate-500">Shift Details & Roster Allocations</p>
                 </div>
               </div>
               <button
-                onClick={() => {
-                  setSelectedShift(null);
-                  setModalSearch("");
-                }}
-                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                onClick={closeModal}
+                className="shrink-0 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
+                aria-label="Close"
               >
                 <X size={18} />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-5 sm:p-6 overflow-y-auto space-y-5 text-sm">
-              {/* Shift Timing Information Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <div className="p-3.5 bg-slate-50/80 border border-slate-100 rounded-xl">
-                  <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
-                    <Clock size={12} className="text-indigo-600" /> Start Time
+            {/* Body */}
+            <div className="px-4 sm:px-5 py-4 overflow-y-auto space-y-4">
+              {/* Timing grid */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium flex items-center gap-1">
+                    <Clock size={11} className="text-indigo-600" /> Start
                   </span>
-                  <p className="font-semibold text-slate-800 mt-1">
+                  <p className="font-bold text-slate-900 text-sm mt-0.5 font-mono">
                     {selectedShift.startTime || selectedShift.start || "N/A"}
                   </p>
                 </div>
-
-                <div className="p-3.5 bg-slate-50/80 border border-slate-100 rounded-xl">
-                  <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
-                    <Clock size={12} className="text-rose-600" /> End Time
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium flex items-center gap-1">
+                    <Clock size={11} className="text-rose-600" /> End
                   </span>
-                  <p className="font-semibold text-slate-800 mt-1">
+                  <p className="font-bold text-slate-900 text-sm mt-0.5 font-mono">
                     {selectedShift.endTime || selectedShift.end || "N/A"}
                   </p>
                 </div>
-
-                <div className="p-3.5 bg-slate-50/80 border border-slate-100 rounded-xl col-span-2 sm:col-span-1">
-                  <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
-                    <Users size={12} className="text-indigo-600" /> Allocated
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium flex items-center gap-1">
+                    <Users size={11} className="text-indigo-600" /> Allocated
                   </span>
-                  <p className="font-semibold text-slate-800 mt-1">
-                    {selectedShift.count} Employees
+                  <p className="font-bold text-slate-900 text-sm mt-0.5 font-mono">
+                    {selectedShift.count}
                   </p>
                 </div>
               </div>
 
-              {/* Employees Search Toolbar */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+              {/* Search toolbar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                   <UserCheck size={16} className="text-indigo-600" />
-                  Assigned Personnel List ({filteredRoster.length})
+                  Assigned Personnel ({filteredRoster.length})
                 </h4>
 
                 <div className="relative w-full sm:w-64">
@@ -371,85 +430,116 @@ export default function ShiftReportsPage() {
                     placeholder="Search by name, email, code..."
                     value={modalSearch}
                     onChange={(e) => setModalSearch(e.target.value)}
-                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600"
+                    className="w-full pl-8 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-700 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
                   />
                 </div>
               </div>
 
-              {/* Assigned Employees List Table */}
-              <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
-                {filteredRoster.length === 0 ? (
-                  <div className="py-12 text-center text-slate-400 text-xs font-medium bg-slate-50/50">
-                    No employees allocated to this shift in the 30-day window.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto max-h-72">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold sticky top-0">
-                        <tr>
-                          <th className="px-4 py-3">Employee</th>
-                          <th className="px-4 py-3">Date Range</th>
-                          <th className="px-4 py-3 text-right">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filteredRoster.map((r, i) => {
-                          const emp = r.employee || {};
-                          return (
-                            <tr key={r._id || i} className="hover:bg-slate-50/80 transition-colors">
-                              <td className="px-4 py-3 font-medium text-slate-800">
-                                <div>
+              {/* Roster list */}
+              {filteredRoster.length === 0 ? (
+                <div className="py-10 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                  <CalendarX className="w-9 h-9 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-bold text-slate-700">No employees found</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    {modalSearch
+                      ? "Search se koi employee match nahi hua."
+                      : "Is shift me 30-day window me koi employee allocated nahi hai."}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Desktop/tablet: table */}
+                  <div className="hidden sm:block border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="overflow-y-auto max-h-72">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold sticky top-0">
+                          <tr>
+                            <th className="px-4 py-2.5">Employee</th>
+                            <th className="px-4 py-2.5">Date</th>
+                            <th className="px-4 py-2.5 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredRoster.map((r, i) => {
+                            const emp = r.employee || {};
+                            const code = emp.employeeId || emp.code;
+                            return (
+                              <tr key={r._id || r.id || i} className="hover:bg-slate-50/80 transition-colors">
+                                <td className="px-4 py-2.5">
                                   <p className="font-semibold text-slate-900">
                                     {emp.name || r.employeeName || "Unknown Employee"}
                                   </p>
-                                  <p className="text-2xs text-slate-400">
-                                    {emp.email || emp.code || emp.employeeId || "—"}
+                                  <p className="text-[10px] text-slate-400 font-mono">
+                                    {code ? `ID: ${code}` : ""}
+                                    {code && emp.email ? " • " : ""}
+                                    {emp.email || (!code ? "—" : "")}
                                   </p>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-slate-600">
-                                <span className="flex items-center gap-1">
-                                  <Calendar size={12} className="text-slate-400" />
-                                  {r.date
-                                    ? new Date(r.date).toLocaleDateString()
-                                    : r.startDate
-                                      ? `${new Date(r.startDate).toLocaleDateString()} - ${new Date(
-                                        r.endDate || r.startDate
-                                      ).toLocaleDateString()}`
-                                      : "Scheduled"}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <span className="inline-block px-2 py-0.5 text-2xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  {r.status || "Active"}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                </td>
+                                <td className="px-4 py-2.5 text-slate-600">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Calendar size={12} className="text-indigo-500" />
+                                    {rosterDateText(r)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2.5 text-right">
+                                  <span className="inline-block px-2 py-0.5 text-[10px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 capitalize">
+                                    {r.status || "Active"}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                )}
-              </div>
+
+                  {/* Mobile: cards */}
+                  <div className="sm:hidden space-y-2">
+                    {filteredRoster.map((r, i) => {
+                      const emp = r.employee || {};
+                      const code = emp.employeeId || emp.code;
+                      return (
+                        <div
+                          key={r._id || r.id || i}
+                          className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-900 truncate">
+                              {emp.name || r.employeeName || "Unknown Employee"}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-mono truncate">
+                              {code ? `ID: ${code}` : emp.email || "—"}
+                            </p>
+                            <p className="text-[11px] text-slate-500 mt-0.5 inline-flex items-center gap-1">
+                              <Calendar size={11} className="text-indigo-500" />
+                              {rosterDateText(r)}
+                            </p>
+                          </div>
+                          <span className="shrink-0 px-2 py-0.5 text-[10px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 capitalize">
+                            {r.status || "Active"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+            {/* Footer */}
+            <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/60">
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedShift(null);
-                  setModalSearch("");
-                }}
-                className="px-4 py-2 bg-white border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer"
+                onClick={closeModal}
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer active:scale-[0.99]"
               >
                 Close
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

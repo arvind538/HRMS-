@@ -38,7 +38,7 @@ import {
     LayoutDashboard, Users, Building2, Briefcase, Clock, CalendarDays,
     Wallet, TrendingUp, GraduationCap, Receipt, Plane, Package,
     FileText, MessageSquare, UserCircle, Repeat, ShieldCheck,
-    BarChart3, Settings, Lock, HelpCircle
+    BarChart3, Settings, Lock, HelpCircle, ListChecks
 } from "lucide-react";
 
 export const menuConfig = [
@@ -52,6 +52,14 @@ export const menuConfig = [
             // { label: "Attendance Summary", href: "/dashboard/attendance-summary" },
             // { label: "Leave Summary", href: "/dashboard/leave-summary" },
             // { label: "Payroll Summary", href: "/dashboard/payroll-summary" },
+        ],
+    },
+    {
+        label: "Tasks",
+        icon: ListChecks,
+        children: [
+            { label: "overview", href: "/tasks" },
+
         ],
     },
     {
@@ -104,7 +112,7 @@ export const menuConfig = [
         children: [
             { label: "Attendance Dashboard", href: "/attendance" },
             { label: "Daily Attendance", href: "/attendance/daily" },
-            { label: "Attendance Details ", href: "/attendance/monthly" },
+            { label: "Attendance Monthly ", href: "/attendance/monthly" },
             // { label: "Check In / Check Out", href: "/attendance/check-in-out" },
 
             // { label: "Biometric Attendance", href: "/attendance/biometric" },
@@ -165,20 +173,20 @@ export const menuConfig = [
             { label: "Increment", href: "/performance/increment" },
         ],
     },
-    {
-        label: "Training & Development",
-        icon: GraduationCap,
-        children: [
-            { label: "Training Dashboard", href: "/training" },
-            { label: "Training Programs", href: "/training/programs" },
-            { label: "Courses", href: "/training/courses" },
-            { label: "Trainers", href: "/training/trainers" },
-            { label: "Employee Training", href: "/training/employee-training" },
-            { label: "Training Calendar", href: "/training/calendar" },
-            { label: "Certifications", href: "/training/certifications" },
-            { label: "Training Reports", href: "/training/reports" },
-        ],
-    },
+    // {
+    //     label: "Training & Development",
+    //     icon: GraduationCap,
+    //     children: [
+    //         { label: "Training Dashboard", href: "/training" },
+    //         { label: "Training Programs", href: "/training/programs" },
+    //         { label: "Courses", href: "/training/courses" },
+    //         { label: "Trainers", href: "/training/trainers" },
+    //         { label: "Employee Training", href: "/training/employee-training" },
+    //         { label: "Training Calendar", href: "/training/calendar" },
+    //         { label: "Certifications", href: "/training/certifications" },
+    //         { label: "Training Reports", href: "/training/reports" },
+    //     ],
+    // },
     {
         label: "Expenses",
         icon: Receipt,
@@ -238,7 +246,7 @@ export const menuConfig = [
             { label: "Internal Messages", href: "/communication/messages" },
             { label: "Email", href: "/communication/email" },
             { label: "SMS", href: "/communication/sms" },
-            { label: "Employee Circulars", href: "/communication/circulars" },
+            // { label: "Employee Circulars", href: "/communication/circulars" },
         ],
     },
     {
@@ -246,15 +254,15 @@ export const menuConfig = [
         icon: UserCircle,
         children: [
             { label: "My Profile", href: "/self-service/profile" },
-            { label: "My Attendance", href: "/self-service/attendance" },
-            { label: "My Leaves", href: "/self-service/leaves" },
+            // { label: "My Attendance", href: "/self-service/attendance" },
+            // { label: "My Leaves", href: "/self-service/leaves" },
             { label: "My Payslips", href: "/self-service/payslips" },
             { label: "My Documents", href: "/self-service/documents" },
-            { label: "My Expenses", href: "/self-service/expenses" },
-            { label: "My Assets", href: "/self-service/assets" },
-            { label: "My Goals", href: "/self-service/goals" },
+            // { label: "My Expenses", href: "/self-service/expenses" },
+            // { label: "My Assets", href: "/self-service/assets" },
+            // { label: "My Goals", href: "/self-service/goals" },
             { label: "My Performance", href: "/self-service/performance" },
-            { label: "My Requests", href: "/self-service/requests" },
+            // { label: "My Requests", href: "/self-service/requests" },
         ],
     },
     {
@@ -316,7 +324,7 @@ export const menuConfig = [
             { label: "Roles", href: "/users/roles" },
             { label: "Permissions", href: "/users/permissions" },
             { label: "Login History", href: "/users/login-history" },
-            { label: "Activity Logs", href: "/users/activity-logs" },
+            // { label: "Activity Logs", href: "/users/activity-logs" },
         ],
     },
     {

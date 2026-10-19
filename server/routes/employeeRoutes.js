@@ -10,6 +10,8 @@ const {
     deleteEmployee,
     exitEmployee,
     getMyProfile,
+    updateMyProfile,
+    getMe,
 } = require("../controllers/employeeController");
 
 const resolveGetEmployee = getEmployee || getEmployeeById;
@@ -21,8 +23,12 @@ router
     .post(protect, authorize("admin", "hr"), createEmployee);
 
 // 2. Logged-in user's own profile (MUST be BEFORE /:id)
+// router.get("/profile", protect, getMyProfile);
+// router.get("/me", protect, getMyProfile);
+
 router.get("/profile", protect, getMyProfile);
-router.get("/me", protect, getMyProfile);
+router.get("/me", protect, getMe);
+router.put("/me", protect, updateMyProfile);
 
 // 3. Fallback route used by the frontend edit page
 router.put("/update/:id", protect, authorize("admin", "hr"), updateEmployee);

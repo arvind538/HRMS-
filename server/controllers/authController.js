@@ -264,6 +264,52 @@ exports.resetPassword = async (req, res, next) => {
     }
 };
 
+exports.updateMe = async (req, res) => {
+    try {
+        const { name, email } = req.body;
+        const updates = {};
+
+        if (name !== undefined) {
+            const cleanName = String(name).trim();
+            if (cleanName.length < 2) {
+                return res.status(400).json({ message: "Name must be at least 2 characters" });
+            }
+            updates.name = cleanName;
+        }
+
+        if (email !== undefined) {
+            const cleanEmail = String(email).trim().toLowerCase();
+            if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) {
+                return res.status(400).json({ message: "Invalid email address" });
+            }
+            const exists = await User.findOne({ email: cleanEmail, _id: { $ne: req.user._id } });
+            if (exists) {
+                return res.status(400).json({ message: "Email already in use" });
+            }
+            updates.email = cleanEmail;
+        }
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({ message: "Nothing to update" });
+        }
+
+        const user = await User.findByIdAndUpdate(
+            req.user._id,
+            { $set: updates },
+            { new: true, runValidators: true }
+        ).select("-password");
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        res.json(user);
+    } catch (err) {
+        console.error("updateMe error:", err);
+        res.status(500).json({ message: "Failed to update profile" });
+    }
+};
+
 
 // const bcrypt = require("bcryptjs");
 // const jwt = require("jsonwebtoken");

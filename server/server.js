@@ -1,12 +1,12 @@
-// const dns = require("dns");
-// try {
-//     dns.setServers(["8.8.8.8", "8.8.4.4"]);
-// } catch (err) {
-//     console.warn("DNS servers could not be set:", err.message);
-// }
-
 const dns = require("dns");
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+try {
+    dns.setServers(["8.8.8.8", "8.8.4.4"]);
+} catch (err) {
+    console.warn("DNS servers could not be set:", err.message);
+}
+
+// const dns = require("dns");
+// dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 require("dotenv").config();
 const express = require("express");

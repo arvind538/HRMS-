@@ -57,8 +57,8 @@ const OFFICE_LOCATION = {
     address: "jamdoli, Jaipur",
     lat: 26.890373334979436,
     lng: 75.87398927116433,
-    allowedRadius: 1000, // punch is allowed within this distance (meters)
-    nearRadius: 1000, // inside this distance the office address is saved (meters)
+    allowedRadius: 100, // punch is allowed within this distance (meters)
+    nearRadius: 100, // inside this distance the office address is saved (meters)
 };
 
 const DEFAULT_WORK_HOURS = 8; // used only when no shift is assigned

@@ -14,6 +14,16 @@ const userSchema = new mongoose.Schema(
         passwordResetExpires: { type: Date, select: false },
         passwordResetRequestedAt: { type: Date },
         passwordChangedAt: { type: Date },
+
+        tokenVersion: { type: Number, default: 0 },
+
+        // models/User.js (schema me ye fields add karo)
+        phone: { type: String, default: "" },
+        countryCode: { type: String, default: "+91" },
+        gender: { type: String, enum: ["male", "female", ""], default: "" },
+        address: { type: String, default: "" },
+        timezone: { type: String, default: "Asia/Kolkata" },
+        avatar: { type: String, default: "" },   // sirf path: /uploads/avatars/xyz.jpg
     },
     { timestamps: true }
 );

@@ -1,617 +1,308 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  Percent,
-  RefreshCw,
-  AlertCircle,
-  ShieldCheck,
-  Search,
-  IndianRupee,
-  Calendar,
-  ChevronDown,
-  Edit3,
-  X,
-  FileSpreadsheet,
-  Coins,
-  Scale
-} from "lucide-react";
-import api from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Percent, Pencil, Loader2, X, Coins, IndianRupee, Scale, ShieldCheck, Info } from "lucide-react";
 import { toast } from "react-toastify";
+import api from "@/lib/api";
+import { Avatar, ErrorBanner, FieldError, Label, Sheet, StatCard, cleanText, fieldBorder, inputClass, rupee, rupeeShort } from "@/components/payroll/ui";
+import { EmptyBox, FilterTabs, ListSkeleton, PageHeader, PeriodFields, Pill, SearchBox, monthYear, primaryBtn } from "@/components/payroll/common";
+
+const blank = { employeeId: "", regime: "NEW", panNumber: "", section80C: "", section80D: "", hraExemption: "", otherExemptions: "" };
 
 export default function TaxTDS() {
-  const [taxData, setTaxData] = useState([]);
-  const [employees, setEmployees] = useState([]);
+  const now = new Date();
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-  const [regimeFilter, setRegimeFilter] = useState("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showModal, setShowModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("all");
+  const [search, setSearch] = useState("");
 
-  const [form, setForm] = useState({
-    employeeId: "",
-    regime: "NEW",
-    panNumber: "",
-    section80C: "",
-    section80D: "",
-    hraExemption: "",
-  });
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(blank);
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
 
-  const fetchTaxProfiles = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [period, setPeriod] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState(null);
+
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+    setError("");
     try {
-      const response = await api.get("/payroll/tax-tds");
-      const resData = response?.data;
-
-      const list = Array.isArray(resData)
-        ? resData
-        : Array.isArray(resData?.data)
-          ? resData.data
-          : [];
-
-      setTaxData(list);
+      const { data } = await api.get("/payroll/tax-tds");
+      setRows(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Fetch Tax/TDS error:", err);
-      setError(
-        err.response?.data?.message ||
-        err.response?.data?.error ||
-        "Failed to load Income Tax & TDS profiles from server."
-      );
-      setTaxData([]);
+      setError(err?.response?.data?.message || "Unable to load the tax details. Please try again.");
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  const fetchEmployees = useCallback(async () => {
-    try {
-      const response = await api.get("/employee");
-      const resData = response?.data;
-      const list = Array.isArray(resData)
-        ? resData
-        : Array.isArray(resData?.data)
-          ? resData.data
-          : Array.isArray(resData?.employees)
-            ? resData.employees
-            : [];
-      setEmployees(list);
-    } catch (err) {
-      try {
-        const fallbackRes = await api.get("/employees");
-        const fbData = fallbackRes?.data;
-        const fbList = Array.isArray(fbData) ? fbData : fbData?.data || [];
-        setEmployees(fbList);
-      } catch (e) {
-        console.warn("Could not load employee select list:", err);
-      }
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchTaxProfiles();
-    fetchEmployees();
-  }, [fetchTaxProfiles, fetchEmployees]);
+    load();
+  }, [load]);
 
-  const openDeclarationModal = (item = null) => {
-    if (item) {
-      setForm({
-        employeeId: item.employee?._id || "",
-        regime: item.regime || "NEW",
-        panNumber: item.panNumber === "PENDING" ? "" : item.panNumber || "",
-        section80C: item.section80C?.toString() || "",
-        section80D: item.section80D?.toString() || "",
-        hraExemption: item.hraExemption?.toString() || "",
-      });
-    } else {
-      setForm({
-        employeeId: "",
-        regime: "NEW",
-        panNumber: "",
-        section80C: "",
-        section80D: "",
-        hraExemption: "",
-      });
-    }
-    setShowModal(true);
+  const counts = useMemo(() => ({ all: rows.length, NEW: rows.filter((r) => r.regime === "NEW").length, OLD: rows.filter((r) => r.regime === "OLD").length }), [rows]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((r) => (tab === "all" || r.regime === tab) && (!q || `${r.employee?.name || ""} ${r.employee?.employeeId || ""} ${r.panNumber || ""}`.toLowerCase().includes(q)));
+  }, [rows, tab, search]);
+
+  const totalMonthly = useMemo(() => rows.reduce((s, r) => s + (r.monthlyTDS || 0), 0), [rows]);
+  const totalAnnual = useMemo(() => rows.reduce((s, r) => s + (r.annualTax || 0), 0), [rows]);
+
+  const openModal = (r) => {
+    setForm({
+      employeeId: r.employee?._id || "",
+      regime: r.regime || "NEW",
+      panNumber: r.panNumber === "PENDING" ? "" : r.panNumber || "",
+      section80C: r.section80C ? String(r.section80C) : "",
+      section80D: r.section80D ? String(r.section80D) : "",
+      hraExemption: r.hraExemption ? String(r.hraExemption) : "",
+      otherExemptions: r.otherExemptions ? String(r.otherExemptions) : "",
+    });
+    setErrors({});
+    setModal({ row: r });
   };
 
-  const handleSaveDeclaration = async (e) => {
+  const setField = (key, value) => {
+    setForm((p) => ({ ...p, [key]: value }));
+    setErrors((p) => (p[key] ? { ...p, [key]: undefined } : p));
+  };
+
+  const save = async (e) => {
     e.preventDefault();
+    if (saving) return;
+    const next = {};
+    const pan = form.panNumber.trim().toUpperCase();
+    if (pan && !/^[A-Z]{5}\d{4}[A-Z]$/.test(pan)) next.panNumber = "PAN must look like ABCDE1234F.";
+    ["section80C", "section80D", "hraExemption", "otherExemptions"].forEach((k) => {
+      if (form[k] !== "" && (!Number.isFinite(Number(form[k])) || Number(form[k]) < 0)) next[k] = "Enter a valid amount.";
+    });
+    setErrors(next);
+    if (Object.keys(next).length) return;
 
-    if (!form.employeeId) {
-      toast.error("Please select an employee.");
-      return;
-    }
-
-    setSubmitting(true);
+    setSaving(true);
     try {
       await api.post("/payroll/tax-tds", {
         employeeId: form.employeeId,
         regime: form.regime,
-        panNumber: form.panNumber.trim().toUpperCase(),
+        panNumber: pan,
         section80C: Number(form.section80C) || 0,
         section80D: Number(form.section80D) || 0,
         hraExemption: Number(form.hraExemption) || 0,
+        otherExemptions: Number(form.otherExemptions) || 0,
       });
-
-      toast.success("Tax declaration updated successfully!");
-      setShowModal(false);
-      fetchTaxProfiles();
+      toast.success("Tax declaration saved.");
+      setModal(null);
+      load({ silent: true });
     } catch (err) {
-      console.error("Save tax declaration error:", err);
-      toast.error(
-        err.response?.data?.message || "Failed to update tax declaration."
-      );
+      toast.error(err?.response?.data?.message || "Unable to save the declaration.");
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  const filtered = useMemo(() => {
-    return taxData.filter((t) => {
-      const q = searchQuery.toLowerCase().trim();
-      const empName = t.employee?.name || "";
-      const empCode = t.employee?.employeeId || "";
-      const pan = t.panNumber || "";
+  const apply = async () => {
+    if (applying) return;
+    setApplying(true);
+    try {
+      const { data } = await api.post("/payroll/tax-tds/apply", period);
+      setApplyResult(data);
+      toast.success(data.message);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Unable to add the TDS.");
+    } finally {
+      setApplying(false);
+    }
+  };
 
-      const matchesSearch =
-        !q ||
-        empName.toLowerCase().includes(q) ||
-        empCode.toLowerCase().includes(q) ||
-        pan.toLowerCase().includes(q);
+  const closeApply = () => {
+    if (applying) return;
+    setApplyOpen(false);
+    setApplyResult(null);
+  };
 
-      const matchesRegime =
-        regimeFilter === "ALL" || t.regime === regimeFilter;
+  const numField = (key, label) => (
+    <div>
+      <Label>{label}</Label>
+      <input type="number" inputMode="decimal" min="0" step="any" value={form[key]} onChange={(e) => setField(key, e.target.value)} placeholder="0" className={`${inputClass} font-mono ${fieldBorder(errors[key])}`} />
+      <FieldError>{errors[key]}</FieldError>
+    </div>
+  );
 
-      return matchesSearch && matchesRegime;
-    });
-  }, [taxData, searchQuery, regimeFilter]);
-
-  const totalMonthlyTds = useMemo(() => {
-    return filtered.reduce((sum, item) => sum + (Number(item.monthlyTDS) || 0), 0);
-  }, [filtered]);
-
-  const totalAnnualTaxLiability = useMemo(() => {
-    return filtered.reduce((sum, item) => sum + (Number(item.annualTax) || 0), 0);
-  }, [filtered]);
+  const regimePill = (r) => <Pill tone={r.regime === "NEW" ? "indigo" : "amber"}>{r.regime} regime</Pill>;
+  const empCell = (r, size) => (
+    <div className="flex items-center gap-3 min-w-0">
+      <Avatar name={r.employee?.name} size={size} />
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-slate-900 truncate">{r.employee?.name || "Unknown"}</p>
+        <p className="text-[11px] text-slate-500 truncate font-mono">{[r.employee?.employeeId, r.panNumber].filter(Boolean).join(" • ")}</p>
+      </div>
+    </div>
+  );
+  const editBtn = (r, cls = "") => (
+    <button type="button" onClick={() => openModal(r)} className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 rounded-lg text-xs font-bold border border-slate-200 transition cursor-pointer ${cls}`}>
+      <Pencil size={13} /> Edit
+    </button>
+  );
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 font-sans">
-      {/* Top Banner Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs transition-all duration-300 hover:shadow-xl hover:border-indigo-200">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 transition-transform duration-300 hover:scale-105">
-            <Percent className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-                Income Tax & TDS Summary
-              </h1>
-              {!loading && !error && (
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                  {taxData.length} Profiles Computed
-                </span>
-              )}
-            </div>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Tax regime choices (New vs Old), declared chapter VI-A deductions, and calculated TDS withholding
-            </p>
-          </div>
-        </div>
+    <div className="w-full max-w-7xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={Percent} title="Income Tax & TDS" subtitle="Tax regime, declared deductions and the monthly TDS of every employee." onRefresh={() => load({ silent: true })} busy={loading || refreshing}>
+        <button type="button" onClick={() => setApplyOpen(true)} disabled={!rows.length} className={primaryBtn}><ShieldCheck size={16} /> Apply TDS to payroll</button>
+      </PageHeader>
 
-        <div className="flex items-center gap-2.5 self-start sm:self-auto">
-          <button
-            onClick={() => {
-              fetchTaxProfiles();
-              fetchEmployees();
-            }}
-            disabled={loading}
-            className="p-3 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition disabled:opacity-50 cursor-pointer"
-            title="Recalculate tax brackets"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
-          <button
-            onClick={() => openDeclarationModal()}
-            className="inline-flex items-center gap-2 px-4.5 py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer active:scale-95"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>Update Declaration</span>
-          </button>
-        </div>
+      <div className="flex items-start gap-2.5 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+        <Info size={15} className="shrink-0 mt-0.5 text-amber-600" />
+        <p className="font-medium">These are <b>estimates</b> from the standard slabs and the salary on the employee profile. Please confirm the rates and each person&apos;s declaration with your CA before you rely on them. <b>Apply TDS to payroll</b> adds the monthly amount as a deduction, which is then cut in that month&apos;s payslip.</p>
       </div>
 
-      {/* KPI Overview */}
-      {!loading && !error && taxData.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition-all duration-300 hover:shadow-xl hover:border-rose-200 group">
-            <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-rose-600 transition-colors">
-                Monthly TDS Withholding Pool
-              </p>
-              <h3 className="text-xl sm:text-2xl font-extrabold text-rose-600 mt-1 font-mono">
-                ₹{totalMonthlyTds.toLocaleString("en-IN")}/mo
-              </h3>
-            </div>
-            <div className="w-11 h-11 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <Coins className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition-all duration-300 hover:shadow-xl hover:border-indigo-200 group">
-            <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-indigo-600 transition-colors">
-                Annual Tax Liability (FY 2026-27)
-              </p>
-              <h3 className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 font-mono">
-                ₹{totalAnnualTaxLiability.toLocaleString("en-IN")}
-              </h3>
-            </div>
-            <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <IndianRupee className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition-all duration-300 hover:shadow-xl hover:border-emerald-200 group">
-            <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider group-hover:text-emerald-600 transition-colors">
-                Tax Regime Split
-              </p>
-              <h3 className="text-xl sm:text-2xl font-extrabold text-emerald-600 mt-1">
-                {taxData.filter((t) => t.regime === "NEW").length} New / {taxData.filter((t) => t.regime === "OLD").length} Old
-              </h3>
-            </div>
-            <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-              <Scale className="w-5 h-5" />
-            </div>
-          </div>
+      {!loading && !error && rows.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <StatCard icon={Coins} tone="rose" label="TDS per month" value={rupeeShort(totalMonthly)} />
+          <StatCard icon={IndianRupee} tone="indigo" label="Annual tax" value={rupeeShort(totalAnnual)} />
+          <StatCard icon={Scale} tone="emerald" label="New / Old regime" value={`${counts.NEW} / ${counts.OLD}`} />
+          <StatCard icon={Percent} tone="violet" label="Employees" value={rows.length} />
         </div>
       )}
 
-      {/* Filter and Search Bar with Interactive Regime Tabs */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 transition-all duration-300 hover:shadow-md">
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search employee name, ID or PAN..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          {["ALL", "NEW", "OLD"].map((rg) => (
-            <button
-              key={rg}
-              onClick={() => setRegimeFilter(rg)}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-200 cursor-pointer ${regimeFilter === rg
-                ? "bg-slate-900 text-white shadow-xs scale-105"
-                : "bg-slate-100 hover:bg-slate-200 text-slate-600"
-                }`}
-            >
-              {rg === "ALL" ? "All Regimes" : `${rg} Regime`}
-            </button>
-          ))}
-        </div>
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/70 shadow-sm space-y-3">
+        <SearchBox value={search} onChange={setSearch} placeholder="Search name, ID or PAN" />
+        <FilterTabs tabs={[["all", "All", counts.all], ["NEW", "New regime", counts.NEW], ["OLD", "Old regime", counts.OLD]]} value={tab} onChange={setTab} />
       </div>
 
-      {/* Main Results Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition-all duration-300 hover:shadow-md">
-        {loading ? (
-          <div className="py-20 text-center space-y-3">
-            <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
-            <p className="text-sm font-semibold text-slate-800">
-              Computing tax slabs and declared deductions...
-            </p>
-          </div>
-        ) : error ? (
-          <div className="py-16 text-center max-w-md mx-auto p-6">
-            <AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-2" />
-            <h3 className="text-sm font-bold text-slate-900">Failed to Load Tax Records</h3>
-            <p className="text-xs text-slate-500 mt-1 mb-4">{error}</p>
-            <button
-              onClick={fetchTaxProfiles}
-              className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition cursor-pointer"
-            >
-              Try Again
-            </button>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-20 text-center max-w-sm mx-auto p-6">
-            <Percent className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <h3 className="text-sm font-bold text-slate-800">No Tax Profiles Found</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              Ensure employees have assigned salaries in the Employee Salary Mapping tab.
-            </p>
-          </div>
+      <ErrorBanner message={error} onRetry={() => load()} />
+
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        {loading ? <ListSkeleton /> : visible.length === 0 ? (
+          <EmptyBox icon={Percent} title={rows.length === 0 ? "No employee with a salary" : "Nothing matches your search"} text={rows.length === 0 ? "Set the monthly salary in Employee Salary first." : "Try another keyword or regime."} />
         ) : (
           <>
-            {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    <th className="py-4 px-6">Employee</th>
-                    <th className="py-4 px-6">Chosen Regime</th>
-                    <th className="py-4 px-6">Exemptions / Deductions</th>
-                    <th className="py-4 px-6">Taxable Income</th>
-                    <th className="py-4 px-6">Annual Tax</th>
-                    <th className="py-4 px-6">Monthly TDS</th>
-                    <th className="py-4 px-6 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
-                  {filtered.map((item) => {
-                    const id = item._id;
-                    const empName = item.employee?.name || "Unknown Staff";
-                    const empCode = item.employee?.employeeId || "—";
-
-                    return (
-                      <tr key={id} className="hover:bg-indigo-50/40 transition-colors duration-150 group">
-                        <td className="py-4 px-6">
-                          <div className="font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">
-                            {empName}
-                          </div>
-                          <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 font-mono">
-                            <span>{empCode}</span>
-                            <span>• PAN: {item.panNumber}</span>
-                          </div>
-                        </td>
-
-                        <td className="py-4 px-6 whitespace-nowrap">
-                          <span
-                            className={`inline-block text-xs font-mono font-bold px-3 py-1 rounded-lg border ${item.regime === "NEW"
-                              ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                              : "bg-amber-50 text-amber-800 border-amber-200"
-                              }`}
-                          >
-                            {item.regime === "NEW" ? "NEW REGIME" : "OLD REGIME"}
-                          </span>
-                        </td>
-
-                        <td className="py-4 px-6 text-slate-600 text-xs font-semibold font-mono">
-                          ₹{(item.exemptionsDeclared || 0).toLocaleString("en-IN")}
-                          {item.regime === "OLD" && (
-                            <span className="text-[11px] text-slate-400 block font-normal">
-                              80C: ₹{Number(item.section80C || 0).toLocaleString("en-IN")}
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="py-4 px-6 font-bold text-slate-900 font-mono">
-                          ₹{(item.taxableIncome || 0).toLocaleString("en-IN")}
-                        </td>
-
-                        <td className="py-4 px-6 font-semibold text-slate-700 font-mono">
-                          ₹{(item.annualTax || 0).toLocaleString("en-IN")}
-                        </td>
-
-                        <td className="py-4 px-6 font-extrabold text-rose-600 text-base font-mono">
-                          ₹{(item.monthlyTDS || 0).toLocaleString("en-IN")}/mo
-                        </td>
-
-                        <td className="py-4 px-6 text-right whitespace-nowrap">
-                          <button
-                            onClick={() => openDeclarationModal(item)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-700 rounded-xl text-xs font-semibold border border-slate-200 transition cursor-pointer shadow-xs"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            <span>Edit</span>
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 sm:p-4 lg:hidden">
+              {visible.map((r) => (
+                <div key={r._id} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">{empCell(r, "w-10 h-10")}{regimePill(r)}</div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    {[["Annual pay", rupeeShort(r.annualGross)], ["Annual tax", rupeeShort(r.annualTax)], ["TDS / month", rupeeShort(r.monthlyTDS)]].map(([l, v]) => (
+                      <div key={l} className="rounded-xl bg-slate-50 py-2 px-1 min-w-0"><p className="text-[10px] font-bold uppercase text-slate-400">{l}</p><p className="text-xs font-bold text-slate-800 truncate">{v}</p></div>
+                    ))}
+                  </div>
+                  {editBtn(r, "w-full")}
+                </div>
+              ))}
             </div>
 
-            {/* Mobile Card View */}
-            <div className="md:hidden divide-y divide-slate-100">
-              {filtered.map((item) => {
-                const id = item._id;
-                const empName = item.employee?.name || "Unknown";
-                const empCode = item.employee?.employeeId || "";
-
-                return (
-                  <div key={id} className="p-4 space-y-3 bg-white hover:bg-slate-50 transition-colors">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h4 className="font-bold text-slate-900 text-sm">{empName}</h4>
-                        <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                          {empCode} | PAN: {item.panNumber}
-                        </p>
-                      </div>
-                      <span
-                        className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-md border ${item.regime === "NEW"
-                          ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                          : "bg-amber-50 text-amber-800 border-amber-200"
-                          }`}
-                      >
-                        {item.regime}
-                      </span>
-                    </div>
-
-                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 space-y-2 text-xs">
-                      <div className="flex justify-between items-center text-slate-600">
-                        <span className="font-medium">Taxable Income:</span>
-                        <span className="font-bold text-slate-800 font-mono">
-                          ₹{(item.taxableIncome || 0).toLocaleString("en-IN")}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center text-slate-600">
-                        <span className="font-medium">Annual Tax:</span>
-                        <span className="font-semibold text-slate-700 font-mono">
-                          ₹{(item.annualTax || 0).toLocaleString("en-IN")}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center text-slate-900 font-bold pt-2 mt-1 border-t border-slate-200/60">
-                        <span>Monthly TDS:</span>
-                        <span className="text-rose-600 font-black text-sm font-mono">
-                          ₹{(item.monthlyTDS || 0).toLocaleString("en-IN")}/mo
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => openDeclarationModal(item)}
-                      className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 border border-slate-200 transition cursor-pointer"
-                    >
-                      <Edit3 className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Update Tax Declaration</span>
-                    </button>
-                  </div>
-                );
-              })}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600 border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-600 uppercase">
+                  <tr><th className="px-5 py-3.5">Employee</th><th className="px-4 py-3.5">Regime</th><th className="px-4 py-3.5">Annual pay</th><th className="px-4 py-3.5">Exemptions</th><th className="px-4 py-3.5">Taxable income</th><th className="px-4 py-3.5">Annual tax</th><th className="px-4 py-3.5">TDS / month</th><th className="px-4 py-3.5 text-right">Action</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visible.map((r) => (
+                    <tr key={r._id} className="hover:bg-indigo-50/40 transition-colors">
+                      <td className="px-5 py-3.5">{empCell(r, "w-9 h-9")}</td>
+                      <td className="px-4 py-3.5">{regimePill(r)}</td>
+                      <td className="px-4 py-3.5 font-semibold whitespace-nowrap">{rupee(r.annualGross)}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">{rupee(r.exemptionsDeclared)}{r.regime === "OLD" && <span className="block text-[10px] text-slate-400">80C {rupeeShort(r.section80C)}</span>}</td>
+                      <td className="px-4 py-3.5 font-bold text-slate-900 whitespace-nowrap">{rupee(r.taxableIncome)}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap">{rupee(r.annualTax)}</td>
+                      <td className="px-4 py-3.5 font-extrabold text-rose-600 whitespace-nowrap">{rupee(r.monthlyTDS)}</td>
+                      <td className="px-4 py-3.5 text-right">{editBtn(r)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </>
         )}
       </div>
 
-      {/* Tax Declaration Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-7 space-y-4 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-150">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3.5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <h3 className="font-bold text-slate-900 text-base">Income Tax Declaration</h3>
-              </div>
-              <button
-                onClick={() => setShowModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl hover:bg-slate-100 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {modal && (
+        <Sheet onClose={() => setModal(null)} locked={saving} size="max-w-lg">
+          <form onSubmit={save} noValidate className="flex flex-col min-h-0 flex-1">
+            <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-slate-100 bg-slate-50/70">
+              <div className="min-w-0"><h3 className="text-base font-bold text-slate-900">Tax declaration</h3><p className="text-xs text-slate-400 truncate">{modal.row.employee?.name} {modal.row.employee?.employeeId ? `· ${modal.row.employee.employeeId}` : ""}</p></div>
+              <button type="button" onClick={() => !saving && setModal(null)} className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition cursor-pointer" aria-label="Close"><X size={18} /></button>
             </div>
 
-            <form onSubmit={handleSaveDeclaration} className="space-y-4 text-xs">
-              {/* Employee Selector */}
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1.5">
-                  Select Employee
-                </label>
-                <div className="relative">
-                  <select
-                    required
-                    value={form.employeeId}
-                    onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-                    className="w-full p-3 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer appearance-none font-medium"
-                  >
-                    <option value="">-- Choose Employee --</option>
-                    {employees.map((emp) => (
-                      <option key={emp._id} value={emp._id}>
-                        {emp.name} ({emp.employeeId || emp.email})
-                      </option>
-                    ))}
+            <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Tax regime</Label>
+                  <select value={form.regime} onChange={(e) => setField("regime", e.target.value)} className={`${inputClass} cursor-pointer border-slate-200 focus:border-indigo-500`}>
+                    <option value="NEW">New regime</option>
+                    <option value="OLD">Old regime</option>
                   </select>
-                  <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
-                    <ChevronDown className="w-4 h-4" />
-                  </div>
+                </div>
+                <div>
+                  <Label>PAN</Label>
+                  <input value={form.panNumber} maxLength={10} onChange={(e) => setField("panNumber", e.target.value.toUpperCase())} placeholder="ABCDE1234F" className={`${inputClass} font-mono uppercase ${fieldBorder(errors.panNumber)}`} />
+                  <FieldError>{errors.panNumber}</FieldError>
                 </div>
               </div>
 
-              {/* Regime and PAN */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1.5">Choose Tax Regime</label>
-                  <select
-                    value={form.regime}
-                    onChange={(e) => setForm({ ...form, regime: e.target.value })}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer font-bold"
-                  >
-                    <option value="NEW">⚡ New Tax Regime</option>
-                    <option value="OLD">🏛️ Old Tax Regime</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1.5">PAN Card Number</label>
-                  <input
-                    type="text"
-                    maxLength={10}
-                    placeholder="ABCDE1234F"
-                    value={form.panNumber}
-                    onChange={(e) => setForm({ ...form, panNumber: e.target.value.toUpperCase() })}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 uppercase focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-mono font-semibold"
-                  />
-                </div>
-              </div>
-
-              {/* Old Regime Exemptions Fields or New Regime Notice */}
               {form.regime === "OLD" ? (
-                <div className="space-y-3 p-4 bg-amber-50/50 rounded-2xl border border-amber-200/60 animate-in fade-in duration-200">
-                  <p className="font-bold text-amber-900 text-[11px] uppercase tracking-wider">
-                    Chapter VI-A Declarations (Old Regime)
-                  </p>
-                  <div>
-                    <label className="text-slate-700 font-medium block mb-1">Section 80C (PPF, ELSS, EPF - Max ₹1.5L)</label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 150000"
-                      value={form.section80C}
-                      onChange={(e) => setForm({ ...form, section80C: e.target.value })}
-                      className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-mono"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-slate-700 font-medium block mb-1">Section 80D (Health)</label>
-                      <input
-                        type="number"
-                        placeholder="e.g. 25000"
-                        value={form.section80D}
-                        onChange={(e) => setForm({ ...form, section80D: e.target.value })}
-                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-slate-700 font-medium block mb-1">HRA Exemption</label>
-                      <input
-                        type="number"
-                        placeholder="e.g. 60000"
-                        value={form.hraExemption}
-                        onChange={(e) => setForm({ ...form, hraExemption: e.target.value })}
-                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 font-mono"
-                      />
-                    </div>
+                <div className="space-y-3 p-4 bg-amber-50/50 rounded-2xl border border-amber-200/60">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-amber-900">Declared deductions (old regime)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {numField("section80C", "Section 80C (max ₹1,50,000)")}
+                    {numField("section80D", "Section 80D (health)")}
+                    {numField("hraExemption", "HRA exemption")}
+                    {numField("otherExemptions", "Other exemptions")}
                   </div>
                 </div>
               ) : (
-                <div className="p-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl text-[11px] text-indigo-800 space-y-1 animate-in fade-in duration-200">
-                  <p className="font-bold">⚡ New Tax Regime Selected</p>
-                  <p className="text-indigo-700">
-                    Includes automatic ₹75,000 Standard Deduction and rebate under Section 87A. No Chapter VI-A itemized declarations needed.
-                  </p>
-                </div>
+                <p className="text-[11px] text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-2xl p-4">The new regime has a standard deduction of ₹75,000 and a tax rebate. No itemised declaration is needed.</p>
               )}
+            </div>
 
-              <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-5 py-2.5 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-xl shadow-xs transition disabled:opacity-50 cursor-pointer active:scale-95"
-                >
-                  {submitting ? "Saving..." : "Save Declaration"}
-                </button>
+            <div className="shrink-0 border-t border-slate-100 bg-white px-5 sm:px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5">
+              <button type="button" onClick={() => setModal(null)} disabled={saving} className="px-5 py-3 sm:py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50">Cancel</button>
+              <button type="submit" disabled={saving} className={primaryBtn}>{saving && <Loader2 size={14} className="animate-spin" />}{saving ? "Saving..." : "Save Declaration"}</button>
+            </div>
+          </form>
+        </Sheet>
+      )}
+
+      {applyOpen && (
+        <Sheet onClose={closeApply} locked={applying} size="max-w-md">
+          <div className="p-5 sm:p-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Apply TDS to payroll</h3>
+              <p className="text-xs text-slate-500 mt-1">The monthly TDS of everyone is added as a deduction for the month you choose. Employees whose payslip is already processed or paid, or who already have a TDS entry, are skipped.</p>
+            </div>
+
+            {!applyResult ? (
+              <PeriodFields label="For the payslip of" month={period.month} year={period.year} onMonth={(v) => setPeriod((p) => ({ ...p, month: v }))} onYear={(v) => setPeriod((p) => ({ ...p, year: v }))} disabled={applying} />
+            ) : (
+              <div className="space-y-3">
+                <p className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-sm font-bold text-emerald-800">{applyResult.message}</p>
+                {applyResult.inDraft > 0 && <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">{applyResult.inDraft} of them already have a draft payslip. Open Payroll and choose <b>Recalculate</b> on those drafts.</p>}
+                {applyResult.skipped?.length > 0 && (
+                  <ul className="divide-y divide-slate-100 max-h-44 overflow-y-auto rounded-2xl border border-slate-200 px-3">
+                    {applyResult.skipped.map((s, i) => (
+                      <li key={i} className="py-2 text-[11px] flex justify-between gap-3"><span className="font-semibold text-slate-700">{s.name}</span><span className="text-slate-500 text-right">{s.reason}</span></li>
+                    ))}
+                  </ul>
+                )}
               </div>
-            </form>
+            )}
+
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5">
+              <button type="button" onClick={closeApply} disabled={applying} className="px-5 py-3 sm:py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50">{applyResult ? "Done" : "Cancel"}</button>
+              {!applyResult && (
+                <button type="button" onClick={apply} disabled={applying} className={primaryBtn}>{applying && <Loader2 size={14} className="animate-spin" />}{applying ? "Adding..." : `Add TDS for ${monthYear(period.month, period.year)}`}</button>
+              )}
+            </div>
           </div>
-        </div>
+        </Sheet>
       )}
     </div>
   );

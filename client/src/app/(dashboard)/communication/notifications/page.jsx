@@ -158,7 +158,7 @@ export default function NotificationsPage() {
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-3 sm:px-4 py-4 space-y-4 sm:space-y-5 antialiased pb-16">
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 sm:space-y-5 antialiased pb-16">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-sm">
         <div className="flex items-center gap-3.5 min-w-0">

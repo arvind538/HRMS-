@@ -50,7 +50,7 @@ export default function NotificationSettingsPage() {
   }
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 sm:px-3 lg:px-4 py-3 space-y-3">
+    <div className="w-full max-w-6xl mx-auto px-4 sm:px-3 lg:px-4 py-3 space-y-3">
 
       {/* Header Section */}
       <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/85 shadow-xs transition-all">

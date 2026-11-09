@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Attendance = require("../models/Attendance");
+const Holiday = require("../models/Holiday");
 const ActivityLog = require("../models/ActivityLog");
 const {
     TZ,
@@ -13,6 +14,8 @@ const {
     attachPeople,
 } = require("../utils/accessScope");
 const { notify } = require("../utils/notify");
+const { normalizeYmd, dayContext, markAbsentForDate, buildVirtualRows } = require("../utils/attendanceSync");
+const { getOffInfo } = require("../utils/workCalendar");
 
 const OFFICE_START_MINUTES = 9 * 60 + 30; // 09:30 India time
 const OFFICE_END_MINUTES = 18 * 60 + 30; // 18:30 India time
@@ -42,6 +45,17 @@ const logActivity = async (req, action) => {
     }
 };
 
+const toPlain = (item) => (item && typeof item.toObject === "function" ? item.toObject() : { ...item });
+
+/* Sirf admin holidays change kar sakta hai. HR sirf dekh sakta hai. */
+const requireAdmin = (req, res) => {
+    if (req.user?.role !== "admin") {
+        res.status(403).json({ message: "Sirf admin holiday add ya remove kar sakta hai." });
+        return false;
+    }
+    return true;
+};
+
 // @route POST /api/attendance/mark  (admin / hr / manager: mark attendance for someone)
 exports.markAttendance = async (req, res, next) => {
     try {
@@ -67,14 +81,37 @@ exports.markAttendance = async (req, res, next) => {
             return res.status(400).json({ message: `Status must be one of: ${STATUSES.join(", ")}.` });
         }
 
-        const set = { status: cleanStatus, isLate: cleanStatus === "late", notes: cleanText(notes) };
+        // Holiday ya weekly off par "absent" nahi lag sakta. Kaam karna ho to Present/Late/Half-day chalega.
+        const ymd = normalizeYmd(req.body.date);
+        const off = await getOffInfo(ymd);
+        if (off.off && ["absent", "on-leave"].includes(cleanStatus)) {
+            return res.status(409).json({
+                message: `${ymd} is a ${off.type === "holiday" ? "holiday" : "weekly off"}${off.name ? ` (${off.name})` : ""}. Absent / On leave mark nahi ho sakta.`,
+            });
+        }
+
+        // source "admin" = person ne decide kiya, automatic job is row ko dobara nahi chhuegi
+        const set = {
+            status: cleanStatus,
+            isLate: cleanStatus === "late",
+            notes: cleanText(notes),
+            source: "admin",
+            markedBy: req.user._id,
+        };
+        const update = { $set: set, $setOnInsert: { date: start } };
 
         if (WORKING_STATUSES.includes(cleanStatus)) {
-            const when = checkInTime ? new Date(checkInTime) : new Date();
-            if (Number.isNaN(when.getTime())) {
-                return res.status(400).json({ message: "Invalid check-in time." });
+            // Check-in time sirf tab save hota hai jab di gayi ho. Pehle "now" save ho jata tha, jo galat tha.
+            if (checkInTime) {
+                const when = new Date(checkInTime);
+                if (Number.isNaN(when.getTime())) {
+                    return res.status(400).json({ message: "Invalid check-in time." });
+                }
+                set.checkIn = when;
             }
-            set.checkIn = when;
+        } else {
+            // Absent / On leave: koi punch time nahi rehna chahiye
+            update.$unset = { checkIn: 1, checkOut: 1, workHours: 1, isEarlyLeaving: 1 };
         }
 
         const address = cleanText(inLocation);
@@ -84,7 +121,7 @@ exports.markAttendance = async (req, res, next) => {
 
         const record = await Attendance.findOneAndUpdate(
             { employee: targetUser, date: { $gte: start, $lt: end } },
-            { $set: set, $setOnInsert: { date: start } },
+            update,
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
 
@@ -92,6 +129,57 @@ exports.markAttendance = async (req, res, next) => {
         await logActivity(req, `Marked attendance as ${cleanStatus}`);
 
         res.status(201).json({ success: true, message: "Attendance status updated successfully", attendance });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route POST /api/attendance/mark-absent-bulk  (admin / hr / manager)
+// Selected date ke "not marked / auto absent" employees ko ek click me Absent save karta hai.
+exports.markAbsentBulk = async (req, res, next) => {
+    try {
+        const ymd = normalizeYmd(req.body.date);
+        const scope = await getScopeIds(req);
+
+        const result = await markAbsentForDate(ymd, { scope, source: "admin", markedBy: req.user._id });
+
+        if (result.skipped === "future") {
+            return res.status(400).json({ message: "Attendance cannot be marked for a future date." });
+        }
+        if (result.skipped === "holiday" || result.skipped === "week-off") {
+            return res.status(409).json({
+                message: `${ymd} is a ${result.skipped === "holiday" ? "holiday" : "weekly off"}. Attendance is not required on this day.`,
+            });
+        }
+
+        await logActivity(req, `Marked ${result.created} employees absent for ${ymd}`);
+        res.json({
+            success: true,
+            created: result.created,
+            message: result.created
+                ? `${result.created} employee(s) marked absent.`
+                : "Everyone already has an attendance record for this date.",
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route GET /api/attendance/day-info?date=YYYY-MM-DD
+// Batata hai ki date holiday / weekly off / future / abhi open hai ya nahi.
+exports.getDayInfo = async (req, res, next) => {
+    try {
+        const ymd = normalizeYmd(req.query.date);
+        const info = await dayContext(ymd);
+        const off = await getOffInfo(ymd);
+
+        // Off din ka flag hamesha frontend ko mile, chahe dayContext kuch aur bhi bheje
+        res.json({
+            ...info,
+            isOff: Boolean(off.off),
+            type: off.off ? off.type : null,
+            name: off.off ? off.name || "" : "",
+        });
     } catch (err) {
         next(err);
     }
@@ -105,6 +193,9 @@ exports.getAttendance = async (req, res, next) => {
         const scope = await getScopeIds(req);
         const filter = {};
 
+        const dayMode = !(month && year);
+        const wantedStatus = status && String(status).toUpperCase() !== "ALL" ? String(status).toLowerCase() : null;
+
         if (requested) {
             if (!mongoose.isValidObjectId(requested) || !inScope(scope, requested)) return res.json([]);
             filter.employee = { $in: await expandIds(requested) };
@@ -112,11 +203,10 @@ exports.getAttendance = async (req, res, next) => {
             filter.employee = { $in: scope };
         }
 
-        if (status && String(status).toUpperCase() !== "ALL") {
-            filter.status = String(status).toLowerCase();
-        }
+        // Day mode me status filter missing employees add hone ke BAAD lagta hai
+        if (wantedStatus && !dayMode) filter.status = wantedStatus;
 
-        if (month && year) {
+        if (!dayMode) {
             const m = Number(month);
             const y = Number(year);
             if (!(m >= 1 && m <= 12) || !(y >= 2000 && y <= 2100)) {
@@ -130,7 +220,26 @@ exports.getAttendance = async (req, res, next) => {
         }
 
         const records = await Attendance.find(filter).sort({ date: -1, checkIn: -1 }).limit(2000);
-        res.json(await attachPeople(records));
+        let list = await attachPeople(records);
+
+        // Jin employees ka is date par row nahi hai, unhe virtual row diya jata hai.
+        // Off din (holiday / weekly off) par buildVirtualRows koi absent row nahi banata.
+        if (dayMode && !requested) {
+            const ymd = normalizeYmd(date);
+            const { rows } = await buildVirtualRows(ymd, scope);
+            if (rows && rows.length) {
+                const virtual = (await attachPeople(rows))
+                    .map((item) => ({ ...toPlain(item), virtual: true }))
+                    .sort((a, b) => String(a.employee?.name || "").localeCompare(String(b.employee?.name || "")));
+                list = list.concat(virtual);
+            }
+        }
+
+        if (wantedStatus && dayMode) {
+            list = list.filter((item) => String(item.status || "present").toLowerCase() === wantedStatus);
+        }
+
+        res.json(list);
     } catch (err) {
         next(err);
     }
@@ -182,7 +291,7 @@ exports.getAttendanceReports = async (req, res, next) => {
     }
 };
 
-// @route POST /api/attendance/check-in  (always for the logged-in user)
+// @route POST /api/attendance/check-in  (hamesha logged-in user ke liye)
 exports.checkIn = async (req, res, next) => {
     try {
         const userId = String(req.user._id);
@@ -197,18 +306,27 @@ exports.checkIn = async (req, res, next) => {
             return res.status(409).json({ message: "You have already punched in today." });
         }
 
+        // HR / admin ne aaj ko Absent ya On leave decide kiya hai to employee override nahi kar sakta.
+        // System ka automatic Absent alag hai, usko punch-in replace karta hai.
+        if (existing && existing.source === "admin" && ["absent", "on-leave"].includes(String(existing.status).toLowerCase())) {
+            return res.status(409).json({
+                message: `Your attendance for today was marked as ${existing.status} by HR. Please contact HR to correct it.`,
+            });
+        }
+
         const data = {
             status: "present",
             checkIn: now,
             isLate: minutesIntoDayIST(now) > OFFICE_START_MINUTES,
             inLocation: cleanText(inLocation),
+            source: "employee",
         };
         const coords = pickCoords(inCoordinates || location);
         if (coords) data.inCoordinates = coords;
 
         let record;
         if (existing) {
-            // A record without a check-in already exists (for example marked by HR): fill it, only once
+            // Bina check-in wala row already hai (auto absent ya HR ne mark kiya): usi ko bhar do, sirf ek baar
             record = await Attendance.findOneAndUpdate({ _id: existing._id, checkIn: null }, { $set: data }, { new: true });
             if (!record) return res.status(409).json({ message: "You have already punched in today." });
         } else {
@@ -229,7 +347,7 @@ exports.checkIn = async (req, res, next) => {
     }
 };
 
-// @route PUT /api/attendance/check-out  (always for the logged-in user)
+// @route PUT /api/attendance/check-out  (hamesha logged-in user ke liye)
 exports.checkOut = async (req, res, next) => {
     try {
         const userId = String(req.user._id);
@@ -255,7 +373,7 @@ exports.checkOut = async (req, res, next) => {
         const coords = pickCoords(outCoordinates || location);
         if (coords) set.outCoordinates = coords;
 
-        // The "checkOut: null" part makes sure only one request can ever close the day
+        // "checkOut: null" shart ki wajah se ek hi request din band kar sakti hai
         const updated = await Attendance.findOneAndUpdate({ _id: record._id, checkOut: null }, { $set: set }, { new: true });
         if (!updated) return res.status(409).json({ message: "You have already punched out today." });
 
@@ -294,6 +412,8 @@ exports.regularizeAttendance = async (req, res, next) => {
         }
 
         record.status = "present";
+        record.source = "admin";
+        record.markedBy = req.user._id;
         if (inDate) record.checkIn = inDate;
         if (outDate) record.checkOut = outDate;
         if (inDate && outDate) record.workHours = ((outDate - inDate) / 3600000).toFixed(2);
@@ -370,646 +490,57 @@ exports.deleteAttendance = async (req, res, next) => {
     }
 };
 
-
-// const Attendance = require("../models/Attendance");
-// const ActivityLog = require("../models/ActivityLog");
-
-// // Helper: Date ka time zero karne ke liye (Pure din ki exact matching ke liye)
-// const getNormalizedDate = (dateInput = new Date()) => {
-//     const d = new Date(dateInput);
-//     d.setHours(0, 0, 0, 0);
-//     return d;
-// };
-
-// // Helper: text clean karne ke liye (fake default kabhi nahi lagayenge)
-// const cleanText = (value) => (typeof value === "string" ? value.trim() : "");
-
-// // Helper: valid {lat, lng} object banane ke liye, warna undefined
-// const pickCoords = (coords) => {
-//     if (!coords) return undefined;
-//     const lat = Number(coords.lat);
-//     const lng = Number(coords.lng);
-//     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
-//     return { lat, lng };
-// };
-
-// // @route POST /api/attendance/mark
-// exports.markAttendance = async (req, res, next) => {
-//     try {
-//         const {
-//             status,
-//             checkInTime,
-//             notes,
-//             employee,
-//             inLocation,
-//             inCoordinates,
-//             location,
-//         } = req.body;
-//         const targetEmployee = employee || req.user?.employee || req.user?.id;
-
-//         if (!targetEmployee) {
-//             return res.status(400).json({ message: "Employee ID is missing. Please log in again." });
-//         }
-
-//         const today = getNormalizedDate();
-//         const cleanStatus = (status || "present").toLowerCase();
-
-//         const update = {
-//             employee: targetEmployee,
-//             date: today,
-//             status: cleanStatus,
-//             checkIn: checkInTime ? new Date(checkInTime) : new Date(),
-//             isLate: cleanStatus === "late",
-//             notes: notes || "",
-//         };
-
-//         // Location sirf tab set hogi jab frontend se aayi ho (purana data overwrite nahi hoga)
-//         const cleanedIn = cleanText(inLocation);
-//         if (cleanedIn) update.inLocation = cleanedIn;
-
-//         const coords = pickCoords(inCoordinates || location);
-//         if (coords) update.inCoordinates = coords;
-
-//         let attendance = await Attendance.findOneAndUpdate(
-//             { employee: targetEmployee, date: today },
-//             { $set: update },
-//             { upsert: true, new: true, setDefaultsOnInsert: true }
-//         );
-
-//         attendance = await attendance.populate("employee", "employeeId name department role");
-
-//         try {
-//             await ActivityLog.create({
-//                 user: req.user?.id || targetEmployee,
-//                 action: `Marked attendance as ${cleanStatus}`,
-//                 module: "Attendance",
-//             });
-//         } catch (logErr) {
-//             console.error("Failed to save activity log:", logErr);
-//         }
-
-//         res.status(201).json({
-//             success: true,
-//             message: "Attendance status updated successfully",
-//             attendance,
-//         });
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route GET /api/attendance?date=&employee=&status=
-// exports.getAttendance = async (req, res, next) => {
-//     try {
-//         const { date, employee, month, year, status } = req.query;
-//         const filter = {};
-
-//         if (employee) filter.employee = employee;
-//         if (status && status !== "ALL") filter.status = status.toLowerCase();
-
-//         if (date) {
-//             const start = new Date(date);
-//             start.setHours(0, 0, 0, 0);
-//             const end = new Date(date);
-//             end.setHours(23, 59, 59, 999);
-//             filter.date = { $gte: start, $lte: end };
-//         } else if (month && year) {
-//             filter.date = {
-//                 $gte: new Date(year, month - 1, 1, 0, 0, 0),
-//                 $lte: new Date(year, month, 0, 23, 59, 59),
-//             };
-//         } else {
-//             const todayStart = new Date();
-//             todayStart.setHours(0, 0, 0, 0);
-//             const todayEnd = new Date(todayStart);
-//             todayEnd.setHours(23, 59, 59, 999);
-//             filter.date = { $gte: todayStart, $lte: todayEnd };
-//         }
-
-//         const records = await Attendance.find(filter)
-//             .populate("employee", "employeeId name department role")
-//             .sort({ date: -1 });
-
-//         res.json(records);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route GET /api/attendance/reports
-// exports.getAttendanceReports = async (req, res, next) => {
-//     try {
-//         const { startDate, endDate, department, status } = req.query;
-//         let query = {};
-
-//         if (startDate && endDate) {
-//             const start = new Date(startDate);
-//             start.setHours(0, 0, 0, 0);
-//             const end = new Date(endDate);
-//             end.setHours(23, 59, 59, 999);
-//             query.date = { $gte: start, $lte: end };
-//         }
-
-//         if (status && status !== "ALL") {
-//             query.status = status.toLowerCase();
-//         }
-
-//         let attendanceRecords = await Attendance.find(query)
-//             .populate("employee", "employeeId name department role")
-//             .sort({ date: -1 });
-
-//         if (department && department !== "ALL") {
-//             attendanceRecords = attendanceRecords.filter(
-//                 (item) => item.employee?.department?.toUpperCase() === department.toUpperCase()
-//             );
-//         }
-
-//         const formattedReports = attendanceRecords.map((item) => ({
-//             _id: item._id,
-//             userId: item.employee?.employeeId || item.employee?._id?.toString().slice(-6) || "N/A",
-//             userName: item.employee?.name || "Staff Member",
-//             department: item.employee?.department || "N/A",
-//             date: item.date ? new Date(item.date).toISOString().slice(0, 10) : "",
-//             checkIn: item.checkIn
-//                 ? new Date(item.checkIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-//                 : "",
-//             checkOut: item.checkOut
-//                 ? new Date(item.checkOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-//                 : "",
-//             inLocation: item.inLocation || "—",
-//             outLocation: item.outLocation || "—",
-//             inCoordinates: item.inCoordinates || null,
-//             outCoordinates: item.outCoordinates || null,
-//             hours: item.workHours ? `${item.workHours}` : "",
-//             status: item.status || "present",
-//         }));
-
-//         res.status(200).json(formattedReports);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route POST /api/attendance/check-in
-// exports.checkIn = async (req, res, next) => {
-//     try {
-//         const targetEmployee = req.body.employee || req.user?.employee || req.user?.id;
-//         const { inLocation, inCoordinates, location } = req.body;
-
-//         if (!targetEmployee) {
-//             return res
-//                 .status(400)
-//                 .json({ message: "Employee ID is required for check-in. Please login again." });
-//         }
-
-//         const today = getNormalizedDate();
-
-//         let existing = await Attendance.findOne({ employee: targetEmployee, date: today });
-//         if (existing && existing.checkIn) {
-//             return res.status(400).json({ message: "Already checked in today" });
-//         }
-
-//         const now = new Date();
-//         const officeStart = new Date();
-//         officeStart.setHours(9, 30, 0, 0);
-
-//         const address = cleanText(inLocation);
-//         const coords = pickCoords(inCoordinates || location);
-
-//         let record;
-//         if (existing) {
-//             existing.checkIn = now;
-//             existing.status = "present";
-//             existing.isLate = now > officeStart;
-//             existing.inLocation = address;
-//             if (coords) existing.inCoordinates = coords;
-//             await existing.save();
-//             record = existing;
-//         } else {
-//             record = await Attendance.create({
-//                 employee: targetEmployee,
-//                 date: today,
-//                 checkIn: now,
-//                 status: "present",
-//                 isLate: now > officeStart,
-//                 inLocation: address,
-//                 ...(coords && { inCoordinates: coords }),
-//             });
-//         }
-
-//         record = await record.populate("employee", "employeeId name department role");
-//         res.status(201).json(record);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route PUT /api/attendance/check-out
-// exports.checkOut = async (req, res, next) => {
-//     try {
-//         const targetEmployee = req.body.employee || req.user?.employee || req.user?.id;
-//         const { outLocation, outCoordinates, location } = req.body;
-
-//         if (!targetEmployee) {
-//             return res.status(400).json({ message: "Employee ID is required for check-out" });
-//         }
-
-//         const today = getNormalizedDate();
-
-//         let record = await Attendance.findOne({ employee: targetEmployee, date: today });
-//         if (!record) {
-//             return res
-//                 .status(404)
-//                 .json({ message: "No check-in found for today. Please check-in first." });
-//         }
-
-//         if (!record.checkIn) {
-//             return res
-//                 .status(400)
-//                 .json({ message: "Check-in time missing for today. Please check-in first." });
-//         }
-
-//         const now = new Date();
-//         record.checkOut = now;
-//         record.outLocation = cleanText(outLocation);
-
-//         const coords = pickCoords(outCoordinates || location);
-//         if (coords) record.outCoordinates = coords;
-
-//         const diffMs = now - new Date(record.checkIn);
-//         record.workHours = (diffMs / (1000 * 60 * 60)).toFixed(2);
-
-//         const officeEnd = new Date();
-//         officeEnd.setHours(18, 30, 0, 0);
-//         record.isEarlyLeaving = now < officeEnd;
-
-//         await record.save();
-//         record = await record.populate("employee", "employeeId name department role");
-
-//         res.json(record);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route POST /api/attendance/regularize
-// exports.regularizeAttendance = async (req, res, next) => {
-//     try {
-//         const { id, checkIn, checkOut, remarks, inLocation, outLocation } = req.body;
-
-//         // Sirf wahi fields update hongi jo bheji gayi hain
-//         const update = { status: "present" };
-//         if (checkIn) update.checkIn = checkIn;
-//         if (checkOut) update.checkOut = checkOut;
-//         if (remarks !== undefined) update.remarks = remarks;
-//         if (cleanText(inLocation)) update.inLocation = cleanText(inLocation);
-//         if (cleanText(outLocation)) update.outLocation = cleanText(outLocation);
-
-//         const record = await Attendance.findByIdAndUpdate(id, { $set: update }, { new: true }).populate(
-//             "employee",
-//             "employeeId name department role"
-//         );
-
-//         if (!record) {
-//             return res.status(404).json({ message: "Attendance record nahi mila." });
-//         }
-
-//         res.json(record);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route GET /api/attendance/summary/:employeeId
-// exports.getAttendanceSummary = async (req, res, next) => {
-//     try {
-//         const { month, year } = req.query;
-//         const filter = { employee: req.params.employeeId };
-
-//         if (month && year) {
-//             filter.date = {
-//                 $gte: new Date(year, month - 1, 1, 0, 0, 0),
-//                 $lte: new Date(year, month, 0, 23, 59, 59),
-//             };
-//         }
-
-//         const records = await Attendance.find(filter);
-//         const summary = {
-//             present: records.filter((r) => r.status === "present").length,
-//             absent: records.filter((r) => r.status === "absent").length,
-//             late: records.filter((r) => r.isLate).length,
-//             onLeave: records.filter((r) => r.status === "on-leave").length,
-//             totalOvertimeHours: records.reduce((sum, r) => sum + (r.overtimeHours || 0), 0),
-//         };
-
-//         res.json(summary);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route DELETE /api/attendance/:id
-// exports.deleteAttendance = async (req, res, next) => {
-//     try {
-//         const { id } = req.params;
-//         const deletedRecord = await Attendance.findByIdAndDelete(id);
-
-//         if (!deletedRecord) {
-//             return res.status(404).json({ message: "Attendance record database mein nahi mila." });
-//         }
-
-//         res.status(200).json({ success: true, message: "Attendance record successfully delete ho gaya." });
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-
-
-
-// const Attendance = require("../models/Attendance");
-// const ActivityLog = require("../models/ActivityLog");
-
-// // Helper: Date ka time zero karne ke liye (Pure din ki exact matching ke liye)
-// const getNormalizedDate = (dateInput = new Date()) => {
-//     const d = new Date(dateInput);
-//     d.setHours(0, 0, 0, 0);
-//     return d;
-// };
-
-// // @route POST /api/attendance/mark
-// exports.markAttendance = async (req, res, next) => {
-//     try {
-//         const { status, checkInTime, notes, employee } = req.body;
-//         // Priority: explicit employee body -> logged in user's employee ref -> logged in user's id
-//         const targetEmployee = employee || req.user?.employee || req.user?.id;
-
-//         if (!targetEmployee) {
-//             return res.status(400).json({ message: "Employee ID is missing. Please log in again." });
-//         }
-
-//         const today = getNormalizedDate();
-//         const cleanStatus = (status || "present").toLowerCase();
-
-//         let attendance = await Attendance.findOneAndUpdate(
-//             { employee: targetEmployee, date: today },
-//             {
-//                 employee: targetEmployee,
-//                 date: today,
-//                 status: cleanStatus,
-//                 checkIn: checkInTime ? new Date(checkInTime) : new Date(),
-//                 isLate: cleanStatus === "late",
-//                 notes: notes || ""
-//             },
-//             { upsert: true, new: true, setDefaultsOnInsert: true }
-//         );
-
-//         // Populate employee details immediately so response contains name & employeeId
-//         attendance = await attendance.populate("employee", "employeeId name department role");
-
-//         try {
-//             await ActivityLog.create({
-//                 user: req.user?.id || targetEmployee,
-//                 action: `Marked attendance as ${cleanStatus}`,
-//                 module: "Attendance",
-//             });
-//         } catch (logErr) {
-//             console.error("Failed to save activity log:", logErr);
-//         }
-
-//         res.status(201).json({
-//             success: true,
-//             message: "Attendance status updated successfully",
-//             attendance,
-//         });
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route GET /api/attendance?date=&employee=&status=
-// exports.getAttendance = async (req, res, next) => {
-//     try {
-//         const { date, employee, month, year, status } = req.query;
-//         const filter = {};
-
-//         if (employee) filter.employee = employee;
-//         if (status && status !== 'ALL') filter.status = status.toLowerCase();
-
-//         if (date) {
-//             const start = new Date(date);
-//             start.setHours(0, 0, 0, 0);
-//             const end = new Date(date);
-//             end.setHours(23, 59, 59, 999);
-//             filter.date = { $gte: start, $lte: end };
-//         } else if (month && year) {
-//             filter.date = {
-//                 $gte: new Date(year, month - 1, 1, 0, 0, 0), $lte: new Date(year, month, 0, 23, 59, 59),
-//             };
-//         } else {
-//             const todayStart = new Date();
-//             todayStart.setHours(0, 0, 0, 0);
-//             const todayEnd = new Date(todayStart);
-//             todayEnd.setHours(23, 59, 59, 999);
-//             filter.date = { $gte: todayStart, $lte: todayEnd };
-//         }
-
-//         // Hamesha employee details populate karein taaki frontend par naam show ho sake
-//         const records = await Attendance.find(filter)
-//             .populate("employee", "employeeId name department role")
-//             .sort({ date: -1 });
-
-//         res.json(records);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route GET /api/attendance/reports
-// exports.getAttendanceReports = async (req, res, next) => {
-//     try {
-//         const { startDate, endDate, department, status } = req.query;
-//         let query = {};
-
-//         if (startDate && endDate) {
-//             const start = new Date(startDate);
-//             start.setHours(0, 0, 0, 0);
-//             const end = new Date(endDate);
-//             end.setHours(23, 59, 59, 999);
-//             query.date = { $gte: start, $lte: end };
-//         }
-
-//         if (status && status !== 'ALL') {
-//             query.status = status.toLowerCase();
-//         }
-
-//         let attendanceRecords = await Attendance.find(query)
-//             .populate("employee", "employeeId name department role")
-//             .sort({ date: -1 });
-
-//         // Department filter logic
-//         if (department && department !== 'ALL') {
-//             attendanceRecords = attendanceRecords.filter(item =>
-//                 item.employee?.department?.toUpperCase() === department.toUpperCase()
-//             );
-//         }
-
-//         const formattedReports = attendanceRecords.map(item => ({
-//             _id: item._id,
-//             userId: item.employee?.employeeId || item.employee?._id?.toString().slice(-6) || "N/A",
-//             userName: item.employee?.name || "Staff Member",
-//             department: item.employee?.department || "N/A",
-//             date: item.date ? new Date(item.date).toISOString().slice(0, 10) : "",
-//             checkIn: item.checkIn ? new Date(item.checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-//             checkOut: item.checkOut ? new Date(item.checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-//             hours: item.workHours ? `${item.workHours}` : '',
-//             status: item.status || 'present'
-//         }));
-
-//         res.status(200).json(formattedReports);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route POST /api/attendance/check-in
-// exports.checkIn = async (req, res, next) => {
-//     try {
-//         // req.body se ya authenticated user (`req.user`) se employee ID fetch karein
-//         const targetEmployee = req.body.employee || req.user?.employee || req.user?.id;
-
-//         if (!targetEmployee) {
-//             return res.status(400).json({ message: "Employee ID is required for check-in. Please login again." });
-//         }
-
-//         const today = getNormalizedDate();
-
-//         let existing = await Attendance.findOne({ employee: targetEmployee, date: today });
-//         if (existing && existing.checkIn) {
-//             return res.status(400).json({ message: "Already checked in today" });
-//         }
-
-//         const now = new Date();
-//         const officeStart = new Date();
-//         officeStart.setHours(9, 30, 0, 0);
-
-//         let record;
-//         if (existing) {
-//             existing.checkIn = now;
-//             existing.status = "present";
-//             existing.isLate = now > officeStart;
-//             await existing.save();
-//             record = existing;
-//         } else {
-//             record = await Attendance.create({
-//                 employee: targetEmployee,
-//                 date: today,
-//                 checkIn: now,
-//                 status: "present",
-//                 isLate: now > officeStart,
-//             });
-//         }
-
-//         // Return populated record so frontend gets the employee name instantly
-//         record = await record.populate("employee", "employeeId name department role");
-
-//         res.status(201).json(record);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route PUT /api/attendance/check-out
-// exports.checkOut = async (req, res, next) => {
-//     try {
-//         const targetEmployee = req.body.employee || req.user?.employee || req.user?.id;
-//         if (!targetEmployee) {
-//             return res.status(400).json({ message: "Employee ID is required for check-out" });
-//         }
-
-//         const today = getNormalizedDate();
-
-//         let record = await Attendance.findOne({ employee: targetEmployee, date: today });
-//         if (!record) {
-//             return res.status(404).json({ message: "No check-in found for today. Please check-in first." });
-//         }
-
-//         const now = new Date();
-//         record.checkOut = now;
-
-//         const diffMs = now - new Date(record.checkIn);
-//         record.workHours = (diffMs / (1000 * 60 * 60)).toFixed(2);
-
-//         const officeEnd = new Date();
-//         officeEnd.setHours(18, 30, 0, 0);
-//         record.isEarlyLeaving = now < officeEnd;
-
-//         await record.save();
-//         record = await record.populate("employee", "employeeId name department role");
-
-//         res.json(record);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route POST /api/attendance/regularize
-// exports.regularizeAttendance = async (req, res, next) => {
-//     try {
-//         const { id, checkIn, checkOut, remarks } = req.body;
-//         let record = await Attendance.findByIdAndUpdate(
-//             id,
-//             { checkIn, checkOut, remarks, status: "present" },
-//             { new: true }
-//         ).populate("employee", "employeeId name department role");
-
-//         res.json(record);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route GET /api/attendance/summary/:employeeId
-// exports.getAttendanceSummary = async (req, res, next) => {
-//     try {
-//         const { month, year } = req.query;
-//         const filter = { employee: req.params.employeeId };
-
-//         if (month && year) {
-//             filter.date = {
-//                 $gte: new Date(year, month - 1, 1, 0, 0, 0), $lte: new Date(year, month, 0, 23, 59, 59),
-//             };
-//         }
-
-//         const records = await Attendance.find(filter);
-//         const summary = {
-//             present: records.filter((r) => r.status === "present").length,
-//             absent: records.filter((r) => r.status === "absent").length,
-//             late: records.filter((r) => r.isLate).length,
-//             onLeave: records.filter((r) => r.status === "on-leave").length,
-//             totalOvertimeHours: records.reduce((sum, r) => sum + (r.overtimeHours || 0), 0),
-//         };
-
-//         res.json(summary);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route DELETE /api/attendance/:id
-// exports.deleteAttendance = async (req, res, next) => {
-//     try {
-//         const { id } = req.params;
-
-//         // Check karein ki ID valid format mein hai ya nahi
-//         const deletedRecord = await Attendance.findByIdAndDelete(id);
-
-//         if (!deletedRecord) {
-//             return res.status(404).json({ message: "Attendance record database mein nahi mila." });
-//         }
-
-//         res.status(200).json({ success: true, message: "Attendance record successfully delete ho gaya." });
-//     } catch (err) {
-//         next(err);
-//     }
-// };
+/* ------------------------------------------------------------------ */
+/* Holidays: list (admin / hr), add and remove (sirf admin)            */
+/* ------------------------------------------------------------------ */
+
+// @route GET /api/attendance/holidays?year=2026
+exports.listHolidays = async (req, res, next) => {
+    try {
+        const year = Number(req.query.year) || Number(ymdIST(new Date()).slice(0, 4));
+        const holidays = await Holiday.find({ date: { $gte: `${year}-01-01`, $lte: `${year}-12-31` } })
+            .sort({ date: 1 })
+            .lean();
+        res.json(holidays);
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route POST /api/attendance/holidays   body: { date, name }   (sirf admin)
+exports.addHoliday = async (req, res, next) => {
+    try {
+        if (!requireAdmin(req, res)) return;
+
+        const date = String(req.body.date || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ message: "A valid date (YYYY-MM-DD) is required." });
+        }
+        const name = cleanText(req.body.name).slice(0, 80) || "Holiday";
+
+        const holiday = await Holiday.findOneAndUpdate(
+            { date },
+            { $set: { name }, $setOnInsert: { createdBy: req.user._id } },
+            { upsert: true, new: true }
+        );
+
+        await logActivity(req, `Added holiday ${date} (${name})`);
+        res.status(201).json({ success: true, message: "Holiday saved.", holiday });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// @route DELETE /api/attendance/holidays/:date   (sirf admin)
+exports.deleteHoliday = async (req, res, next) => {
+    try {
+        if (!requireAdmin(req, res)) return;
+
+        const deleted = await Holiday.findOneAndDelete({ date: req.params.date });
+        if (!deleted) return res.status(404).json({ message: "Holiday not found." });
+        await logActivity(req, `Removed holiday ${req.params.date}`);
+        res.json({ success: true, message: "Holiday removed." });
+    } catch (err) {
+        next(err);
+    }
+};

@@ -1,194 +1,159 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { Loader2, Save, Scale, Calendar, FileText } from "lucide-react";
-import api from "@/lib/api";
+
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, Plus, Scale, X } from "lucide-react";
 import { toast } from "react-toastify";
-import Button from "@/components/ui/Button";
+import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { ConfirmDialog, ErrorBanner, FieldError, Label, Sheet, fieldBorder, inputClass } from "@/components/payroll/ui";
+import { FilterTabs, ListSkeleton, PageHeader, primaryBtn } from "@/components/payroll/common";
+import { RecordList, RegistrationCard, ymdLocal } from "@/components/compliance/shared";
+
+const IDEAS = ["Minimum wages review", "Payment of Bonus (annual)", "Gratuity provision", "Shops & Establishment renewal", "Muster roll / registers update"];
+const blank = { title: "", dueDate: "", totalAmount: "", notes: "" };
 
 export default function LabourCompliancePage() {
-  const [settings, setSettings] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    registrationNumber: "",
-    actName: "Factories Act / Shops & Establishment Act",
-    dueDate: "Quarterly / Annual Filings",
-    status: "active",
-    remarks: ""
-  });
+  const { user } = useAuth();
+  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
 
-  const fetchLabourSettings = useCallback(async () => {
+  const [tab, setTab] = useState("tasks");
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(blank);
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [ask, setAsk] = useState(null);
+
+  const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
-      // Backend ke existing /settings endpoint se Labour compliance data fetch kar rahe hain
-      const { data } = await api.get("/settings");
-      setSettings(data);
-      if (data.labourSettings) {
-        setForm({
-          registrationNumber: data.labourSettings.registrationNumber || "",
-          actName: data.labourSettings.actName || "Factories Act / Shops & Establishment Act",
-          dueDate: data.labourSettings.dueDate || "Quarterly / Annual Filings",
-          status: data.labourSettings.status || "active",
-          remarks: data.labourSettings.remarks || ""
-        });
-      }
+      const { data } = await api.get("/compliance", { params: { type: "labour" } });
+      setRecords(Array.isArray(data) ? data : []);
     } catch (err) {
-      toast.error("Failed to load labour compliance settings.");
+      setError(err?.response?.data?.message || "Unable to load the tasks.");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchLabourSettings();
-  }, [fetchLabourSettings]);
+    load();
+  }, [load]);
 
-  const handleSave = async (e) => {
+  const openModal = (r = null) => {
+    setForm(r ? { title: r.title || "", dueDate: ymdLocal(new Date(r.dueDate)), totalAmount: r.totalAmount ? String(r.totalAmount) : "", notes: r.notes || "" } : blank);
+    setErrors({});
+    setModal({ row: r });
+  };
+  const set = (k, v) => {
+    setForm((p) => ({ ...p, [k]: v }));
+    setErrors((p) => (p[k] ? { ...p, [k]: undefined } : p));
+  };
+
+  const save = async (e) => {
     e.preventDefault();
+    if (saving) return;
+    const next = {};
+    if (form.title.trim().length < 3) next.title = "Please enter a title (at least 3 characters).";
+    if (!form.dueDate) next.dueDate = "Please choose the due date.";
+    if (form.totalAmount !== "" && (!Number.isFinite(Number(form.totalAmount)) || Number(form.totalAmount) < 0)) next.totalAmount = "Enter a valid amount.";
+    setErrors(next);
+    if (Object.keys(next).length) return;
+
+    const [y, m] = form.dueDate.split("-").map(Number);
+    const body = { title: form.title.trim(), dueDate: form.dueDate, notes: form.notes.trim(), ...(form.totalAmount !== "" ? { totalAmount: Number(form.totalAmount) } : {}) };
+
     setSaving(true);
     try {
-      // Existing /settings endpoint par labourSettings object merge karke bhej rahe hain
-      await api.put("/settings", {
-        ...settings,
-        labourSettings: form
-      });
-      toast.success("Labour compliance records saved successfully.");
-      fetchLabourSettings();
+      if (modal.row) await api.put(`/compliance/${modal.row._id}`, body);
+      else await api.post("/compliance", { ...body, type: "labour", month: m, year: y });
+      toast.success("Saved.");
+      setModal(null);
+      load();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to save labour compliance records. Only administrators can edit this.");
+      toast.error(err?.response?.data?.message || "Unable to save the task.");
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px] w-full">
-        <Loader2 className="animate-spin text-indigo-600 w-8 h-8" />
-      </div>
-    );
-  }
+  const remove = (r) =>
+    setAsk({
+      title: "Delete this task?",
+      text: r.title,
+      run: async () => {
+        try {
+          await api.delete(`/compliance/${r._id}`);
+          toast.success("Task deleted.");
+          load();
+        } catch (err) {
+          toast.error(err?.response?.data?.message || "Unable to delete.");
+        }
+      },
+    });
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 sm:px-3 lg:px-4 py-3 space-y-3">
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={Scale} title="Labour Compliance" subtitle="Registers, licences, minimum wages, bonus and gratuity: your own due dates in one place." onRefresh={load} busy={loading}>
+        <button type="button" onClick={() => openModal()} className={primaryBtn}><Plus size={16} /> Add task</button>
+      </PageHeader>
 
-      {/* Header Section */}
-      <div className="flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl shadow-inner">
-            <Scale size={24} />
+      <FilterTabs tabs={[["tasks", "Tasks", records.length], ["registration", "Registration"]]} value={tab} onChange={setTab} />
+
+      {tab === "tasks" ? (
+        <>
+          <ErrorBanner message={error} onRetry={load} />
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+            {loading ? <ListSkeleton /> : <RecordList records={records} isAdmin={isAdmin} onChanged={load} onEdit={openModal} onDelete={remove} emptyText='No task yet. Click "Add task" to add the first one.' />}
           </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Labour Law Compliance
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Manage labour law related compliance filings, registers, and statutory due dates.
-            </p>
-          </div>
-        </div>
-      </div>
+        </>
+      ) : (
+        <RegistrationCard isAdmin={isAdmin} fields={[["labourNumber", "Establishment / licence number", "e.g. LBR/2026/REG/9876"], ["labourAct", "Applicable Act", "e.g. Shops & Establishment Act"]]} />
+      )}
 
-      {/* Main Form Card */}
-      <form
-        onSubmit={handleSave}
-        className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 p-5 sm:p-8 space-y-6"
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+      {modal && (
+        <Sheet onClose={() => setModal(null)} locked={saving} size="max-w-lg">
+          <form onSubmit={save} noValidate className="flex flex-col min-h-0 flex-1">
+            <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-slate-100 bg-slate-50/70">
+              <h3 className="text-base font-bold text-slate-900">{modal.row ? "Edit task" : "New labour task"}</h3>
+              <button type="button" onClick={() => !saving && setModal(null)} className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition cursor-pointer" aria-label="Close"><X size={18} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto overscroll-contain p-5 sm:p-6 space-y-4">
+              <div>
+                <Label>Title</Label>
+                <input value={form.title} maxLength={150} onChange={(e) => set("title", e.target.value)} className={`${inputClass} ${fieldBorder(errors.title)}`} />
+                <FieldError>{errors.title}</FieldError>
+                {!modal.row && <div className="flex flex-wrap gap-1.5 mt-2">{IDEAS.map((i) => <button key={i} type="button" onClick={() => set("title", i)} className="px-2.5 py-1 rounded-full border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-[11px] font-semibold text-slate-600 cursor-pointer">{i}</button>)}</div>}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Due date</Label>
+                  <input type="date" value={form.dueDate} onChange={(e) => set("dueDate", e.target.value)} className={`${inputClass} ${fieldBorder(errors.dueDate)}`} />
+                  <FieldError>{errors.dueDate}</FieldError>
+                </div>
+                <div>
+                  <Label>Amount (₹, optional)</Label>
+                  <input type="number" inputMode="decimal" min="0" step="any" value={form.totalAmount} onChange={(e) => set("totalAmount", e.target.value)} className={`${inputClass} ${fieldBorder(errors.totalAmount)}`} />
+                  <FieldError>{errors.totalAmount}</FieldError>
+                </div>
+              </div>
+              <div>
+                <Label>Notes (optional)</Label>
+                <textarea rows={2} value={form.notes} maxLength={500} onChange={(e) => set("notes", e.target.value)} className={`${inputClass} resize-none border-slate-200 focus:border-indigo-500`} />
+              </div>
+            </div>
+            <div className="shrink-0 border-t border-slate-100 bg-white px-5 sm:px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5">
+              <button type="button" onClick={() => setModal(null)} disabled={saving} className="px-5 py-3 sm:py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50">Cancel</button>
+              <button type="submit" disabled={saving} className={primaryBtn}>{saving && <Loader2 size={14} className="animate-spin" />}{saving ? "Saving..." : "Save"}</button>
+            </div>
+          </form>
+        </Sheet>
+      )}
 
-          {/* Registration Number */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <FileText size={16} className="text-indigo-600" />
-              Establishment / License Number
-            </label>
-            <input
-              type="text"
-              value={form.registrationNumber}
-              onChange={(e) => setForm({ ...form, registrationNumber: e.target.value })}
-              className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm sm:text-base text-slate-800 placeholder:text-slate-400 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-all duration-200"
-              placeholder="e.g. LBR/2026/REG/9876"
-              required
-            />
-          </div>
-
-          {/* Applicable Act */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Scale size={16} className="text-indigo-600" />
-              Applicable Labour Act
-            </label>
-            <input
-              type="text"
-              value={form.actName}
-              onChange={(e) => setForm({ ...form, actName: e.target.value })}
-              className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm sm:text-base text-slate-800 placeholder:text-slate-400 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-all duration-200"
-              placeholder="e.g. Shops & Establishment Act"
-              required
-            />
-          </div>
-
-        </div>
-
-        {/* Due Date */}
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-            <Calendar size={16} className="text-indigo-600" />
-            Filing Schedule / Due Date
-          </label>
-          <input
-            type="text"
-            value={form.dueDate}
-            onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-            className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm sm:text-base text-slate-800 placeholder:text-slate-400 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-all duration-200"
-            placeholder="e.g. Quarterly or Annual filings"
-            required
-          />
-        </div>
-
-        {/* Status Selection */}
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-            Compliance Status
-          </label>
-          <select
-            value={form.status}
-            onChange={(e) => setForm({ ...form, status: e.target.value })}
-            className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm sm:text-base text-slate-800 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-all duration-200 cursor-pointer"
-          >
-            <option value="active">Active & Compliant</option>
-            <option value="pending">Pending Filing</option>
-            <option value="review">Under Review</option>
-          </select>
-        </div>
-
-        {/* Remarks / Notes */}
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-            Filing Remarks & Notes
-          </label>
-          <textarea
-            rows={3}
-            value={form.remarks}
-            onChange={(e) => setForm({ ...form, remarks: e.target.value })}
-            className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm sm:text-base text-slate-800 placeholder:text-slate-400 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 outline-none transition-all duration-200 resize-none"
-            placeholder="Add notes regarding statutory registers, employee registers, or license renewals..."
-          />
-        </div>
-
-        {/* Action Button Section */}
-        <div className="pt-4 flex items-center justify-end border-t border-slate-100">
-          <Button
-            type="submit"
-            loading={saving}
-            className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-medium text-sm rounded-xl transition-all duration-200 shadow-sm hover:shadow flex items-center justify-center gap-2"
-          >
-            <Save size={18} />
-            <span>Save Labour Records</span>
-          </Button>
-        </div>
-      </form>
-
+      {ask && <ConfirmDialog title={ask.title} text={ask.text} label="Delete" danger onConfirm={ask.run} onClose={() => setAsk(null)} />}
     </div>
   );
 }

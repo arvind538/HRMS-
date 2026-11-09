@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Search,
   ChevronLeft,
@@ -9,7 +9,7 @@ import {
   RefreshCw,
   Loader2,
   ShieldAlert,
-} from 'lucide-react';
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -18,7 +18,7 @@ const PRIVILEGED_ROLES = ["admin", "hr", "manager", "team_lead", "lead"];
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
+  "July", "August", "September", "October", "November", "December",
 ];
 
 const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -44,8 +44,7 @@ const nameOf = (emp) =>
   emp?.username ||
   "";
 
-/* The attendance records often carry only a database id, so the name and the readable ID
-   are looked up from the employee list (by database id first, then by name). */
+/* Attendance records often carry only a database id, so name and readable ID come from the employee list */
 const buildDirectory = (list) => {
   const byId = new Map();
   const byName = new Map();
@@ -107,7 +106,6 @@ function AccessDeniedScreen({ role, router }) {
           Your role ({role || "employee"}) has restricted view access.
         </p>
       </div>
-
       <button
         type="button"
         onClick={() => router.push("/dashboard")}
@@ -122,27 +120,27 @@ function AccessDeniedScreen({ role, router }) {
 function StatusBadge({ status, isWeekend }) {
   if (!status) {
     return isWeekend
-      ? <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-slate-400 bg-slate-100 rounded-md text-center">WO</span>
+      ? <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-slate-400 bg-slate-100 rounded-md text-center" title="Weekly off">WO</span>
       : <span className="inline-block w-6 h-6 leading-6 text-[10px] text-slate-300 text-center">—</span>;
   }
   const st = status.toLowerCase();
   switch (st) {
-    case 'present':
+    case "present":
       return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-emerald-700 bg-emerald-100 rounded-md text-center" title="Present">P</span>;
-    case 'late':
+    case "late":
       return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-amber-700 bg-amber-100 rounded-md text-center" title="Late">L</span>;
-    case 'absent':
+    case "absent":
       return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-rose-700 bg-rose-100 rounded-md text-center" title="Absent">A</span>;
-    case 'half-day':
-    case 'half day':
+    case "half-day":
+    case "half day":
       return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-indigo-700 bg-indigo-100 rounded-md text-center" title="Half Day">HD</span>;
-    case 'leave':
-    case 'on-leave':
+    case "leave":
+    case "on-leave":
       return <span className="inline-block w-6 h-6 leading-6 text-[10px] font-bold text-sky-700 bg-sky-100 rounded-md text-center" title="On Leave">LV</span>;
     default:
       return <span className="inline-block w-6 h-6 leading-6 text-[10px] text-slate-300 text-center">—</span>;
   }
-};
+}
 
 /* -------------------------------------------------------------------------- */
 /* PAGE                                                                       */
@@ -151,17 +149,18 @@ function StatusBadge({ status, isWeekend }) {
 export default function MonthlyAttendance() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [groupedData, setGroupedData] = useState([]);
   const [directory, setDirectory] = useState({ byId: new Map(), byName: new Map() });
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [offSet, setOffSet] = useState(new Set());
 
-  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-  const firstWeekday = new Date(selectedYear, selectedMonth - 1, 1).getDay();
+  /* ----- derived auth values: sabse upar, taaki neeche ke effects inhe use kar sakein ----- */
+  const roleChecked = !authLoading;
 
   const currentRole = useMemo(() => {
     if (!user) return null;
@@ -176,10 +175,42 @@ export default function MonthlyAttendance() {
     return null;
   }, [user]);
 
-  const roleChecked = !authLoading;
   const isPrivileged = Boolean(currentRole && PRIVILEGED_ROLES.includes(currentRole));
 
-  /* Employee list: gives every row its real name and readable ID (EMP-001) */
+  /* ----- approved company off days (Sunday is always off, handled in isOffDay) ----- */
+  useEffect(() => {
+    if (!roleChecked || !user) return;
+    let alive = true;
+    api
+      .get("/attendance/off-days", { params: { year: selectedYear } })
+      .then(({ data }) => {
+        if (!alive) return;
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        setOffSet(new Set(list.filter((o) => o.status === "approved").map((o) => o.date)));
+      })
+      .catch(() => {
+        if (alive) setOffSet(new Set());
+      });
+    return () => {
+      alive = false;
+    };
+  }, [roleChecked, user, selectedYear]);
+
+  /* Sirf Sunday aur approved company off days off hain. Saturday working day hai. */
+  const isOffDay = useCallback(
+    (day) => {
+      const dow = new Date(selectedYear, selectedMonth - 1, day).getDay();
+      const ymd = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      return dow === 0 || offSet.has(ymd);
+    },
+    [selectedYear, selectedMonth, offSet]
+  );
+
+  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const firstWeekday = new Date(selectedYear, selectedMonth - 1, 1).getDay();
+
+  /* ----- employee list: real name and readable ID (EMP-001) ----- */
   useEffect(() => {
     if (!roleChecked || !user) return;
     let alive = true;
@@ -196,15 +227,15 @@ export default function MonthlyAttendance() {
     };
   }, [roleChecked, user]);
 
+  /* ----- monthly attendance ----- */
   const fetchMonthlyData = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMsg(null);
 
       const params = { month: selectedMonth, year: selectedYear };
-
       if (!isPrivileged && user?._id) {
-        params.employeeId = user._id;
+        params.employee = user._id;
       }
 
       const { data } = await api.get("/attendance", { params });
@@ -214,14 +245,17 @@ export default function MonthlyAttendance() {
 
       records.forEach((rec) => {
         const empObj = rec.employee && typeof rec.employee === "object" ? rec.employee : null;
-        const empId = empObj?._id || empObj?.id || (typeof rec.employee === "string" ? rec.employee : null) || user?._id;
+        const empId =
+          empObj?._id ||
+          empObj?.id ||
+          (typeof rec.employee === "string" ? rec.employee : null) ||
+          user?._id;
         if (!empId) return;
         const key = String(empId);
 
         if (!employeeMap[key]) {
           employeeMap[key] = {
             id: key,
-            /* kept raw here. The name and ID are resolved at render time from the employee list. */
             employee: empObj
               ? { ...empObj, _id: empObj._id || empObj.id || key }
               : { _id: key, name: rec.name, employeeId: rec.employeeId || rec.empId || rec.employeeCode },
@@ -288,7 +322,6 @@ export default function MonthlyAttendance() {
     }
   };
 
-  /* Every row with its resolved name and ID */
   const rows = useMemo(
     () => groupedData.map((item) => ({ ...item, info: resolveInfo(item.employee, directory, user) })),
     [groupedData, directory, user]
@@ -302,7 +335,6 @@ export default function MonthlyAttendance() {
           (item.info.name && user?.name && lower(item.info.name) === lower(user.name))
       );
     }
-
     const q = lower(searchTerm);
     return rows.filter(
       (item) => lower(item.info.name).includes(q) || lower(item.info.code).includes(q)
@@ -315,18 +347,18 @@ export default function MonthlyAttendance() {
       present += item.totalPresent;
       late += item.totalLate;
       absent += item.totalAbsent;
-      leave += (item.totalLeave || 0);
+      leave += item.totalLeave || 0;
     });
     return { present, late, absent, leave, employees: visibleList.length };
   }, [visibleList]);
+
+  /* ----- guards ----- */
 
   if (!roleChecked) {
     return (
       <div className="w-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400">
         <Loader2 size={36} className="animate-spin text-indigo-600" />
-        <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">
-          Verifying permissions...
-        </p>
+        <p className="text-xs font-bold tracking-wider text-slate-600 uppercase">Verifying permissions...</p>
       </div>
     );
   }
@@ -374,12 +406,12 @@ export default function MonthlyAttendance() {
             title="Refresh Sheet"
             aria-label="Refresh"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-indigo-600' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-indigo-600" : ""}`} />
           </button>
         </div>
       </div>
 
-      {/* Filter and Legend Bar */}
+      {/* Filter and legend bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 sm:gap-4">
         {isPrivileged ? (
           <div className="relative w-full lg:flex-1 lg:max-w-md">
@@ -399,18 +431,10 @@ export default function MonthlyAttendance() {
         )}
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium">
-            <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full"></span> Present (P)
-          </span>
-          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium">
-            <span className="w-2.5 h-2.5 bg-amber-500 rounded-full"></span> Late (L)
-          </span>
-          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium">
-            <span className="w-2.5 h-2.5 bg-rose-500 rounded-full"></span> Absent (A)
-          </span>
-          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium">
-            <span className="w-2.5 h-2.5 bg-sky-500 rounded-full"></span> Leave (LV)
-          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium"><span className="w-2.5 h-2.5 bg-emerald-500 rounded-full" /> Present (P)</span>
+          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium"><span className="w-2.5 h-2.5 bg-amber-500 rounded-full" /> Late (L)</span>
+          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium"><span className="w-2.5 h-2.5 bg-rose-500 rounded-full" /> Absent (A)</span>
+          <span className="inline-flex items-center gap-1.5 text-slate-600 font-medium"><span className="w-2.5 h-2.5 bg-sky-500 rounded-full" /> Leave (LV)</span>
         </div>
       </div>
 
@@ -444,7 +468,7 @@ export default function MonthlyAttendance() {
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Present</p>
                       <p className="text-lg font-bold text-indigo-700 leading-none mt-0.5">{item.totalPresent}</p>
                     </div>
                   </div>
@@ -474,15 +498,11 @@ export default function MonthlyAttendance() {
                         <div key={`blank-${i}`} />
                       ))}
                       {daysArray.map((day) => {
-                        const dayOfWeek = new Date(selectedYear, selectedMonth - 1, day).getDay();
-                        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                        const off = isOffDay(day);
                         return (
-                          <div
-                            key={day}
-                            className={`flex flex-col items-center gap-0.5 rounded-lg py-1 ${isWeekend ? "bg-slate-50" : ""}`}
-                          >
+                          <div key={day} className={`flex flex-col items-center gap-0.5 rounded-lg py-1 ${off ? "bg-slate-50" : ""}`}>
                             <span className="text-[9px] font-semibold text-slate-400 leading-none">{day}</span>
-                            <StatusBadge status={item.days[day]} isWeekend={isWeekend} />
+                            <StatusBadge status={item.days[day]} isWeekend={off} />
                           </div>
                         );
                       })}
@@ -500,21 +520,20 @@ export default function MonthlyAttendance() {
             <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-700 uppercase">
               <tr>
                 <th className="px-4 py-3.5 sticky left-0 bg-slate-50 z-20 border-r border-slate-200 min-w-[210px]">
-                  NAME OF ATTENDEE
+                  Name of Attendee
                 </th>
                 {daysArray.map((day) => {
-                  const dateObj = new Date(selectedYear, selectedMonth - 1, day);
-                  const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                  const off = isOffDay(day);
                   return (
                     <th
                       key={day}
-                      className={`px-1 py-2 text-center min-w-[30px] border-r border-slate-100 ${isWeekend ? 'bg-slate-100/70 text-slate-400' : ''}`}
+                      className={`px-1 py-2 text-center min-w-[30px] border-r border-slate-100 ${off ? "bg-slate-100/70 text-slate-400" : ""}`}
                     >
                       <div>{day}</div>
                     </th>
                   );
                 })}
-                <th className="px-3 py-3.5 text-center bg-indigo-50/50 text-indigo-800 border-l border-slate-200 min-w-[50px]">TOTAL</th>
+                <th className="px-3 py-3.5 text-center bg-indigo-50/50 text-indigo-800 border-l border-slate-200 min-w-[50px]">Total</th>
               </tr>
             </thead>
 
@@ -547,11 +566,10 @@ export default function MonthlyAttendance() {
                     </td>
 
                     {daysArray.map((day) => {
-                      const dateObj = new Date(selectedYear, selectedMonth - 1, day);
-                      const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                      const off = isOffDay(day);
                       return (
-                        <td key={day} className={`px-0.5 py-2 text-center border-r border-slate-100 ${isWeekend ? 'bg-slate-50/50' : ''}`}>
-                          <StatusBadge status={item.days[day]} isWeekend={isWeekend} />
+                        <td key={day} className={`px-0.5 py-2 text-center border-r border-slate-100 ${off ? "bg-slate-50/50" : ""}`}>
+                          <StatusBadge status={item.days[day]} isWeekend={off} />
                         </td>
                       );
                     })}
@@ -566,7 +584,7 @@ export default function MonthlyAttendance() {
           </table>
         </div>
 
-        {/* Bottom Summary Badges Bar */}
+        {/* Bottom summary */}
         <div className="p-3 sm:p-4 bg-white border-t border-slate-200/80 flex flex-wrap items-center gap-2 sm:gap-3">
           <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl text-[11px] sm:text-xs font-bold border border-emerald-100 shadow-2xs">
             {summaryTotals.present} PRESENT

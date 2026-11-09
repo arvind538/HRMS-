@@ -171,7 +171,7 @@ export default function FAQsPage() {
   }, [search, selectedCategory]);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 antialiased">
+    <div className="max-w-6xl mx-auto px-4 sm:px-3 lg:px-4 py-4 space-y-4 antialiased">
       {/* Light Clean Enterprise Header Banner */}
       <div className="rounded-3xl bg-white border border-slate-200 shadow-xs p-6 sm:p-10 relative overflow-hidden">
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 rounded-full bg-slate-50 border border-slate-100/60 pointer-events-none -z-0" />
@@ -333,7 +333,7 @@ export default function FAQsPage() {
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+        <div className="flex flex-col m-2 p-3 sm:flex-row items-center gap-2 w-full sm:w-auto">
           <Link
             href="/help/tickets"
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-bold shadow-sm shadow-indigo-600/20 transition-all shrink-0"

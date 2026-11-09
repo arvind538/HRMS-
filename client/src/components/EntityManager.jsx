@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, X, Loader2, Search } from "lucide-react";
-import "./entity-manager.css";
+// import "./entity-manager.css";
 import apiBaseUrl from "@/lib/api"; // Agar yeh base URL string hai
 
 export default function EntityManager({ title, subtitle, endpoint, columns, fields, primaryKey = "name" }) {

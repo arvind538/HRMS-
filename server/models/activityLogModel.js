@@ -19,5 +19,5 @@ const activityLogSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// ✅ Safe check to prevent OverwriteModelError
+// Safe check to prevent OverwriteModelError
 module.exports = mongoose.models.ActivityLog || mongoose.model("ActivityLog", activityLogSchema);

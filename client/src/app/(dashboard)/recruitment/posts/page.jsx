@@ -1,321 +1,267 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
-import {
-  Briefcase,
-  Users,
-  Building2,
-  Clock,
-  Search,
-  RefreshCw,
-  Sparkles,
-  ArrowRight,
-  X,
-  CheckCircle2,
-  Calendar
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Copy, Eye, EyeOff, Globe, Megaphone, Pencil, Send, Users } from "lucide-react";
+import { toast } from "react-toastify";
 import api from "@/lib/api";
+import { ErrorBanner, FieldError, Label, StatCard, dateText, inputClass } from "@/components/payroll/ui";
+import { EmptyBox, FilterTabs, ListSkeleton, PageHeader, SearchBox, primaryBtn } from "@/components/payroll/common";
+import { Box, Chip, EMP_TYPES, FooterBar, FormFooter, Info, JOB_STATUS, RowMenu, errMsg, ghostBtn } from "@/components/recruitment/rui";
+
+const STATE = {
+  live: { label: "Live", tone: "emerald" },
+  unpublished: { label: "Not published", tone: "slate" },
+  paused: { label: "Paused", tone: "amber" },
+  expired: { label: "Expired", tone: "rose" },
+};
+
+const stateOf = (p) => {
+  if (!p.isPublished) return "unpublished";
+  if (p.status !== "open") return "paused";
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  if (p.lastDate && new Date(p.lastDate) < t) return "expired";
+  return "live";
+};
+
+const typeLabel = (v) => (EMP_TYPES.find(([k]) => k === v) || [, v])[1];
 
 export default function JobPostsPage() {
-  const [positions, setPositions] = useState([]);
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDept, setSelectedDept] = useState("all");
-  const [selectedJob, setSelectedJob] = useState(null);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState("all");
+  const [viewing, setViewing] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
 
-  const fetchJobPosts = useCallback(async (isManual = false) => {
-    if (isManual) setRefreshing(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
     else setLoading(true);
-
+    setError("");
     try {
-      const res = await api.get("/recruitment/positions");
-      const rawData = Array.isArray(res?.data)
-        ? res.data
-        : Array.isArray(res?.data?.data)
-          ? res.data.data
-          : [];
-
-      // Flexible check: 'open', 'Open', ya bina status wali positions ko bhi handle karega
-      const activePosts = rawData.filter((p) => {
-        const s = String(p.status || "").trim().toLowerCase();
-        return s === "open" || s === "active" || s === "";
-      });
-
-      setPositions(activePosts);
+      const { data } = await api.get("/recruitment/positions");
+      setRows(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Failed to fetch job posts:", err);
+      setError(await errMsg(err, "Unable to load the job posts."));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchJobPosts();
-  }, [fetchJobPosts]);
+  useEffect(() => { load(); }, [load]);
 
-  // Unique departments list for filter
-  const departmentsList = useMemo(() => {
-    const set = new Set();
-    positions.forEach((p) => {
-      const name = p.department?.name || p.department;
-      if (name && typeof name === "string") set.add(name);
-    });
-    return Array.from(set);
-  }, [positions]);
+  const counts = useMemo(() => {
+    const c = { all: rows.length, live: 0, unpublished: 0, paused: 0, expired: 0 };
+    rows.forEach((p) => c[stateOf(p)]++);
+    return c;
+  }, [rows]);
+  const applicants = useMemo(() => rows.reduce((s, p) => s + (p.candidateCount || 0), 0), [rows]);
 
-  // Filtered jobs based on search query & department
-  const filteredJobs = useMemo(() => {
-    return positions.filter((job) => {
-      const title = (job.title || "").toLowerCase();
-      const dept = (job.department?.name || job.department || "").toLowerCase();
-      const exp = (job.experienceRequired || "").toLowerCase();
-      const query = searchQuery.toLowerCase();
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((p) => (tab === "all" || stateOf(p) === tab) && (!q || `${p.title} ${p.department?.name || ""} ${p.location || ""}`.toLowerCase().includes(q)));
+  }, [rows, search, tab]);
 
-      const matchesSearch =
-        title.includes(query) || dept.includes(query) || exp.includes(query);
-      const matchesDept =
-        selectedDept === "all" ||
-        (job.department?.name || job.department) === selectedDept;
+  const patch = async (p, body, okText) => {
+    try {
+      const { data } = await api.put(`/recruitment/positions/${p._id}`, body);
+      setRows((prev) => prev.map((x) => (x._id === p._id ? { ...x, ...data, candidateCount: x.candidateCount, hiredCount: x.hiredCount } : x)));
+      setViewing((v) => (v && v._id === p._id ? { ...v, ...data } : v));
+      toast.success(okText);
+      return true;
+    } catch (err) {
+      toast.error(await errMsg(err, "Unable to update the job post."));
+      return false;
+    }
+  };
 
-      return matchesSearch && matchesDept;
-    });
-  }, [positions, searchQuery, selectedDept]);
+  const toggle = async (p) => {
+    const publish = !p.isPublished;
+    const ok = await patch(p, { isPublished: publish }, publish ? "Job post published." : "Job post unpublished.");
+    if (ok && publish && p.status !== "open") toast.info(`The position is ${JOB_STATUS[p.status].label.toLowerCase()}. Set it to Open in Job Positions to make it live.`);
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/careers`);
+      toast.success("Careers page link copied.");
+    } catch {
+      toast.error("Unable to copy the link.");
+    }
+  };
+
+  const openEdit = (p) => {
+    setForm({ isPublished: p.isPublished ? "yes" : "no", lastDate: p.lastDate ? String(p.lastDate).slice(0, 10) : "", employmentType: p.employmentType || "full-time", location: p.location || "", salaryRange: p.salaryRange || "", skills: (p.requiredSkills || []).join(", "), description: p.description || "" });
+    setModal({ row: p });
+  };
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    const ok = await patch(modal.row, { isPublished: form.isPublished === "yes", lastDate: form.lastDate, employmentType: form.employmentType, location: form.location.trim(), salaryRange: form.salaryRange.trim(), requiredSkills: form.skills, description: form.description.trim() }, "Job post saved.");
+    setSaving(false);
+    if (ok) setModal(null);
+  };
+
+  const menuFor = (p) => [
+    { label: "View post", icon: Eye, run: () => setViewing(p) },
+    { label: "Edit post", icon: Pencil, run: () => openEdit(p) },
+    { label: p.isPublished ? "Unpublish" : "Publish", icon: p.isPublished ? EyeOff : Send, run: () => toggle(p) },
+    { label: "Copy careers link", icon: Copy, run: copyLink, hidden: stateOf(p) !== "live" },
+  ];
+
+  const mark = (p) => <div className="w-10 h-10 shrink-0 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center font-extrabold text-sm">{p.title?.charAt(0)?.toUpperCase() || "J"}</div>;
+  const chip = (p) => { const s = STATE[stateOf(p)]; return <Chip tone={s.tone} dot>{s.label}</Chip>; };
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6 pb-12 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
-              <Sparkles size={22} />
-            </span>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Active Job Board
-            </h1>
-          </div>
-          <p className="text-xs text-slate-500 mt-1 pl-11">
-            Currently published vacancies ready for applications and candidate sourcing
-          </p>
-        </div>
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={Megaphone} title="Job Posts" subtitle="Publish a position so candidates can see it and apply." onRefresh={() => load({ silent: true })} busy={loading || refreshing}>
+        <button type="button" onClick={copyLink} className="inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-bold transition cursor-pointer"><Copy size={15} /> Careers link</button>
+      </PageHeader>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => fetchJobPosts(true)}
-            disabled={refreshing || loading}
-            title="Refresh open jobs"
-            className="p-2.5 border border-slate-200 rounded-2xl text-slate-600 hover:bg-slate-50 active:scale-95 transition-all disabled:opacity-50"
-          >
-            <RefreshCw
-              size={16}
-              className={refreshing ? "animate-spin text-indigo-600" : ""}
-            />
-          </button>
-        </div>
-      </div>
-
-      {/* Filter & Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs">
-        <div className="relative w-full sm:w-80">
-          <Search
-            size={15}
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search role, skills, experience..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-50/80 border border-slate-200 rounded-2xl text-xs font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-          />
-        </div>
-
-        {departmentsList.length > 0 && (
-          <div className="w-full sm:w-auto">
-            <select
-              value={selectedDept}
-              onChange={(e) => setSelectedDept(e.target.value)}
-              className="w-full sm:w-auto px-3.5 py-2 bg-slate-50/80 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Departments</option>
-              {departmentsList.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* Job Cards Grid */}
-      {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div
-              key={i}
-              className="bg-white p-6 rounded-3xl border border-slate-200/70 shadow-xs animate-pulse space-y-4"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-slate-100 rounded-2xl" />
-                <div className="space-y-2 flex-1">
-                  <div className="h-4 bg-slate-100 rounded w-3/4" />
-                  <div className="h-3 bg-slate-50 rounded w-1/2" />
-                </div>
-              </div>
-              <div className="h-3 bg-slate-50 rounded w-2/3" />
-              <div className="pt-3 border-t border-slate-100 flex justify-between">
-                <div className="h-4 bg-slate-100 rounded w-20" />
-                <div className="h-4 bg-slate-100 rounded w-16" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : filteredJobs.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-slate-200/80 p-16 text-center shadow-xs">
-          <div className="w-14 h-14 rounded-2xl bg-indigo-50/60 text-indigo-500 flex items-center justify-center mx-auto mb-3">
-            <Briefcase size={28} />
-          </div>
-          <h3 className="text-sm font-bold text-slate-800">
-            Koi Active Job Post Nahi Hai
-          </h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Recruitment section me jakar kisi Position ka status <strong>Open</strong> karein taaki wo yahan live board par dikhne lage.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredJobs.map((p) => {
-            const deptName = p.department?.name || p.department || "General";
-            const openings = Number(p.numberOfOpenings) || 1;
-
-            return (
-              <div
-                key={p._id}
-                onClick={() => setSelectedJob(p)}
-                className="group bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs hover:shadow-md hover:border-indigo-200 transition-all duration-200 flex flex-col justify-between cursor-pointer"
-              >
-                <div>
-                  {/* Top Bar: Icon + Status */}
-                  <div className="flex items-center justify-between gap-2 mb-4">
-                    <div className="w-11 h-11 rounded-2xl bg-indigo-50/80 text-indigo-600 flex items-center justify-center group-hover:scale-105 transition-transform">
-                      <Briefcase size={20} />
-                    </div>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      Active Hiring
-                    </span>
-                  </div>
-
-                  {/* Title & Department */}
-                  <h3 className="text-base font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
-                    {p.title}
-                  </h3>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
-                    <Building2 size={13} className="text-slate-400" />
-                    <span>{deptName}</span>
-                  </div>
-
-                  {/* Experience Pill */}
-                  <div className="mt-3.5 flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-100 text-[11px] font-semibold text-slate-600">
-                      <Clock size={12} className="text-slate-400" />
-                      {p.experienceRequired || "Experience: Open"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Footer: Openings & Details Trigger */}
-                <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5 font-bold text-indigo-600">
-                    <Users size={14} />
-                    <span>{openings} Vacanc{openings > 1 ? "ies" : "y"}</span>
-                  </div>
-
-                  <span className="inline-flex items-center gap-1 text-slate-400 font-semibold group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all">
-                    View Specs <ArrowRight size={13} />
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+      {!loading && !error && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          <StatCard icon={Globe} tone="emerald" label="Live posts" value={counts.live} />
+          <StatCard icon={EyeOff} tone="indigo" label="Not published" value={counts.unpublished} />
+          <div className="col-span-2 lg:col-span-1"><StatCard icon={Users} tone="violet" label="Total applicants" value={applicants} /></div>
         </div>
       )}
 
-      {/* Quick Details Modal on Card Click */}
-      {selectedJob && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-100 space-y-5 animate-in zoom-in-95 duration-200">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                  <Briefcase size={22} />
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/70 shadow-sm space-y-3">
+        <SearchBox value={search} onChange={setSearch} placeholder="Search title, department, location" />
+        <FilterTabs tabs={[["all", "All", counts.all], ["live", "Live", counts.live], ["unpublished", "Not published", counts.unpublished], ["paused", "Paused", counts.paused], ["expired", "Expired", counts.expired]]} value={tab} onChange={setTab} />
+      </div>
+
+      <ErrorBanner message={error} onRetry={() => load()} />
+
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        {loading ? <ListSkeleton /> : visible.length === 0 ? (
+          <EmptyBox icon={Megaphone} title={rows.length ? "Nothing matches your search" : "No job posts yet"} text={rows.length ? "Try another keyword or filter." : "Create a position in Job Positions, then publish it here."} />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 sm:p-4 lg:hidden">
+              {visible.map((p) => (
+                <div key={p._id} onClick={() => setViewing(p)} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 space-y-3 hover:border-indigo-200 hover:shadow-sm transition cursor-pointer">
+                  <div className="flex items-start gap-3">
+                    {mark(p)}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-slate-900 break-words">{p.title}</p>
+                      <p className="text-[11px] text-slate-400">{p.department?.name || "General"}{p.location ? ` • ${p.location}` : ""}</p>
+                    </div>
+                    <div onClick={(e) => e.stopPropagation()}><RowMenu items={menuFor(p)} /></div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {chip(p)}
+                    <Chip tone="slate">{p.candidateCount || 0} applicants</Chip>
+                    {p.lastDate && <span className="text-[11px] text-slate-400 font-medium">Till {dateText(p.lastDate)}</span>}
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">
-                    {selectedJob.title}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {selectedJob.department?.name || selectedJob.department || "General"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedJob(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                <X size={18} />
-              </button>
+              ))}
             </div>
 
-            <div className="bg-slate-50/80 rounded-2xl p-4 space-y-2.5 text-xs text-slate-700">
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-400 font-medium">Vacancies</span>
-                <span className="font-bold text-slate-800">
-                  {selectedJob.numberOfOpenings || 1} Positions
-                </span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-400 font-medium">Experience Level</span>
-                <span className="font-bold text-slate-800">
-                  {selectedJob.experienceRequired || "Open for all"}
-                </span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
-                <span className="text-slate-400 font-medium">Job Ref ID</span>
-                <span className="font-mono text-slate-600">
-                  {selectedJob._id}
-                </span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-400 font-medium">Hiring Status</span>
-                <span className="inline-flex items-center gap-1 font-bold text-emerald-600">
-                  <CheckCircle2 size={12} /> Live on Portal
-                </span>
-              </div>
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600 border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                  <tr>
+                    <th className="px-5 py-3.5">Job post</th>
+                    <th className="px-4 py-3.5">Department</th>
+                    <th className="px-4 py-3.5">Type</th>
+                    <th className="px-4 py-3.5">Posted</th>
+                    <th className="px-4 py-3.5">Last date</th>
+                    <th className="px-4 py-3.5">Applicants</th>
+                    <th className="px-4 py-3.5">Status</th>
+                    <th className="px-4 py-3.5 text-center w-20">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visible.map((p) => (
+                    <tr key={p._id} onClick={() => setViewing(p)} className="hover:bg-indigo-50/40 transition-colors cursor-pointer">
+                      <td className="px-5 py-3 align-middle">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {mark(p)}
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 text-sm truncate max-w-[240px]">{p.title}</p>
+                            <p className="text-[11px] text-slate-400 truncate max-w-[240px]">{p.location || "—"}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap font-semibold text-slate-700">{p.department?.name || "General"}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap">{typeLabel(p.employmentType)}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap">{p.postedOn ? dateText(p.postedOn) : "—"}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap">{p.lastDate ? dateText(p.lastDate) : "—"}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap font-semibold text-slate-700">{p.candidateCount || 0}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap">{chip(p)}</td>
+                      <td className="px-4 py-3 align-middle text-center" onClick={(e) => e.stopPropagation()}><RowMenu items={menuFor(p)} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          </>
+        )}
+      </div>
 
-            {selectedJob.description && (
-              <div>
-                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Role Overview
-                </h4>
-                <p className="text-xs text-slate-600 leading-relaxed bg-slate-50/50 p-3.5 rounded-2xl border border-slate-100">
-                  {selectedJob.description}
-                </p>
-              </div>
-            )}
+      {viewing && (
+        <Box title={viewing.title} subtitle={viewing.department?.name || "General"} onClose={() => setViewing(null)} footer={
+          <FooterBar>
+            <button type="button" onClick={() => toggle(viewing)} className={primaryBtn}>{viewing.isPublished ? <EyeOff size={14} /> : <Send size={14} />} {viewing.isPublished ? "Unpublish" : "Publish"}</button>
+            <button type="button" onClick={() => { const p = viewing; setViewing(null); openEdit(p); }} className={ghostBtn}><Pencil size={14} /> Edit post</button>
+          </FooterBar>
+        }>
+          <div className="flex flex-wrap items-center gap-2">{chip(viewing)}<Chip tone={JOB_STATUS[viewing.status]?.tone}>{JOB_STATUS[viewing.status]?.label}</Chip></div>
+          <Info rows={[["Job type", typeLabel(viewing.employmentType)], ["Experience", viewing.experienceRequired], ["Location", viewing.location], ["Salary range", viewing.salaryRange], ["Openings", viewing.numberOfOpenings], ["Applicants", viewing.candidateCount || 0], ["Posted on", viewing.postedOn ? dateText(viewing.postedOn) : ""], ["Last date", viewing.lastDate ? dateText(viewing.lastDate) : ""]]} />
+          {viewing.requiredSkills?.length > 0 && <div className="flex flex-wrap gap-1.5">{viewing.requiredSkills.map((s) => <Chip key={s} tone="indigo">{s}</Chip>)}</div>}
+          <p className="text-xs text-slate-600 leading-relaxed bg-slate-50/70 border border-slate-200 rounded-2xl p-3.5 whitespace-pre-line break-words">{viewing.description || "No description added yet."}</p>
+        </Box>
+      )}
 
-            <button
-              onClick={() => setSelectedJob(null)}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-xl transition-colors active:scale-95"
-            >
-              Close Overview
-            </button>
+      {modal && (
+        <Box title="Edit job post" subtitle={modal.row.title} onClose={() => setModal(null)} onSubmit={save} locked={saving} size="max-w-2xl" footer={<FormFooter onCancel={() => setModal(null)} busy={saving} label="Save post" />}>
+          <div>
+            <Label>Visibility</Label>
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl">
+              {[["yes", "Published"], ["no", "Not published"]].map(([k, l]) => (
+                <button key={k} type="button" onClick={() => set("isPublished", k)} className={`py-2.5 sm:py-2 text-xs font-bold rounded-lg transition cursor-pointer ${form.isPublished === k ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{l}</button>
+              ))}
+            </div>
+            <FieldError>{form.isPublished === "yes" && modal.row.status !== "open" ? `The position is ${JOB_STATUS[modal.row.status].label.toLowerCase()}, so it will not be live until it is set to Open.` : ""}</FieldError>
           </div>
-        </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Last date to apply</Label>
+              <input type="date" value={form.lastDate ?? ""} onChange={(e) => set("lastDate", e.target.value)} className={`${inputClass} cursor-pointer border-slate-200 focus:border-indigo-500`} />
+            </div>
+            <div>
+              <Label>Job type</Label>
+              <select value={form.employmentType ?? ""} onChange={(e) => set("employmentType", e.target.value)} className={`${inputClass} cursor-pointer border-slate-200 focus:border-indigo-500`}>
+                {EMP_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Location</Label>
+              <input value={form.location ?? ""} maxLength={120} onChange={(e) => set("location", e.target.value)} className={`${inputClass} border-slate-200 focus:border-indigo-500`} />
+            </div>
+            <div>
+              <Label>Salary range</Label>
+              <input value={form.salaryRange ?? ""} maxLength={60} onChange={(e) => set("salaryRange", e.target.value)} className={`${inputClass} border-slate-200 focus:border-indigo-500`} />
+            </div>
+          </div>
+          <div>
+            <Label>Skills (comma separated)</Label>
+            <input value={form.skills ?? ""} onChange={(e) => set("skills", e.target.value)} className={`${inputClass} border-slate-200 focus:border-indigo-500`} />
+          </div>
+          <div>
+            <Label>Job description shown to candidates</Label>
+            <textarea rows={5} value={form.description ?? ""} maxLength={4000} onChange={(e) => set("description", e.target.value)} className={`${inputClass} resize-y border-slate-200 focus:border-indigo-500`} />
+          </div>
+        </Box>
       )}
     </div>
   );

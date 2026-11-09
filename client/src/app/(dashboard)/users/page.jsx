@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   Loader2,
   Trash2,
@@ -13,7 +13,8 @@ import {
   Search,
   UserCog,
   Shield,
-  ChevronDown
+  ChevronDown,
+  MoreVertical,
 } from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
@@ -22,6 +23,9 @@ import Badge from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
+
+const MENU_WIDTH = 176; // w-44
+const MENU_HEIGHT = 52; // approx height of one item + padding
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
@@ -35,6 +39,10 @@ export default function UsersPage() {
   const [selectedEmpId, setSelectedEmpId] = useState("");
   const [linking, setLinking] = useState(false);
   const [actionId, setActionId] = useState(null);
+
+  // Three-dot menu state: which row is open and where to place the menu
+  const [menu, setMenu] = useState(null); // { id, top, left }
+  const menuRef = useRef(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -59,6 +67,42 @@ export default function UsersPage() {
       .then(({ data }) => setEmployees(Array.isArray(data) ? data : []))
       .catch(() => setEmployees([]));
   }, []);
+
+  /* Close the three-dot menu on outside click, Escape, scroll or resize */
+  useEffect(() => {
+    if (!menu) return;
+    const onMouseDown = (e) => {
+      if (menuRef.current?.contains(e.target)) return;
+      if (e.target.closest?.("[data-menu-btn]")) return; // toggle handled by the button
+      setMenu(null);
+    };
+    const onKey = (e) => e.key === "Escape" && setMenu(null);
+    const close = () => setMenu(null);
+
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+
+  const openMenu = (e, id) => {
+    e.stopPropagation();
+    if (menu?.id === id) return setMenu(null);
+
+    const r = e.currentTarget.getBoundingClientRect();
+    const openUp = r.bottom + MENU_HEIGHT + 8 > window.innerHeight;
+    setMenu({
+      id,
+      top: openUp ? r.top - MENU_HEIGHT - 6 : r.bottom + 6,
+      left: Math.max(8, r.right - MENU_WIDTH),
+    });
+  };
 
   const handleRoleChange = async (id, role) => {
     setActionId(id);
@@ -100,6 +144,11 @@ export default function UsersPage() {
     } finally {
       setActionId(null);
     }
+  };
+
+  const deleteFromMenu = (id) => {
+    setMenu(null);
+    handleDelete(id);
   };
 
   const openLinkModal = (user) => {
@@ -276,15 +325,24 @@ export default function UsersPage() {
       label: "Actions",
       render: (r) => {
         const isSelf = r._id === currentUser?._id;
+        const isOpen = menu?.id === r._id;
         return (
           <div className="flex justify-end pr-2">
             <button
+              type="button"
+              data-menu-btn
               disabled={isSelf || actionId === r._id}
-              onClick={() => handleDelete(r._id)}
-              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-              title={isSelf ? "Current session cannot be deleted" : "Delete user"}
+              onClick={(e) => openMenu(e, r._id)}
+              aria-haspopup="menu"
+              aria-expanded={isOpen}
+              aria-label="More actions"
+              title={isSelf ? "Current session cannot be modified" : "More actions"}
+              className={`p-2 rounded-lg transition-all duration-150 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed ${isOpen
+                ? "bg-slate-100 text-slate-800"
+                : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                }`}
             >
-              <Trash2 size={16} />
+              <MoreVertical size={16} />
             </button>
           </div>
         );
@@ -294,6 +352,8 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <style>{`@keyframes menuIn { from { opacity: 0; transform: translateY(-4px) scale(.97); } to { opacity: 1; transform: none; } }`}</style>
+
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="space-y-1">
@@ -373,6 +433,31 @@ export default function UsersPage() {
           />
         )}
       </div>
+
+      {/* Three-dot menu (fixed, so the table never clips it) */}
+      {menu && (
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{
+            top: menu.top,
+            left: menu.left,
+            width: MENU_WIDTH,
+            animation: "menuIn 150ms ease-out",
+          }}
+          className="fixed z-[120] origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => deleteFromMenu(menu.id)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 active:bg-rose-100 transition-colors duration-150"
+          >
+            <Trash2 size={15} />
+            Delete user
+          </button>
+        </div>
+      )}
 
       {/* Security Info Banner */}
       <div className="rounded-xl bg-slate-900 text-slate-300 border border-slate-800 p-4 flex items-center gap-3 text-xs shadow-md">

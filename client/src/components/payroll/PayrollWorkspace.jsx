@@ -34,7 +34,7 @@ import { useAuth } from "@/context/AuthContext";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const THIS_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 6 }, (_, i) => THIS_YEAR - i);
+const YEARS = Array.from({ length: 6 }, (_, i) => THIS_YEAR + i);
 
 const STATUS = {
     draft: { label: "Draft", cls: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },

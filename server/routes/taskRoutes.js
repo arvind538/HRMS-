@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect } = require("../middleware/authMiddleware");
+const { protect, authorize } = require("../middleware/authMiddleware");
 const {
     getTasks,
     createTask,
@@ -12,7 +12,8 @@ const {
 } = require("../controllers/taskController");
 
 router.get("/", protect, getTasks);
-router.post("/", protect, createTask);
+// router.post("/", protect, createTask);
+router.post("/", protect, authorize("admin", "hr", "manager"), createTask);
 
 // Daily work flow: update progress -> submit -> manager approves or asks for rework
 router.post("/:id/progress", protect, addProgress);
@@ -23,21 +24,3 @@ router.put("/:id", protect, updateTask);
 router.delete("/:id", protect, deleteTask);
 
 module.exports = router;
-
-
-
-
-
-
-
-// const express = require("express");
-// const router = express.Router();
-// const { protect } = require("../middleware/authMiddleware");
-// const { getTasks, createTask, updateTask, deleteTask } = require("../controllers/taskController");
-
-// router.get("/", protect, getTasks);
-// router.post("/", protect, createTask);
-// router.put("/:id", protect, updateTask);
-// router.delete("/:id", protect, deleteTask);
-
-// module.exports = router;

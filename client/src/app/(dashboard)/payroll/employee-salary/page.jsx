@@ -16,13 +16,28 @@ const FILTERS = [
 ];
 const MAX_SALARY = 10000000;
 
-/* ---- small helpers (they work even if the API sends the employee fields under another name) ---- */
+/* colours of the salary parts (used in every bar and legend) */
+const PARTS = [
+  ["basic", "Basic", "bg-indigo-500"],
+  ["hra", "HRA", "bg-sky-500"],
+  ["da", "DA", "bg-amber-500"],
+  ["special", "Special", "bg-emerald-500"],
+];
+
+/* ---- helpers (they work even if the API sends fields under another name) ---- */
 const idOf = (v) => (v && typeof v === "object" ? v._id : v) || "";
 const nameOf = (e = {}) =>
-  e.name || e.fullName || e.employeeName || [e.firstName, e.middleName, e.lastName].filter(Boolean).join(" ") || e.user?.name || "Unnamed employee";
+  e.name ||
+  e.fullName ||
+  e.employeeName ||
+  [e.firstName, e.middleName, e.lastName].filter(Boolean).join(" ") ||
+  e.user?.name ||
+  (e.email || e.loginEmail || "").split("@")[0] ||
+  "Unnamed employee";
 const codeOf = (e = {}) => e.employeeId || e.empId || e.employeeCode || e.code || "";
 const isDefault = (r) => !idOf(r.salaryStructure);
 const noSalary = (r) => !(Number(r.grossMonthly) > 0);
+const asList = (d, keys) => (Array.isArray(d) ? d : keys.map((k) => d?.[k]).find(Array.isArray) || []);
 
 /* The same split the server makes when it builds a payslip */
 const splitSalary = (gross, st) => {
@@ -48,6 +63,33 @@ function StatusPill({ status }) {
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border whitespace-nowrap ${cls}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${dot}`} /> {status}
     </span>
+  );
+}
+
+/* stacked bar: how the monthly salary is divided */
+function BreakupBar({ b, className = "h-2" }) {
+  const total = PARTS.reduce((s, [k]) => s + Math.max(0, b[k]), 0) || 1;
+  return (
+    <div className={`flex w-full overflow-hidden rounded-full bg-slate-100 ${className}`}>
+      {PARTS.map(([k, label, color]) =>
+        b[k] > 0 ? <div key={k} className={color} style={{ width: `${(Math.max(0, b[k]) / total) * 100}%` }} title={`${label} ${rupee(b[k])}`} /> : null
+      )}
+    </div>
+  );
+}
+
+function Legend({ b }) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {PARTS.map(([k, label, color]) =>
+        b[k] > 0 ? (
+          <span key={k} className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+            <span className={`w-2 h-2 rounded-full ${color}`} />
+            {label} <b className="text-slate-700 font-semibold">{rupeeShort(b[k])}</b>
+          </span>
+        ) : null
+      )}
+    </div>
   );
 }
 
@@ -135,7 +177,8 @@ function ActionMenu({ items }) {
 }
 
 export default function EmployeeSalary() {
-  const [rows, setRows] = useState([]);
+  const [salaryRows, setSalaryRows] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [structures, setStructures] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -154,12 +197,18 @@ export default function EmployeeSalary() {
     if (silent) setRefreshing(true);
     else setLoading(true);
     setError("");
-    const [salaryRes, structRes] = await Promise.allSettled([api.get("/payroll/employee-salaries"), api.get("/payroll/structures")]);
+    const [salaryRes, structRes, empRes] = await Promise.allSettled([
+      api.get("/payroll/employee-salaries"),
+      api.get("/payroll/structures"),
+      api.get("/employees"),
+    ]);
 
-    if (salaryRes.status === "fulfilled") setRows(Array.isArray(salaryRes.value.data) ? salaryRes.value.data : []);
+    if (salaryRes.status === "fulfilled") setSalaryRows(asList(salaryRes.value.data, ["salaries", "employeeSalaries", "data", "rows"]));
     else setError(salaryRes.reason?.response?.data?.message || "Unable to load the salary list. Please try again.");
 
-    if (structRes.status === "fulfilled") setStructures(Array.isArray(structRes.value.data) ? structRes.value.data : []);
+    if (structRes.status === "fulfilled") setStructures(asList(structRes.value.data, ["structures", "data"]));
+    if (empRes.status === "fulfilled") setEmployees(asList(empRes.value.data, ["employees", "data"]));
+
     setLoading(false);
     setRefreshing(false);
   }, []);
@@ -168,10 +217,38 @@ export default function EmployeeSalary() {
     load();
   }, [load]);
 
+  /* One row per active employee: the saved salary record if there is one, otherwise an empty row.
+     This is why the employee list and the names always show, even if the salary API sends little. */
+  const rows = useMemo(() => {
+    const saved = new Map(salaryRows.map((r) => [String(idOf(r.employee)), r]));
+    const out = new Map();
+
+    employees
+      .filter((e) => !/^(inactive|exited|exit|terminated)$/i.test(e.employeeStatus || ""))
+      .forEach((emp) => {
+        const id = String(idOf(emp));
+        const rec = saved.get(id);
+        const recEmp = rec && typeof rec.employee === "object" ? rec.employee : {};
+        out.set(
+          id,
+          rec
+            ? { ...rec, employee: { ...recEmp, ...emp } }
+            : { employee: emp, grossMonthly: Number(emp.grossMonthly ?? emp.salary ?? emp.monthlySalary ?? 0) || 0, status: "Active", salaryStructure: null }
+        );
+      });
+
+    salaryRows.forEach((r) => {
+      const id = String(idOf(r.employee));
+      if (id && !out.has(id)) out.set(id, typeof r.employee === "object" ? r : { ...r, employee: { _id: r.employee } });
+    });
+
+    return [...out.values()];
+  }, [salaryRows, employees]);
+
   const defaultStructure = structures.find((s) => s.isDefault) || null;
 
-  /* The structure a row really uses, and its monthly breakup, worked out here from the structures list */
-  const structureOf = (r) => structures.find((s) => s._id === (idOf(r.salaryStructure) || idOf(r.effectiveStructure))) || defaultStructure || null;
+  /* The structure a row really uses, and its monthly breakup */
+  const structureOf = (r) => structures.find((s) => String(s._id) === String(idOf(r.salaryStructure) || idOf(r.effectiveStructure))) || defaultStructure || null;
   const breakupOf = (r) => splitSalary(Number(r.grossMonthly) || 0, structureOf(r));
 
   const counts = useMemo(
@@ -202,10 +279,20 @@ export default function EmployeeSalary() {
     return { monthly, annual: monthly * 12, avg: active.length ? monthly / active.length : 0, missing: counts.nosalary };
   }, [rows, counts.nosalary]);
 
+  /* employees per structure (for the structure cards) */
+  const usage = useMemo(() => {
+    const m = {};
+    rows.forEach((r) => {
+      const s = structures.find((x) => String(x._id) === String(idOf(r.salaryStructure) || idOf(r.effectiveStructure))) || defaultStructure;
+      if (s) m[s._id] = (m[s._id] || 0) + 1;
+    });
+    return m;
+  }, [rows, structures, defaultStructure]);
+
   /* ---- modal ---- */
   const fillFrom = (r) => ({
-    employeeId: r?.employee?._id || "",
-    structureId: idOf(r?.salaryStructure),
+    employeeId: String(idOf(r?.employee)),
+    structureId: String(idOf(r?.salaryStructure)),
     salary: r && Number(r.grossMonthly) > 0 ? String(r.grossMonthly) : "",
     status: r?.status || "Active",
   });
@@ -217,7 +304,7 @@ export default function EmployeeSalary() {
   };
 
   const pickEmployee = (id) => {
-    const r = rows.find((x) => x.employee?._id === id);
+    const r = rows.find((x) => String(idOf(x.employee)) === id);
     setForm(r ? fillFrom(r) : { employeeId: "", structureId: "", salary: "", status: "Active" });
     setErrors({});
   };
@@ -227,7 +314,7 @@ export default function EmployeeSalary() {
     setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
   };
 
-  const chosen = structures.find((s) => s._id === form.structureId) || defaultStructure;
+  const chosen = structures.find((s) => String(s._id) === form.structureId) || defaultStructure;
   const grossNow = Number(form.salary) || 0;
   const preview = splitSalary(grossNow, chosen);
 
@@ -276,27 +363,30 @@ export default function EmployeeSalary() {
       },
     });
 
-  /* ---- rows ---- */
+  /* ---- cells ---- */
+  const percentText = (st) =>
+    st
+      ? [`Basic ${st.basicPercent || 0}%`, st.hraPercent ? `HRA ${st.hraPercent}%` : "", st.daPercent ? `DA ${st.daPercent}%` : ""].filter(Boolean).join(" · ")
+      : "All Basic";
+
   const structureCell = (r) => {
     const st = structureOf(r);
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 max-w-full">
-        <Layers className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-        <span className="truncate">{st?.name || "Basic only"}</span>
-        {isDefault(r) && st && <span className="text-[10px] font-bold text-indigo-600">DEFAULT</span>}
-      </span>
+      <div className="min-w-0">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 max-w-full">
+          <Layers className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <span className="truncate">{st?.name || "Basic only"}</span>
+          {isDefault(r) && st && <span className="text-[10px] font-bold text-indigo-600">DEFAULT</span>}
+        </span>
+        <p className="text-[10px] text-slate-400 mt-1 truncate">{percentText(st)}</p>
+      </div>
     );
   };
 
   const actions = (r) => {
-    const items = [{ label: r._id || !noSalary(r) ? "Edit salary" : "Assign salary", icon: Edit3, onClick: () => openModal(r) }];
+    const items = [{ label: (r._id || !noSalary(r)) ? "Edit salary" : "Assign salary", icon: Edit3, onClick: () => openModal(r) }];
     if (r._id) items.push({ label: "Remove assignment", icon: Trash2, danger: true, onClick: () => removeAssignment(r) });
     return <ActionMenu items={items} />;
-  };
-
-  const breakupText = (r) => {
-    const b = breakupOf(r);
-    return `Basic ${rupeeShort(b.basic)} · HRA ${rupeeShort(b.hra)}${b.da > 0 ? ` · DA ${rupeeShort(b.da)}` : ""} · Special ${rupeeShort(b.special)}`;
   };
 
   return (
@@ -347,6 +437,46 @@ export default function EmployeeSalary() {
         </div>
       )}
 
+      {/* Salary structures */}
+      {!loading && structures.length > 0 && (
+        <div className="bg-white p-4 rounded-2xl border border-slate-200/70 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Salary structures</p>
+            <span className="text-[11px] text-slate-400">{structures.length} total</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {structures.map((s) => {
+              const pct = splitSalary(100, s); // on 100 the amounts are the percentages
+              return (
+                <div key={s._id} className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3.5 hover:border-indigo-200 hover:bg-white transition">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-8 h-8 shrink-0 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center"><Layers className="w-4 h-4" /></span>
+                      <p className="text-sm font-bold text-slate-900 truncate">{s.name}</p>
+                    </div>
+                    {s.isDefault && <span className="shrink-0 text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">DEFAULT</span>}
+                  </div>
+                  <div className="mt-3"><BreakupBar b={pct} /></div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                    {PARTS.map(([k, label, color]) =>
+                      pct[k] > 0 ? (
+                        <span key={k} className="inline-flex items-center gap-1 text-[11px] text-slate-500">
+                          <span className={`w-2 h-2 rounded-full ${color}`} />{label} <b className="text-slate-700 font-semibold">{round2(pct[k])}%</b>
+                        </span>
+                      ) : null
+                    )}
+                  </div>
+                  <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>{[s.pfPercent ? `PF ${s.pfPercent}%` : "", s.esiPercent ? `ESI ${s.esiPercent}%` : ""].filter(Boolean).join(" · ") || "No PF / ESI"}</span>
+                    <span className="font-semibold text-slate-600">{usage[s._id] || 0} employee{(usage[s._id] || 0) === 1 ? "" : "s"}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Search and filters */}
       <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/70 shadow-sm space-y-3">
         <div className="relative sm:max-w-sm">
@@ -394,8 +524,9 @@ export default function EmployeeSalary() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 sm:p-4 lg:hidden">
               {visible.map((r) => {
                 const e = r.employee || {};
+                const b = breakupOf(r);
                 return (
-                  <div key={e._id} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                  <div key={idOf(e)} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3 min-w-0">
                         <Avatar name={nameOf(e)} size="w-10 h-10" />
@@ -407,7 +538,7 @@ export default function EmployeeSalary() {
                       <div className="shrink-0">{actions(r)}</div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-start gap-2">
                       {structureCell(r)}
                       <StatusPill status={r.status} />
                     </div>
@@ -415,10 +546,13 @@ export default function EmployeeSalary() {
                     {noSalary(r) ? (
                       <p className="rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold px-3 py-2">Monthly salary is not set.</p>
                     ) : (
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="rounded-xl bg-slate-50 p-2.5"><p className="text-[10px] font-bold uppercase text-slate-400">Monthly</p><p className="font-bold text-slate-900">{rupeeShort(r.grossMonthly)}</p></div>
-                        <div className="rounded-xl bg-slate-50 p-2.5"><p className="text-[10px] font-bold uppercase text-slate-400">Annual</p><p className="font-bold text-indigo-600">{rupeeShort(Number(r.annualCTC) || r.grossMonthly * 12)}</p></div>
-                        <p className="col-span-2 text-[11px] text-slate-500">{breakupText(r)}</p>
+                      <div className="space-y-2.5">
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl bg-slate-50 p-2.5"><p className="text-[10px] font-bold uppercase text-slate-400">Monthly</p><p className="font-bold text-slate-900">{rupeeShort(r.grossMonthly)}</p></div>
+                          <div className="rounded-xl bg-slate-50 p-2.5"><p className="text-[10px] font-bold uppercase text-slate-400">Annual</p><p className="font-bold text-indigo-600">{rupeeShort(Number(r.annualCTC) || r.grossMonthly * 12)}</p></div>
+                        </div>
+                        <BreakupBar b={b} />
+                        <Legend b={b} />
                       </div>
                     )}
                   </div>
@@ -443,8 +577,9 @@ export default function EmployeeSalary() {
                 <tbody className="divide-y divide-slate-100">
                   {visible.map((r) => {
                     const e = r.employee || {};
+                    const b = breakupOf(r);
                     return (
-                      <tr key={e._id} className="hover:bg-indigo-50/40 transition-colors">
+                      <tr key={idOf(e)} className="hover:bg-indigo-50/40 transition-colors">
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-3">
                             <Avatar name={nameOf(e)} />
@@ -454,12 +589,19 @@ export default function EmployeeSalary() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3.5 max-w-[180px]">{structureCell(r)}</td>
+                        <td className="px-4 py-3.5 max-w-[190px]">{structureCell(r)}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {noSalary(r) ? <span className="text-amber-600 font-bold">Not set</span> : <span className="font-bold text-slate-900 text-sm">{rupee(r.grossMonthly)}</span>}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-bold text-indigo-600">{noSalary(r) ? "—" : rupeeShort(Number(r.annualCTC) || r.grossMonthly * 12)}</td>
-                        <td className="px-4 py-3.5 text-[11px] text-slate-500 whitespace-nowrap">{noSalary(r) ? "—" : breakupText(r)}</td>
+                        <td className="px-4 py-3.5 w-[260px]">
+                          {noSalary(r) ? "—" : (
+                            <div className="space-y-1.5">
+                              <BreakupBar b={b} />
+                              <Legend b={b} />
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3.5"><StatusPill status={r.status} /></td>
                         <td className="px-4 py-3.5"><div className="flex justify-end">{actions(r)}</div></td>
                       </tr>
@@ -494,17 +636,17 @@ export default function EmployeeSalary() {
                     <Avatar name={nameOf(modal.row.employee)} />
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-slate-900 truncate">{nameOf(modal.row.employee)}</p>
-                      <p className="text-[11px] text-slate-500">{codeOf(modal.row.employee) || "—"}</p>
+                      <p className="text-[11px] text-slate-500">{[codeOf(modal.row.employee), cleanText(modal.row.employee?.department)].filter(Boolean).join(" • ") || "—"}</p>
                     </div>
                   </div>
                 ) : (
                   <>
                     <select value={form.employeeId} onChange={(e) => pickEmployee(e.target.value)} className={`${inputClass} cursor-pointer ${fieldBorder(errors.employeeId)}`}>
-                      <option value="">Select employee</option>
+                      <option value="">{rows.length ? "Select employee" : "No employee found"}</option>
                       {[...rows]
                         .sort((a, b) => nameOf(a.employee).localeCompare(nameOf(b.employee)))
                         .map((r) => (
-                          <option key={r.employee?._id} value={r.employee?._id}>
+                          <option key={idOf(r.employee)} value={String(idOf(r.employee))}>
                             {nameOf(r.employee)} ({codeOf(r.employee) || "—"}){noSalary(r) ? " – salary not set" : ""}
                           </option>
                         ))}
@@ -544,22 +686,39 @@ export default function EmployeeSalary() {
               </div>
               {form.status !== "Active" && <p className="text-[11px] font-semibold text-amber-700">A payslip is not generated while the salary is {form.status}.</p>}
 
+              {/* what the chosen structure is made of */}
+              <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3.5">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-indigo-600" />
+                  <p className="text-xs font-bold text-slate-900">{chosen ? chosen.name : "No structure (all Basic)"}</p>
+                  {chosen?.isDefault && <span className="text-[10px] font-bold text-indigo-600">DEFAULT</span>}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {chosen
+                    ? [`Basic ${chosen.basicPercent || 0}%`, chosen.hraPercent ? `HRA ${chosen.hraPercent}%` : "", chosen.daPercent ? `DA ${chosen.daPercent}%` : "", "rest is Special", chosen.pfPercent ? `PF ${chosen.pfPercent}% of Basic` : "", chosen.esiPercent ? `ESI ${chosen.esiPercent}%` : ""].filter(Boolean).join(" · ")
+                    : "The full salary is paid as Basic. No allowances or deductions."}
+                </p>
+              </div>
+
               {grossNow > 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">Monthly breakup</p>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Monthly breakup</p>
+                  <BreakupBar b={preview} className="h-2.5" />
                   <div className="space-y-1.5 text-xs">
-                    {[
-                      ["Basic", preview.basic],
-                      ["House Rent Allowance", preview.hra],
-                      ...(preview.da > 0 ? [["Dearness Allowance", preview.da]] : []),
-                      ["Special Allowance", preview.special],
-                    ].map(([label, amount]) => (
-                      <div key={label} className="flex justify-between"><span className="text-slate-600">{label}</span><span className="font-mono font-bold text-slate-900">{rupee(amount)}</span></div>
+                    {PARTS.filter(([k]) => k !== "da" || preview.da > 0).map(([k, label, color]) => (
+                      <div key={k} className="flex justify-between">
+                        <span className="text-slate-600 inline-flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${color}`} />{{ basic: "Basic", hra: "House Rent Allowance", da: "Dearness Allowance", special: "Special Allowance" }[k]}</span>
+                        <span className="font-mono font-bold text-slate-900">{rupee(preview[k])}</span>
+                      </div>
                     ))}
                     {(preview.pf > 0 || preview.esi > 0) && (
                       <div className="pt-1.5 mt-1.5 border-t border-slate-200 space-y-1.5">
                         {preview.pf > 0 && <div className="flex justify-between"><span className="text-slate-600">PF (estimate)</span><span className="font-mono font-bold text-rose-600">- {rupee(preview.pf)}</span></div>}
                         {preview.esi > 0 && <div className="flex justify-between"><span className="text-slate-600">ESI (estimate)</span><span className="font-mono font-bold text-rose-600">- {rupee(preview.esi)}</span></div>}
+                        <div className="flex justify-between pt-1.5 border-t border-dashed border-slate-300">
+                          <span className="font-bold text-slate-700">Take-home (estimate)</span>
+                          <span className="font-mono font-extrabold text-emerald-600">{rupee(round2(grossNow - preview.pf - preview.esi))}</span>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -583,709 +742,3 @@ export default function EmployeeSalary() {
   );
 }
 
-
-// "use client";
-
-// import React, { useState, useEffect, useCallback, useMemo } from "react";
-// import {
-//   Search,
-//   RefreshCw,
-//   AlertCircle,
-//   IndianRupee,
-//   Edit3,
-//   Trash2,
-//   Layers,
-//   Users,
-//   Coins,
-//   TrendingUp,
-//   X,
-//   Plus,
-//   ChevronDown
-// } from "lucide-react";
-// import api from "@/lib/api";
-// import { toast } from "react-toastify";
-
-// export default function EmployeeSalary() {
-//   const [salaries, setSalaries] = useState([]);
-//   const [employees, setEmployees] = useState([]);
-//   const [structures, setStructures] = useState([]);
-//   const [loading, setLoading] = useState(true);
-//   const [dropdownLoading, setDropdownLoading] = useState(false);
-//   const [error, setError] = useState(null);
-//   const [searchTerm, setSearchTerm] = useState("");
-//   const [deletingId, setDeletingId] = useState(null);
-
-//   // Modal State for Mapping/Editing Salary
-//   const [showModal, setShowModal] = useState(false);
-//   const [submitting, setSubmitting] = useState(false);
-//   const [editingId, setEditingId] = useState(null);
-//   const [form, setForm] = useState({
-//     employeeId: "",
-//     salaryStructureId: "",
-//     annualCTC: "",
-//     status: "Active",
-//   });
-
-//   // Fetch all salary mapping records
-//   const fetchSalaries = useCallback(async () => {
-//     setLoading(true);
-//     setError(null);
-//     try {
-//       const response = await api.get("/payroll/employee-salaries");
-//       const resData = response?.data;
-
-//       const list = Array.isArray(resData)
-//         ? resData
-//         : Array.isArray(resData?.data)
-//           ? resData.data
-//           : Array.isArray(resData?.salaries)
-//             ? resData.salaries
-//             : [];
-
-//       setSalaries(list);
-//     } catch (err) {
-//       console.error("Fetch employee salaries error:", err);
-//       setError(
-//         err.response?.data?.message ||
-//         err.response?.data?.error ||
-//         "Failed to load salary mappings from the server."
-//       );
-//       setSalaries([]);
-//     } finally {
-//       setLoading(false);
-//     }
-//   }, []);
-
-//   // Fetch employees and templates with shape normalization and fallback routes
-//   const fetchDropdownData = useCallback(async () => {
-//     setDropdownLoading(true);
-//     try {
-//       // 1. Fetch Employees (try /employee first, fallback to /employees)
-//       let empList = [];
-//       try {
-//         const empRes = await api.get("/employee");
-//         const empData = empRes?.data;
-//         empList = Array.isArray(empData)
-//           ? empData
-//           : Array.isArray(empData?.data)
-//             ? empData.data
-//             : Array.isArray(empData?.employees)
-//               ? empData.employees
-//               : [];
-//       } catch (err) {
-//         if (err.response?.status === 404) {
-//           try {
-//             const fallbackEmpRes = await api.get("/employees");
-//             const fallbackData = fallbackEmpRes?.data;
-//             empList = Array.isArray(fallbackData)
-//               ? fallbackData
-//               : Array.isArray(fallbackData?.data)
-//                 ? fallbackData.data
-//                 : Array.isArray(fallbackData?.employees)
-//                   ? fallbackData.employees
-//                   : [];
-//           } catch (e) {
-//             console.error("Failed to load employees via /employees fallback:", e);
-//           }
-//         } else {
-//           console.error("Employee fetch error:", err);
-//         }
-//       }
-//       setEmployees(empList);
-
-//       // 2. Fetch Salary Structures
-//       try {
-//         const structRes = await api.get("/payroll/salary-structures");
-//         const structData = structRes?.data;
-//         const structList = Array.isArray(structData)
-//           ? structData
-//           : Array.isArray(structData?.data)
-//             ? structData.data
-//             : Array.isArray(structData?.structures)
-//               ? structData.structures
-//               : [];
-
-//         setStructures(structList);
-//       } catch (err) {
-//         console.warn("Salary structures fetch warning:", err);
-//       }
-//     } finally {
-//       setDropdownLoading(false);
-//     }
-//   }, []);
-
-//   useEffect(() => {
-//     fetchSalaries();
-//     fetchDropdownData();
-//   }, [fetchSalaries, fetchDropdownData]);
-
-//   // Open modal for new assignment or edit
-//   const openModal = (item = null) => {
-//     if (item) {
-//       setEditingId(item._id || item.id);
-//       setForm({
-//         employeeId: item.employee?._id || item.employee || "",
-//         salaryStructureId: item.salaryStructure?._id || item.salaryStructure || "",
-//         annualCTC: item.annualCTC?.toString() || "",
-//         status: item.status || "Active",
-//       });
-//     } else {
-//       setEditingId(null);
-//       setForm({
-//         employeeId: employees[0]?._id || employees[0]?.id || "",
-//         salaryStructureId: structures[0]?._id || structures[0]?.id || "",
-//         annualCTC: "",
-//         status: "Active",
-//       });
-//     }
-//     setShowModal(true);
-//   };
-
-//   // Submit Salary Assignment (Create or Update)
-//   const handleSave = async (e) => {
-//     e.preventDefault();
-//     if (!form.employeeId) {
-//       toast.error("Please select an employee.");
-//       return;
-//     }
-//     if (!form.annualCTC || Number(form.annualCTC) <= 0) {
-//       toast.error("Please enter a valid Annual CTC amount.");
-//       return;
-//     }
-
-//     setSubmitting(true);
-//     try {
-//       const payload = {
-//         employeeId: form.employeeId,
-//         salaryStructureId: form.salaryStructureId || null,
-//         annualCTC: Number(form.annualCTC),
-//         status: form.status,
-//       };
-
-//       if (editingId) {
-//         await api.put(`/payroll/employee-salaries/${editingId}`, payload);
-//         toast.success("Salary assignment updated successfully!");
-//       } else {
-//         await api.post("/payroll/employee-salaries", payload);
-//         toast.success("Salary assignment saved successfully!");
-//       }
-
-//       setShowModal(false);
-//       setEditingId(null);
-//       fetchSalaries();
-//     } catch (err) {
-//       console.error("Save salary mapping error:", err);
-//       toast.error(
-//         err.response?.data?.message ||
-//         err.response?.data?.error ||
-//         "Failed to save salary mapping."
-//       );
-//     } finally {
-//       setSubmitting(false);
-//     }
-//   };
-
-//   // Delete Salary Mapping Handler
-//   const handleDelete = async (id) => {
-//     if (!window.confirm("Are you sure you want to delete this salary mapping record?")) return;
-
-//     setDeletingId(id);
-//     try {
-//       await api.delete(`/payroll/employee-salaries/${id}`);
-//       setSalaries((prev) => prev.filter((item) => (item._id || item.id) !== id));
-//       toast.success("Salary mapping deleted successfully.");
-//     } catch (err) {
-//       console.error("Delete salary mapping error:", err);
-//       toast.error(
-//         err.response?.data?.message ||
-//         "Failed to delete salary mapping record."
-//       );
-//     } finally {
-//       setDeletingId(null);
-//     }
-//   };
-
-//   // Filter list by employee name, id, or department
-//   const filtered = useMemo(() => {
-//     const q = searchTerm.toLowerCase().trim();
-//     if (!q) return salaries;
-//     return salaries.filter((s) => {
-//       const name = s.employee?.name || s.employee?.fullName || s.userName || "";
-//       const code = s.employee?.employeeId || s.employee?.code || s.userId || "";
-//       const dept = s.employee?.department || "";
-//       return (
-//         name.toLowerCase().includes(q) ||
-//         code.toLowerCase().includes(q) ||
-//         dept.toLowerCase().includes(q)
-//       );
-//     });
-//   }, [salaries, searchTerm]);
-
-//   // Payroll Metrics
-//   const totalPayrollCTC = useMemo(() => {
-//     return filtered.reduce((sum, item) => sum + (Number(item.annualCTC) || 0), 0);
-//   }, [filtered]);
-
-//   const avgMonthlyGross = useMemo(() => {
-//     if (!filtered.length) return 0;
-//     const totalGross = filtered.reduce((sum, item) => sum + (Number(item.grossMonthly) || 0), 0);
-//     return Math.round(totalGross / filtered.length);
-//   }, [filtered]);
-
-//   return (
-//     <div className="space-y-6 max-w-7xl mx-auto px-2 sm:px-3 lg:px-4 py-3">
-//       {/* Top Banner Header */}
-//       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs transition hover:shadow-md">
-//         <div className="flex items-center gap-3">
-//           <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
-//             <Coins className="w-5 h-5" />
-//           </div>
-//           <div>
-//             <div className="flex items-center gap-2.5">
-//               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-//                 Employee Salary Mapping
-//               </h1>
-//               {!loading && !error && (
-//                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
-//                   {salaries.length} Employees Mapped
-//                 </span>
-//               )}
-//             </div>
-//             <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-//               Manage annual CTC allocation, monthly gross pay, and salary structure assignments
-//             </p>
-//           </div>
-//         </div>
-
-//         <div className="flex items-center gap-2.5 self-start sm:self-auto">
-//           <button
-//             onClick={() => {
-//               fetchSalaries();
-//               fetchDropdownData();
-//             }}
-//             disabled={loading}
-//             className="p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition disabled:opacity-50"
-//             title="Refresh records"
-//           >
-//             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-//           </button>
-//           <button
-//             onClick={() => openModal()}
-//             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-semibold rounded-xl shadow-xs transition"
-//           >
-//             <Plus className="w-4 h-4" />
-//             <span>Assign Salary</span>
-//           </button>
-//         </div>
-//       </div>
-
-//       {/* Aggregate KPI Badges */}
-//       {!loading && !error && salaries.length > 0 && (
-//         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-//           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition hover:shadow-md">
-//             <div>
-//               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-//                 Total Annual Payroll Outflow
-//               </p>
-//               <h3 className="text-xl font-bold text-slate-900 mt-1">
-//                 ₹{totalPayrollCTC.toLocaleString("en-IN")}
-//               </h3>
-//             </div>
-//             <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-//               <IndianRupee className="w-5 h-5" />
-//             </div>
-//           </div>
-
-//           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition hover:shadow-md">
-//             <div>
-//               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-//                 Average Monthly Gross Pay
-//               </p>
-//               <h3 className="text-xl font-bold text-emerald-600 mt-1">
-//                 ₹{avgMonthlyGross.toLocaleString("en-IN")}
-//               </h3>
-//             </div>
-//             <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-//               <TrendingUp className="w-5 h-5" />
-//             </div>
-//           </div>
-
-//           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between transition hover:shadow-md">
-//             <div>
-//               <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-//                 Active Contracts
-//               </p>
-//               <h3 className="text-xl font-bold text-slate-900 mt-1">
-//                 {salaries.filter((s) => s.status === "Active").length} / {salaries.length}
-//               </h3>
-//             </div>
-//             <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
-//               <Users className="w-5 h-5" />
-//             </div>
-//           </div>
-//         </div>
-//       )}
-
-//       {/* Filter and Search Bar */}
-//       <div className="flex items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs transition hover:shadow-md">
-//         <div className="relative w-full sm:w-80">
-//           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-//           <input
-//             type="text"
-//             placeholder="Search employee by name, ID or department..."
-//             value={searchTerm}
-//             onChange={(e) => setSearchTerm(e.target.value)}
-//             className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-//           />
-//         </div>
-//         <p className="text-xs text-slate-500 font-medium hidden sm:block">
-//           Showing <span className="font-bold text-slate-800">{filtered.length}</span> mappings
-//         </p>
-//       </div>
-
-//       {/* Main Results Table */}
-//       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition hover:shadow-md">
-//         {loading ? (
-//           <div className="py-20 text-center space-y-3">
-//             <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto" />
-//             <p className="text-sm font-semibold text-slate-800">Loading salary mappings...</p>
-//           </div>
-//         ) : error ? (
-//           <div className="py-16 text-center max-w-md mx-auto p-6">
-//             <AlertCircle className="w-10 h-10 text-rose-500 mx-auto mb-2" />
-//             <h3 className="text-sm font-bold text-slate-900">Failed to Load Mappings</h3>
-//             <p className="text-xs text-slate-500 mt-1 mb-4">{error}</p>
-//             <button
-//               onClick={fetchSalaries}
-//               className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition"
-//             >
-//               Try Again
-//             </button>
-//           </div>
-//         ) : filtered.length === 0 ? (
-//           <div className="py-20 text-center max-w-sm mx-auto p-6">
-//             <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-//             <h3 className="text-sm font-bold text-slate-800">No Salary Records Found</h3>
-//             <p className="text-xs text-slate-500 mt-1">
-//               Click 'Assign Salary' above to map an employee to a structure and CTC.
-//             </p>
-//           </div>
-//         ) : (
-//           <>
-//             {/* Desktop Table */}
-//             <div className="hidden md:block overflow-x-auto">
-//               <table className="w-full text-left border-collapse">
-//                 <thead>
-//                   <tr className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-//                     <th className="py-3.5 px-6">Employee</th>
-//                     <th className="py-3.5 px-6">Assigned Template</th>
-//                     <th className="py-3.5 px-6">Monthly Gross</th>
-//                     <th className="py-3.5 px-6">Annual CTC</th>
-//                     <th className="py-3.5 px-6">Status</th>
-//                     <th className="py-3.5 px-6 text-right">Actions</th>
-//                   </tr>
-//                 </thead>
-//                 <tbody className="divide-y divide-slate-100 text-sm">
-//                   {filtered.map((item) => {
-//                     const id = item._id || item.id;
-//                     const isDeleting = deletingId === id;
-//                     const empName = item.employee?.name || item.employee?.fullName || item.userName || "Unknown Employee";
-//                     const empCode = item.employee?.employeeId || item.employee?.code || item.userId || "—";
-//                     const dept = item.employee?.department || "";
-//                     const structureName = item.salaryStructure?.name || item.structureName || "Default Plan";
-
-//                     return (
-//                       <tr key={id} className="hover:bg-slate-50/80 transition-colors">
-//                         <td className="py-4 px-6">
-//                           <div className="flex items-center gap-3">
-//                             <div className="w-9 h-9 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center uppercase shrink-0">
-//                               {empName.charAt(0)}
-//                             </div>
-//                             <div>
-//                               <div className="font-semibold text-slate-900 leading-tight">
-//                                 {empName}
-//                               </div>
-//                               <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
-//                                 <span>{empCode}</span>
-//                                 {dept && <span>• {dept}</span>}
-//                               </div>
-//                             </div>
-//                           </div>
-//                         </td>
-
-//                         <td className="py-4 px-6">
-//                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-//                             <Layers className="w-3.5 h-3.5 text-slate-500" />
-//                             <span>{structureName}</span>
-//                           </span>
-//                         </td>
-
-//                         <td className="py-4 px-6">
-//                           <div className="font-semibold text-slate-800">
-//                             ₹{(item.grossMonthly || 0).toLocaleString("en-IN")}
-//                           </div>
-//                           <span className="text-[11px] text-slate-400">per month</span>
-//                         </td>
-
-//                         <td className="py-4 px-6">
-//                           <div className="font-bold text-indigo-600">
-//                             ₹{(item.annualCTC || 0).toLocaleString("en-IN")}
-//                           </div>
-//                           <span className="text-[11px] text-slate-400">per annum</span>
-//                         </td>
-
-//                         <td className="py-4 px-6 whitespace-nowrap">
-//                           <span
-//                             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${item.status === "Active"
-//                               ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-//                               : "bg-amber-50 text-amber-700 border-amber-200"
-//                               }`}
-//                           >
-//                             <span
-//                               className={`w-1.5 h-1.5 rounded-full ${item.status === "Active" ? "bg-emerald-500" : "bg-amber-500"
-//                                 }`}
-//                             />
-//                             <span>{item.status || "Active"}</span>
-//                           </span>
-//                         </td>
-
-//                         <td className="py-4 px-6 text-right whitespace-nowrap">
-//                           <div className="flex items-center justify-end gap-1.5">
-//                             <button
-//                               onClick={() => openModal(item)}
-//                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold border border-slate-200 transition"
-//                               title="Edit salary assignment"
-//                             >
-//                               <Edit3 className="w-3.5 h-3.5 text-slate-500" />
-//                               <span>Edit</span>
-//                             </button>
-//                             <button
-//                               disabled={isDeleting}
-//                               onClick={() => handleDelete(id)}
-//                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-50 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-lg text-xs font-semibold border border-slate-200 hover:border-rose-200 transition disabled:opacity-40"
-//                               title="Delete salary record"
-//                             >
-//                               <Trash2 className="w-3.5 h-3.5" />
-//                               <span>Delete</span>
-//                             </button>
-//                           </div>
-//                         </td>
-//                       </tr>
-//                     );
-//                   })}
-//                 </tbody>
-//               </table>
-//             </div>
-
-//             {/* Mobile Cards */}
-//             <div className="md:hidden divide-y divide-slate-100">
-//               {filtered.map((item) => {
-//                 const id = item._id || item.id;
-//                 const isDeleting = deletingId === id;
-//                 const empName = item.employee?.name || item.employee?.fullName || item.userName || "Unknown";
-//                 const empCode = item.employee?.employeeId || item.employee?.code || item.userId || "";
-//                 const structureName = item.salaryStructure?.name || item.structureName || "Default";
-
-//                 return (
-//                   <div key={id} className="p-4 space-y-3 bg-white hover:bg-slate-50/50 transition">
-//                     <div className="flex items-start justify-between gap-2">
-//                       <div>
-//                         <h4 className="font-semibold text-slate-900 text-sm">{empName}</h4>
-//                         {empCode && <p className="text-[11px] text-slate-400">{empCode}</p>}
-//                       </div>
-//                       <div className="flex items-center gap-1">
-//                         <button
-//                           onClick={() => openModal(item)}
-//                           className="p-1.5 text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition"
-//                           title="Edit"
-//                         >
-//                           <Edit3 className="w-3.5 h-3.5" />
-//                         </button>
-//                         <button
-//                           disabled={isDeleting}
-//                           onClick={() => handleDelete(id)}
-//                           className="p-1.5 text-slate-600 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 rounded-lg border border-slate-200 hover:border-rose-200 transition disabled:opacity-40"
-//                           title="Delete"
-//                         >
-//                           <Trash2 className="w-3.5 h-3.5" />
-//                         </button>
-//                       </div>
-//                     </div>
-
-//                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1.5 text-xs">
-//                       <div className="flex justify-between items-center text-slate-600">
-//                         <span>Structure:</span>
-//                         <span className="font-semibold text-slate-800">{structureName}</span>
-//                       </div>
-//                       <div className="flex justify-between items-center text-slate-600">
-//                         <span>Monthly Gross:</span>
-//                         <span className="font-semibold text-slate-800">
-//                           ₹{(item.grossMonthly || 0).toLocaleString("en-IN")}
-//                         </span>
-//                       </div>
-//                       <div className="flex justify-between items-center text-slate-600">
-//                         <span>Annual CTC:</span>
-//                         <span className="font-bold text-indigo-600">
-//                           ₹{(item.annualCTC || 0).toLocaleString("en-IN")}
-//                         </span>
-//                       </div>
-//                     </div>
-//                   </div>
-//                 );
-//               })}
-//             </div>
-//           </>
-//         )}
-//       </div>
-
-//       {/* Salary Mapping & Assignment Modal */}
-//       {showModal && (
-//         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-//           <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
-//             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-//               <div className="flex items-center gap-2">
-//                 <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-//                   <Coins className="w-4 h-4" />
-//                 </div>
-//                 <h3 className="font-bold text-slate-900 text-base">
-//                   {editingId ? "Update Salary Assignment" : "Assign Salary"}
-//                 </h3>
-//               </div>
-//               <button
-//                 onClick={() => setShowModal(false)}
-//                 className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition"
-//               >
-//                 <X className="w-5 h-5" />
-//               </button>
-//             </div>
-
-//             <form onSubmit={handleSave} className="space-y-3.5 text-xs">
-//               {/* Select Employee Dropdown */}
-//               <div>
-//                 <label className="font-semibold text-slate-700 block mb-1">
-//                   Select Employee ({employees.length} Available)
-//                 </label>
-//                 <div className="relative">
-//                   <select
-//                     required
-//                     value={form.employeeId}
-//                     onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-//                     className="w-full p-2.5 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer appearance-none transition"
-//                   >
-//                     <option value="">
-//                       {dropdownLoading
-//                         ? "-- Loading Employees... --"
-//                         : employees.length === 0
-//                           ? "-- No Employees Found --"
-//                           : "-- Choose Employee --"}
-//                     </option>
-//                     {employees.map((emp) => {
-//                       const empId = emp._id || emp.id;
-//                       const empName = emp.name || emp.fullName || emp.user?.name || emp.userName || "Unnamed Employee";
-//                       const empCode = emp.employeeId || emp.code || emp.email || "";
-
-//                       return (
-//                         <option key={empId} value={empId}>
-//                           {empName} {empCode ? `(${empCode})` : ""}
-//                         </option>
-//                       );
-//                     })}
-//                   </select>
-//                   <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
-//                     <ChevronDown className="w-4 h-4" />
-//                   </div>
-//                 </div>
-//               </div>
-
-//               {/* Salary Structure Template Dropdown */}
-//               <div>
-//                 <label className="font-semibold text-slate-700 block mb-1">
-//                   Salary Structure Template
-//                 </label>
-//                 <div className="relative">
-//                   <select
-//                     value={form.salaryStructureId}
-//                     onChange={(e) => setForm({ ...form, salaryStructureId: e.target.value })}
-//                     className="w-full p-2.5 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer appearance-none transition"
-//                   >
-//                     <option value="">-- Standard / Default Structure --</option>
-//                     {structures.map((st) => {
-//                       const stId = st._id || st.id;
-//                       return (
-//                         <option key={stId} value={stId}>
-//                           {st.name} (Basic: {st.basicPercent}%)
-//                         </option>
-//                       );
-//                     })}
-//                   </select>
-//                   <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
-//                     <ChevronDown className="w-4 h-4" />
-//                   </div>
-//                 </div>
-//               </div>
-
-//               {/* Annual CTC Input */}
-//               <div>
-//                 <label className="font-semibold text-slate-700 block mb-1">
-//                   Annual Cost to Company (CTC in ₹)
-//                 </label>
-//                 <input
-//                   type="number"
-//                   min="10000"
-//                   step="1000"
-//                   required
-//                   placeholder="e.g. 600000"
-//                   value={form.annualCTC}
-//                   onChange={(e) => setForm({ ...form, annualCTC: e.target.value })}
-//                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
-//                 />
-//                 {Number(form.annualCTC) > 0 && (
-//                   <p className="text-[11px] text-emerald-600 font-semibold mt-1">
-//                     ≈ Monthly Gross: ₹{Math.round(Number(form.annualCTC) / 12).toLocaleString("en-IN")}
-//                   </p>
-//                 )}
-//               </div>
-
-//               {/* Status Select */}
-//               <div>
-//                 <label className="font-semibold text-slate-700 block mb-1">Status</label>
-//                 <div className="relative">
-//                   <select
-//                     value={form.status}
-//                     onChange={(e) => setForm({ ...form, status: e.target.value })}
-//                     className="w-full p-2.5 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 cursor-pointer appearance-none transition"
-//                   >
-//                     <option value="Active">Active</option>
-//                     <option value="Inactive">Inactive</option>
-//                     <option value="On Hold">On Hold</option>
-//                   </select>
-//                   <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
-//                     <ChevronDown className="w-4 h-4" />
-//                   </div>
-//                 </div>
-//               </div>
-
-//               {/* Action Buttons */}
-//               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-//                 <button
-//                   type="button"
-//                   onClick={() => setShowModal(false)}
-//                   className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition"
-//                 >
-//                   Cancel
-//                 </button>
-//                 <button
-//                   type="submit"
-//                   disabled={submitting}
-//                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-xl shadow-xs transition disabled:opacity-50"
-//                 >
-//                   {submitting ? "Saving..." : editingId ? "Update Mapping" : "Save Mapping"}
-//                 </button>
-//               </div>
-//             </form>
-//           </div>
-//         </div>
-//       )}
-//     </div>
-//   );
-// }

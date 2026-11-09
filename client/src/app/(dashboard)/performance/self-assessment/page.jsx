@@ -1,185 +1,103 @@
-// src/app/(dashboard)/performance/self-assessment/page.jsx
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { Loader2, Send, ClipboardEdit, CheckCircle2, CalendarClock, RefreshCw } from "lucide-react";
-import api from "@/lib/api";
+
+import { useMemo, useState } from "react";
+import { CheckCircle2, ClipboardEdit, Clock, Eye, PenLine } from "lucide-react";
 import { toast } from "react-toastify";
-import Button from "@/components/ui/Button";
-import { useAuth } from "@/context/AuthContext";
+import api from "@/lib/api";
+import { ErrorBanner, FieldError, Label, dateText, fieldBorder, inputClass } from "@/components/payroll/ui";
+import { PageHeader, primaryBtn } from "@/components/payroll/common";
+import { Box, FormFooter, errMsg } from "@/components/recruitment/rui";
+import AppraisalDetail from "@/components/performance/AppraisalDetail";
+import { APPR_ST, DataPanel, Person, Stats, StChip, StarPicker, Toolbar, useApi } from "@/components/performance/pui";
 
 export default function SelfAssessmentPage() {
-  const { user } = useAuth();
-  const [appraisals, setAppraisals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, refreshing, error, load } = useApi("/performance/appraisals");
+  const mine = useMemo(() => (data || []).filter((a) => a.isMine), [data]);
 
-  // Stores draft text for each appraisal ID
-  const [drafts, setDrafts] = useState({});
-  const [submittingId, setSubmittingId] = useState(null);
+  const [tab, setTab] = useState("todo");
+  const [search, setSearch] = useState("");
+  const [modal, setModal] = useState(null);
+  const [text, setText] = useState("");
+  const [rating, setRating] = useState(0);
+  const [err, setErr] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [viewing, setViewing] = useState(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const todo = mine.filter((a) => a.status === "pending-self");
+  const visible = (tab === "todo" ? todo : mine.filter((a) => a.status !== "pending-self")).filter((a) => !search.trim() || a.reviewPeriod.toLowerCase().includes(search.trim().toLowerCase()));
+
+  const openModal = (a) => {
+    setText(a.selfAssessment || "");
+    setRating(a.selfRating || 0);
+    setErr("");
+    setModal(a);
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (saving) return;
+    if (text.trim().length < 10) return setErr("Please write at least a few lines about your work.");
+    setSaving(true);
     try {
-      // Step 1: Bina kisi query params ke saare appraisals mangwayein taaki filtering miss na ho
-      const response = await api.get("/performance/appraisals");
-
-      const rawData = response?.data;
-      let list = Array.isArray(rawData)
-        ? rawData
-        : Array.isArray(rawData?.data)
-          ? rawData.data
-          : Array.isArray(rawData?.appraisals)
-            ? rawData.appraisals
-            : [];
-
-      // Step 2: Debugging ke liye console me check karein
-      console.log("All Appraisals Fetched:", list);
-      console.log("Current Logged-in User:", user);
-
-      // Step 3: Filter for pending self-assessment
-      // Agar user Admin nahi hai, toh hum chahe toh sirf uske naam ka dikha sakte hain ya saare pending dikha sakte hain
-      list = list.filter((a) => {
-        const status = (a.status || "").toLowerCase().trim();
-        const isPendingSelf = status === "pending-self" || status === "pendingself";
-
-        // Agar user employee hai, toh uska naam ya ID match kar sakte hain
-        // Filhal hum saare pending-self dikha rahe hain taaki data turant screen par show ho jaye
-        return isPendingSelf;
-      });
-
-      setAppraisals(list);
-    } catch (err) {
-      console.error("Error fetching self-assessments:", err);
-      toast.error("Failed to load assessments. Please try again.");
+      await api.put(`/performance/appraisals/${modal._id}/self-assessment`, { selfAssessment: text.trim(), selfRating: rating || "" });
+      toast.success("Self assessment submitted.");
+      setModal(null);
+      load({ silent: true });
+    } catch (er) {
+      toast.error(await errMsg(er, "Unable to submit the self assessment."));
     } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  const handleSubmit = async (id) => {
-    const assessmentText = drafts[id]?.trim();
-
-    if (!assessmentText) {
-      toast.warning("Please write your self-assessment before submitting.");
-      return;
-    }
-
-    setSubmittingId(id);
-    try {
-      await api.put(`/performance/appraisals/${id}/self-assessment`, {
-        selfAssessment: assessmentText
-      });
-      toast.success("Self-assessment submitted successfully!");
-
-      setDrafts(prev => {
-        const newDrafts = { ...prev };
-        delete newDrafts[id];
-        return newDrafts;
-      });
-      fetchData();
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to submit self-assessment.");
-    } finally {
-      setSubmittingId(null);
+      setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3 font-sans">
-        <Loader2 className="animate-spin text-indigo-600" size={32} />
-        <p className="text-sm text-slate-500 font-medium animate-pulse">Loading your self-assessments...</p>
-      </div>
-    );
-  }
+  const menu = (a) => [
+    { label: a.selfAssessment ? "Edit assessment" : "Write assessment", icon: PenLine, run: () => openModal(a), hidden: a.status === "completed" },
+    { label: "View", icon: Eye, run: () => setViewing(a) },
+  ];
+  const open = (a) => (a.status === "completed" ? setViewing(a) : openModal(a));
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto p-4 sm:p-3 lg:p-4 font-sans">
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
-        <div>
-          <h1 className="text-2xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
-            <ClipboardEdit className="text-indigo-600" size={28} />
-            Self Assessment
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Evaluate your performance, highlight achievements, and outline your growth metrics.
-          </p>
-        </div>
-        <button
-          onClick={fetchData}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 text-sm font-semibold rounded-xl border border-slate-200 hover:border-indigo-200 transition-all shadow-sm cursor-pointer active:scale-95 self-start sm:self-auto"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin text-indigo-600" : ""} />
-          <span>Refresh Tasks</span>
-        </button>
-      </div>
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={ClipboardEdit} title="Self Assessment" subtitle="Write what you achieved in the review period." onRefresh={() => load({ silent: true })} busy={loading || refreshing} />
 
-      {/* Content Section */}
-      {appraisals.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 px-4 text-center bg-white rounded-3xl border border-dashed border-slate-300 shadow-sm hover:border-indigo-300 hover:bg-indigo-50/20 transition-all duration-300">
-          <div className="h-16 w-16 bg-emerald-50 rounded-2xl flex items-center justify-center mb-4 border border-emerald-100 shadow-sm">
-            <CheckCircle2 className="text-emerald-500" size={32} />
+      {!loading && !error && <Stats items={[["To write", todo.length, Clock, "indigo"], ["Submitted", mine.filter((a) => a.status !== "pending-self").length, CheckCircle2, "emerald"], ["All appraisals", mine.length, ClipboardEdit, "violet"]]} />}
+
+      <Toolbar search={search} onSearch={setSearch} placeholder="Search period" tabs={[["todo", "To do", todo.length], ["done", "Submitted", mine.length - todo.length]]} tab={tab} onTab={setTab} />
+      <ErrorBanner message={error} onRetry={() => load()} />
+
+      <DataPanel
+        loading={loading} rows={visible} icon={ClipboardEdit}
+        empty={[tab === "todo" ? "Nothing to write" : "Nothing submitted yet", "Your self assessment is needed only when HR starts an appraisal for you."]}
+        onOpen={open} menu={menu}
+        cols={[
+          { h: "Period", cell: (a) => <span className="font-mono font-bold text-slate-800">{a.reviewPeriod}</span> },
+          { h: "Due", cell: (a) => <div><p>{a.dueDate ? dateText(a.dueDate) : "—"}</p>{a.isOverdue && <p className="text-[11px] font-bold text-rose-600">Overdue</p>}</div> },
+          { h: "Submitted on", cell: (a) => (a.submittedSelfAt ? dateText(a.submittedSelfAt) : "—") },
+          { h: "My rating", cell: (a) => (a.selfRating ? `${a.selfRating}/5` : "—") },
+          { h: "Status", cell: (a) => <StChip map={APPR_ST} v={a.status} /> },
+        ]}
+        card={(a) => (
+          <div className="space-y-2.5">
+            <div><p className="text-sm font-bold text-slate-900 font-mono">{a.reviewPeriod}</p><p className="text-[11px] text-slate-400">{a.dueDate ? `Due ${dateText(a.dueDate)}` : "No due date"}</p></div>
+            <StChip map={APPR_ST} v={a.status} />
+            {a.status === "pending-self" && <button type="button" onClick={(e) => { e.stopPropagation(); openModal(a); }} className={`${primaryBtn} w-full`}><PenLine size={14} /> Write assessment</button>}
           </div>
-          <p className="text-lg text-slate-800 font-bold">You're all caught up!</p>
-          <p className="text-sm text-slate-500 mt-1.5 max-w-sm">
-            There are no pending self-assessments required at the moment.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {appraisals.map((a) => (
-            <div
-              key={a._id || a.id}
-              className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1.5 transition-all duration-300 group relative overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+        )}
+      />
 
-              <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-100 relative z-10">
-                <div>
-                  <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200 uppercase tracking-wider mb-2">
-                    Action Required for: {a.employee?.name || "Employee"}
-                  </span>
-                  <h3 className="flex items-center gap-2 font-bold text-slate-900 text-lg group-hover:text-indigo-600 transition-colors">
-                    <CalendarClock size={20} className="text-indigo-500 group-hover:scale-110 transition-transform" />
-                    Review Period: {a.reviewPeriod || a.period || "Current Cycle"}
-                  </h3>
-                </div>
-              </div>
-
-              <div className="mb-5 relative z-10">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Your Assessment Notes & Achievements
-                </label>
-                <textarea
-                  rows={5}
-                  value={drafts[a._id || a.id] || ""}
-                  onChange={(e) => setDrafts({ ...drafts, [a._id || a.id]: e.target.value })}
-                  placeholder="Describe your key achievements, challenges faced, and goals for the next cycle..."
-                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 resize-y shadow-inner"
-                />
-              </div>
-
-              <div className="flex justify-end pt-2 relative z-10">
-                <Button
-                  className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-lg transition-all active:scale-95"
-                  loading={submittingId === (a._id || a.id)}
-                  onClick={() => handleSubmit(a._id || a.id)}
-                >
-                  {submittingId === (a._id || a.id) ? 'Submitting...' : (
-                    <>
-                      <Send size={16} /> Submit Assessment
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
+      {modal && (
+        <Box title="Self assessment" subtitle={`${modal.reviewPeriod}${modal.dueDate ? ` • due ${dateText(modal.dueDate)}` : ""}`} onClose={() => setModal(null)} onSubmit={save} locked={saving} size="max-w-xl" footer={<FormFooter onCancel={() => setModal(null)} busy={saving} label="Submit assessment" />}>
+          <div>
+            <Label>Your work in this period</Label>
+            <textarea rows={8} value={text} maxLength={3000} autoFocus onChange={(e) => { setText(e.target.value); setErr(""); }} placeholder="What did you achieve? What was hard? What do you want to do next?" className={`${inputClass} resize-y ${fieldBorder(err)}`} />
+            <div className="flex justify-between"><FieldError>{err}</FieldError><span className="ml-auto text-[10px] text-slate-400">{text.length}/3000</span></div>
+          </div>
+          <div><Label>How would you rate yourself? (optional)</Label><StarPicker value={rating} onChange={setRating} /></div>
+          <p className="text-[11px] text-slate-400">You can edit this until your manager completes the review.</p>
+        </Box>
       )}
+
+      {viewing && <AppraisalDetail a={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }

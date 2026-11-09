@@ -104,7 +104,7 @@ export default function HelpCenterPage() {
   }, [searchQuery]);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10 antialiased">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-4 py-8 space-y-5 antialiased">
       {/* Light Clean Enterprise Header */}
       <div className="rounded-3xl bg-white border border-slate-200/90 shadow-xs p-6 sm:p-10 relative overflow-hidden">
         {/* Subtle decorative background ring */}
@@ -300,7 +300,8 @@ export default function HelpCenterPage() {
               </span>
               <span className="text-slate-300">•</span>
               <span className="flex items-center gap-1">
-                <Clock size={12} /> Standard SLA: Within 2 Hours
+                <Clock size={12} /> Replies: Urgent 4h • High 8h • Medium 24h
+                {/* <Clock size={12} /> Standard SLA: Within 2 Hours */}
               </span>
             </div>
           </div>
@@ -327,51 +328,3 @@ export default function HelpCenterPage() {
   );
 }
 
-// "use client";
-// import Link from "next/link";
-// import { BookOpen, HelpCircle, MessageCircleQuestion, UserCog, ArrowRight } from "lucide-react";
-
-// const HELP_TOPICS = [
-//   { icon: BookOpen, title: "Getting Started", desc: "HRMS portal use karna seekho — login, dashboard navigation, profile setup.", href: "/help/faqs" },
-//   { icon: UserCog, title: "Attendance & Leave", desc: "Check-in/out kaise kare, leave apply karna, balance dekhna.", href: "/help/faqs" },
-//   { icon: MessageCircleQuestion, title: "Payroll & Payslips", desc: "Apni payslip download karna, salary breakdown samajhna.", href: "/help/faqs" },
-//   { icon: HelpCircle, title: "Common Issues", desc: "Login problems, forgot password, aur technical issues ka solution.", href: "/help/tickets" },
-// ];
-
-// export default function HelpCenterPage() {
-//   return (
-//     <div className="space-y-6">
-//       <div className="bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl p-8 text-white text-center">
-//         <h1 className="text-2xl font-bold">How can we help you?</h1>
-//         <p className="text-indigo-100 text-sm mt-1">Guides, FAQs, aur support — sab ek jagah</p>
-//       </div>
-
-//       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-//         {HELP_TOPICS.map((topic) => {
-//           const Icon = topic.icon;
-//           return (
-//             <Link key={topic.title} href={topic.href} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all group">
-//               <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3">
-//                 <Icon size={18} />
-//               </div>
-//               <h3 className="font-bold text-slate-900 flex items-center justify-between">
-//                 {topic.title}
-//                 <ArrowRight size={15} className="text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all" />
-//               </h3>
-//               <p className="text-xs text-slate-500 mt-1.5">{topic.desc}</p>
-//             </Link>
-//           );
-//         })}
-//       </div>
-
-//       <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center">
-//         <p className="text-sm text-slate-600">Apna sawal nahi mila?</p>
-//         <div className="flex items-center justify-center gap-3 mt-3">
-//           <Link href="/help/tickets" className="text-sm font-semibold text-indigo-600 hover:underline">Raise a Ticket</Link>
-//           <span className="text-slate-300">·</span>
-//           <Link href="/help/contact" className="text-sm font-semibold text-indigo-600 hover:underline">Contact HR</Link>
-//         </div>
-//       </div>
-//     </div>
-//   );
-// }

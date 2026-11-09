@@ -14,7 +14,12 @@ export default function DocumentCategoryPage({ category, title, description, emp
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [form, setForm] = useState({ title: "", employee: "", fileUrl: "", visibility: "all-employees" });
+    // const [form, setForm] = useState({ title: "", employee: "", fileUrl: "", visibility: "all-employees" });
+    const [form, setForm] = useState({
+        title: "",
+        employee: "",
+        file: null,
+    });
 
     const isAdmin = ["admin", "hr"].includes(user?.role);
 
@@ -44,29 +49,86 @@ export default function DocumentCategoryPage({ category, title, description, emp
         fetchData();
     }, [fetchData]);
 
+    // const handleUpload = async (e) => {
+    //     e.preventDefault();
+    //     setSubmitting(true);
+    //     try {
+    //         const payload = {
+    //             title: form.title,
+    //             fileUrl: form.fileUrl,
+    //             category,
+    //             employee: employeeSpecific && form.employee ? form.employee : null,
+    //             visibility: employeeSpecific ? "specific-employee" : "all-employees"
+    //         };
+
+    //         await api.post("/documents", payload);
+    //         toast.success("Document uploaded successfully.");
+    //         setModalOpen(false);
+    //         setForm({ title: "", employee: "", fileUrl: "", visibility: employeeSpecific ? "specific-employee" : "all-employees" });
+    //         fetchData();
+    //     } catch (err) {
+    //         toast.error(err.response?.data?.message || "Failed to upload document.");
+    //     } finally {
+    //         setSubmitting(false);
+    //     }
+    // };
+
+
     const handleUpload = async (e) => {
         e.preventDefault();
-        setSubmitting(true);
-        try {
-            const payload = {
-                title: form.title,
-                fileUrl: form.fileUrl,
-                category,
-                employee: employeeSpecific && form.employee ? form.employee : null,
-                visibility: employeeSpecific ? "specific-employee" : "all-employees"
-            };
 
-            await api.post("/documents", payload);
-            toast.success("Document uploaded successfully.");
+        if (!form.title.trim()) {
+            toast.error("Document title required hai.");
+            return;
+        }
+
+        if (employeeSpecific && !form.employee) {
+            toast.error("Please employee select karein.");
+            return;
+        }
+
+        if (!form.file) {
+            toast.error("Please PDF ya document file select karein.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("title", form.title.trim());
+        formData.append("category", category);
+        formData.append("file", form.file);
+
+        if (employeeSpecific) {
+            formData.append("employee", form.employee);
+        }
+
+        setSubmitting(true);
+
+        try {
+            await api.post("/documents", formData);
+
+            toast.success("Document successfully saved.");
+
             setModalOpen(false);
-            setForm({ title: "", employee: "", fileUrl: "", visibility: employeeSpecific ? "specific-employee" : "all-employees" });
-            fetchData();
+            setForm({
+                title: "",
+                employee: "",
+                file: null,
+            });
+
+            await fetchData();
         } catch (err) {
-            toast.error(err.response?.data?.message || "Failed to upload document.");
+            console.error("Document upload failed:", err.response?.data || err);
+
+            toast.error(
+                err.response?.data?.message ||
+                "Document upload failed. Backend upload configuration check karein."
+            );
         } finally {
             setSubmitting(false);
         }
     };
+
+
 
     const handleDelete = async (id) => {
         if (!confirm("Are you sure you want to delete this document?")) return;
@@ -78,6 +140,43 @@ export default function DocumentCategoryPage({ category, title, description, emp
             toast.error("Failed to delete document.");
         }
     };
+
+    const handleDownload = async (doc) => {
+        try {
+            if (doc.fileUrl) {
+                window.open(doc.fileUrl, "_blank", "noopener,noreferrer");
+                return;
+            }
+
+            if (!doc.file) {
+                toast.error("Document file available nahi hai.");
+                return;
+            }
+
+            const response = await api.get(
+                `/documents/${doc._id}/file`,
+                { responseType: "blob" }
+            );
+
+            const blobUrl = URL.createObjectURL(response.data);
+            const link = document.createElement("a");
+
+            link.href = blobUrl;
+            link.download = doc.fileName || `${doc.title}.pdf`;
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+        } catch (err) {
+            console.error("Download failed:", err);
+            toast.error(
+                err.response?.data?.message || "Document download nahi hua."
+            );
+        }
+    };
+
 
     return (
         <div className="space-y-6 transition-all duration-300">
@@ -137,7 +236,7 @@ export default function DocumentCategoryPage({ category, title, description, emp
                                 </div>
                             </div>
                             <div className="flex items-center gap-2.5 self-end sm:self-center shrink-0">
-                                <a
+                                {/* <a
                                     href={d.fileUrl}
                                     target="_blank"
                                     rel="noreferrer"
@@ -145,7 +244,17 @@ export default function DocumentCategoryPage({ category, title, description, emp
                                     title="Download Document"
                                 >
                                     <Download size={14} /> Download
-                                </a>
+                                </a> */}
+
+                                <button
+                                    type="button"
+                                    onClick={() => handleDownload(d)}
+                                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-600 hover:text-white rounded-xl"
+                                >
+                                    <Download size={14} />
+                                    Download
+                                </button>
+
                                 {isAdmin && (
                                     <button
                                         onClick={() => handleDelete(d._id)}
@@ -192,7 +301,7 @@ export default function DocumentCategoryPage({ category, title, description, emp
                         </div>
                     )}
 
-                    <div>
+                    {/* <div>
                         <label className="text-xs font-bold uppercase tracking-wider text-slate-500">File URL (Cloud Link)</label>
                         <input
                             required
@@ -202,7 +311,44 @@ export default function DocumentCategoryPage({ category, title, description, emp
                             className="mt-1.5 w-full px-4 py-3 border border-slate-200 rounded-xl text-sm outline-none transition-all duration-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 bg-slate-50/50 hover:border-slate-300 font-medium text-slate-800"
                             placeholder="https://res.cloudinary.com/... or secure file link"
                         />
+                    </div> */}
+
+
+                    <div>
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                            Select Document *
+                        </label>
+
+                        <input
+                            type="file"
+                            required
+                            accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+                            onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+
+                                if (file.size > 10 * 1024 * 1024) {
+                                    toast.error("File size 10 MB se kam honi chahiye.");
+                                    e.target.value = "";
+                                    return;
+                                }
+
+                                setForm((prev) => ({
+                                    ...prev,
+                                    file,
+                                }));
+                            }}
+                            className="mt-2 block w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm"
+                        />
+
+                        {form.file && (
+                            <p className="mt-2 text-xs text-green-700">
+                                Selected: {form.file.name} (
+                                {(form.file.size / 1024).toFixed(1)} KB)
+                            </p>
+                        )}
                     </div>
+
 
                     <div className="pt-4">
                         <Button

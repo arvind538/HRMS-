@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const leaveSchema = new mongoose.Schema(
     {
-        // 💡 Note: Agar aapke project mein user model ka naam "User" hai, 
+        // Note: Agar aapke project mein user model ka naam "User" hai, 
         // toh ref: "User" rakhein. Agar "Employee" hai toh "Employee" rakhein.
         employee: {
             type: mongoose.Schema.Types.ObjectId,

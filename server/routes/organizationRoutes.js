@@ -1,20 +1,39 @@
 const express = require("express");
 const router = express.Router();
-const createCRUDRoutes = require("./genericRoutes");
-const { createCRUDController } = require("../controllers/genericController");
+const { protect, authorize } = require("../middleware/authMiddleware");
+const c = require("../controllers/organizationController");
 
-const Branch = require("../models/Branch");
-const Department = require("../models/Department");
-const Designation = require("../models/Designation");
-const Location = require("../models/Location");
-const Team = require("../models/Team");
-const ReportingManager = require("../models/ReportingManager");
+/* A wrong id gives a clean 404 instead of a database error */
+const checkId = (req, res, next, id) => (/^[0-9a-fA-F]{24}$/.test(id) ? next() : res.status(404).json({ success: false, message: "Record not found." }));
 
-router.use("/branches", createCRUDRoutes(createCRUDController(Branch, "Branch")));
-router.use("/departments", createCRUDRoutes(createCRUDController(Department, "Department")));
-router.use("/designations", createCRUDRoutes(createCRUDController(Designation, "Designation")));
-router.use("/locations", createCRUDRoutes(createCRUDController(Location, "Location")));
-router.use("/teams", createCRUDRoutes(createCRUDController(Team, "Team")));
-router.use("/reporting-managers", createCRUDRoutes(createCRUDController(ReportingManager, "Reporting Manager")));
+const staff = authorize("admin", "hr");
+const admin = authorize("admin");
+
+router.get("/summary", protect, staff, c.summary);
+router.get("/overview", protect, c.overview);
+router.get("/org-chart", protect, c.orgChart);
+router.get("/pincode/:pin", protect, c.pincodeLookup);
+
+/* Everyone who is logged in can read (the employee forms use these lists). Admin and HR can add and edit. Only Admin can delete. */
+function crud(path, ctrl) {
+    const r = express.Router();
+    r.param("id", checkId);
+    r.get("/", protect, ctrl.getAll);
+    r.get("/:id", protect, ctrl.getOne);
+    r.post("/", protect, staff, ctrl.create);
+    r.put("/:id", protect, staff, ctrl.update);
+    r.delete("/:id", protect, admin, ctrl.remove);
+    router.use(path, r);
+}
+
+crud("/branches", c.branch);
+crud("/departments", c.department);
+crud("/designations", c.designation);
+crud("/locations", c.location);
+crud("/teams", c.team);
+crud("/reporting-managers", c.reportingManager);
 
 module.exports = router;
+
+
+

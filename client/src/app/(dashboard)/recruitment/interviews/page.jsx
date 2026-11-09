@@ -1,91 +1,81 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import {
-  Calendar,
-  Clock,
-  Video,
-  Phone,
-  Building2,
-  Users,
-  Search,
-  RefreshCw,
-  Plus,
-  X,
-  ChevronRight,
-  CheckCircle2,
-  AlertCircle,
-  Clock4,
-  ExternalLink,
-  UserCheck,
-  Edit3,
-  Trash2
-} from "lucide-react";
-import api from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Building2, CalendarCheck, CalendarClock, CalendarDays, ExternalLink, Eye, MessageSquareText, Pencil, Phone, Plus, RefreshCw, Trash2, UserPlus, Video } from "lucide-react";
 import { toast } from "react-toastify";
-import Button from "@/components/ui/Button";
+import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { ConfirmDialog, ErrorBanner, FieldError, Label, StatCard, fieldBorder, inputClass } from "@/components/payroll/ui";
+import { EmptyBox, FilterTabs, ListSkeleton, PageHeader, SearchBox, primaryBtn } from "@/components/payroll/common";
+import { Box, Chip, FooterBar, FormFooter, Info, RowMenu, StatusPicker, errMsg, ghostBtn, idOf } from "@/components/recruitment/rui";
+import { RECO, Stars } from "@/components/recruitment/FeedbackChat";
+import { explainEmpty, personName, useCandidateOptions, usePeopleOptions } from "@/components/recruitment/CandidatePicker";
+import NewCandidateDialog from "@/components/recruitment/NewCandidateDialog";
 
-const ROUND_BADGES = {
-  screening: "bg-sky-50 text-sky-700 border-sky-200/80",
-  technical: "bg-purple-50 text-purple-700 border-purple-200/80",
-  hr: "bg-amber-50 text-amber-700 border-amber-200/80",
-  final: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
-};
+const ROUND = { screening: { label: "Screening", tone: "sky" }, technical: { label: "Technical", tone: "violet" }, hr: { label: "HR round", tone: "amber" }, final: { label: "Final", tone: "emerald" } };
+const MODE = { video: { label: "Video call", icon: Video }, "in-person": { label: "In person", icon: Building2 }, phone: { label: "Phone call", icon: Phone } };
+const IV = { scheduled: { label: "Scheduled", tone: "indigo" }, completed: { label: "Completed", tone: "emerald" }, cancelled: { label: "Cancelled", tone: "rose" }, "no-show": { label: "No show", tone: "amber" } };
+const statusOptions = Object.entries(IV).map(([value, s]) => ({ value, ...s, disabled: value === "completed", hint: value === "completed" ? "Completes when feedback is given" : undefined }));
 
-const STATUS_BADGES = {
-  scheduled: { label: "Scheduled", bg: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  completed: { label: "Completed", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  cancelled: { label: "Cancelled", bg: "bg-rose-50 text-rose-700 border-rose-200" },
+const pad = (n) => String(n).padStart(2, "0");
+const toLocalInput = (v) => {
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? "" : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+const when = (v) => (v ? new Date(v).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }) : "—");
+
+/* the name of a candidate in a list (any field name works) */
+const cname = (c) => personName(c) || "Candidate";
+/* a candidate who is already hired, rejected or offered cannot get a new interview */
+const pickable = (c) => !["hired", "rejected", "offered"].includes(String(c?.status || "").toLowerCase());
+
+const blank = () => ({ candidate: "", interviewer: "", round: "screening", scheduledAt: "", durationMins: "45", mode: "video", meetingLink: "", location: "", notes: "" });
+const toForm = (iv) => ({
+  candidate: idOf(iv.candidate),
+  interviewer: idOf(iv.interviewer),
+  round: iv.round || "screening",
+  scheduledAt: toLocalInput(iv.scheduledAt),
+  durationMins: String(iv.durationMins || 45),
+  mode: iv.mode || "video",
+  meetingLink: iv.meetingLink || "",
+  location: iv.location || "",
+  notes: iv.notes || "",
+});
 
 export default function InterviewSchedulePage() {
-  const [interviews, setInterviews] = useState([]);
-  const [candidates, setCandidates] = useState([]);
-  const [employees, setEmployees] = useState([]);
+  const router = useRouter();
+  const { user } = useAuth();
+  const isStaff = ["admin", "hr"].includes(String(user?.role || "").toLowerCase());
+
+  const cand = useCandidateOptions();
+  const staff = usePeopleOptions();
+
+  const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [round, setRound] = useState("ALL");
+  const [tab, setTab] = useState("all");
 
-  // Filter & Search
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(blank());
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [ask, setAsk] = useState(null);
+  const [newCandOpen, setNewCandOpen] = useState(false);
 
-  // Modal & Drawer State
-  const [modalOpen, setModalOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [selectedInterview, setSelectedInterview] = useState(null);
-  const [editId, setEditId] = useState(null); // Tracks if we are editing an existing interview
-
-  const [form, setForm] = useState({
-    candidate: "",
-    interviewer: "",
-    round: "screening",
-    scheduledAt: "",
-    mode: "video",
-    meetingLink: "",
-    notes: "",
-  });
-
-  const fetchData = useCallback(async (isManual = false) => {
-    if (isManual) setRefreshing(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
     else setLoading(true);
-
+    setError("");
     try {
-      const [intRes, candRes, empRes] = await Promise.all([
-        api.get("/recruitment/interviews").catch(() => ({ data: [] })),
-        api.get("/recruitment/candidates").catch(() => ({ data: [] })),
-        api.get("/employees").catch(() => ({ data: [] })),
-      ]);
-
-      const rawInt = Array.isArray(intRes?.data) ? intRes.data : Array.isArray(intRes?.data?.data) ? intRes.data.data : [];
-      const rawCand = Array.isArray(candRes?.data) ? candRes.data : Array.isArray(candRes?.data?.data) ? candRes.data.data : [];
-      const rawEmp = Array.isArray(empRes?.data) ? empRes.data : Array.isArray(empRes?.data?.data) ? empRes.data.data : [];
-
-      setInterviews(rawInt);
-      setCandidates(rawCand);
-      setEmployees(rawEmp);
+      const { data } = await api.get("/recruitment/interviews");
+      setRows(Array.isArray(data) ? data : data?.interviews || data?.data || []);
     } catch (err) {
-      toast.error("Interview schedule data load nahi ho paya.");
-      console.error(err);
+      setError(await errMsg(err, "Unable to load the interviews."));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -93,576 +83,583 @@ export default function InterviewSchedulePage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    load();
+  }, [load]);
 
-  // Open modal for Create or Edit
-  const handleOpenModal = (interview = null) => {
-    if (interview) {
-      setEditId(interview._id || interview.id);
-      setForm({
-        candidate: interview.candidate?._id || interview.candidate || "",
-        interviewer: interview.interviewer?._id || interview.interviewer || "",
-        round: interview.round || "screening",
-        scheduledAt: interview.scheduledAt ? new Date(interview.scheduledAt).toISOString().slice(0, 16) : "",
-        mode: interview.mode || "video",
-        meetingLink: interview.meetingLink || "",
-        notes: interview.notes || "",
-      });
-    } else {
-      setEditId(null);
-      setForm({
-        candidate: "",
-        interviewer: "",
-        round: "screening",
-        scheduledAt: "",
-        mode: "video",
-        meetingLink: "",
-        notes: "",
-      });
-    }
-    setModalOpen(true);
+  const refresh = () => {
+    load({ silent: true });
+    cand.reload();
+    staff.reload();
   };
 
-  // Create or Update Interview
-  const handleSubmitForm = async (e) => {
+  const pool = useMemo(() => cand.candidates.filter(pickable), [cand.candidates]);
+
+  const counts = useMemo(() => {
+    const c = { all: rows.length };
+    Object.keys(IV).forEach((k) => (c[k] = rows.filter((r) => r.status === k).length));
+    return c;
+  }, [rows]);
+
+  const stats = useMemo(() => {
+    const now = new Date();
+    const live = rows.filter((r) => r.status === "scheduled");
+    return {
+      upcoming: live.filter((r) => new Date(r.scheduledAt) >= now).length,
+      today: live.filter((r) => new Date(r.scheduledAt).toDateString() === now.toDateString()).length,
+      done: counts.completed,
+    };
+  }, [rows, counts]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter(
+      (r) =>
+        (tab === "all" || r.status === tab) &&
+        (round === "ALL" || r.round === round) &&
+        (!q ||
+          `${cname(r.candidate)} ${r.candidate?.email || ""} ${r.interviewer?.name || ""} ${r.candidate?.jobPosition?.title || ""}`
+            .toLowerCase()
+            .includes(q))
+    );
+  }, [rows, tab, round, search]);
+
+  /* ---- form ---- */
+  const openModal = (row = null) => {
+    setForm(row ? toForm(row) : blank());
+    setErrors({});
+    setModal({ row });
+  };
+
+  const set = (k, v) => {
+    setForm((p) => ({ ...p, [k]: v }));
+    setErrors((p) => (p[k] ? { ...p, [k]: undefined } : p));
+  };
+
+  /* naya candidate save hone ke baad list reload karo aur usko select karo */
+  const onCandidateAdded = async (id) => {
+    try {
+      await cand.reload();
+    } catch {
+      /* list reload fail hui to bhi id select ho jayega */
+    }
+    set("candidate", id);
+  };
+
+  const save = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
+    if (saving) return;
+    const row = modal.row;
+    const next = {};
+    const d = new Date(form.scheduledAt);
+    const mins = Number(form.durationMins);
+
+    if (!row && !form.candidate) next.candidate = "Please select the candidate.";
+    if (!form.interviewer) next.interviewer = "Please select the interviewer.";
+    if (!form.scheduledAt || Number.isNaN(d.getTime())) next.scheduledAt = "Please select the date and time.";
+    else if (!row && d.getTime() < Date.now() - 5 * 60000) next.scheduledAt = "The interview time cannot be in the past.";
+    if (!Number.isInteger(mins) || mins < 15 || mins > 480) next.durationMins = "Enter 15 to 480 minutes.";
+    if (form.meetingLink.trim() && !/^https?:\/\/\S+$/i.test(form.meetingLink.trim()))
+      next.meetingLink = "The link must start with http:// or https://";
+    setErrors(next);
+    if (Object.keys(next).length) return;
+
+    const body = {
+      interviewer: form.interviewer,
+      round: form.round,
+      mode: form.mode,
+      durationMins: mins,
+      meetingLink: form.meetingLink.trim(),
+      location: form.location.trim(),
+      notes: form.notes.trim(),
+      scheduledAt: d.toISOString(),
+    };
+    if (!row) body.candidate = form.candidate;
+
+    setSaving(true);
     try {
-      if (editId) {
-        await api.put(`/recruitment/interviews/${editId}`, form);
-        toast.success("Interview successfully update ho gaya!");
-      } else {
-        await api.post("/recruitment/interviews", form);
-        toast.success("Interview successfully schedule ho gaya!");
-      }
-      setModalOpen(false);
-      setEditId(null);
-      setForm({
-        candidate: "",
-        interviewer: "",
-        round: "screening",
-        scheduledAt: "",
-        mode: "video",
-        meetingLink: "",
-        notes: "",
-      });
-      fetchData();
+      if (row) await api.put(`/recruitment/interviews/${row._id}`, body);
+      else await api.post("/recruitment/interviews", body);
+      toast.success(row ? "Interview updated." : "Interview scheduled.");
+      setModal(null);
+      load({ silent: true });
     } catch (err) {
-      toast.error(err.response?.data?.message || "Operation fail ho gayi.");
+      toast.error(await errMsg(err, "Unable to save the interview."));
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  // Delete Interview
-  const handleDelete = async (e, id) => {
-    e.stopPropagation();
-    if (!window.confirm("Kya aap waqai is interview schedule ko delete karna chahte hain?")) return;
-
+  const changeStatus = async (r, status) => {
     try {
-      await api.delete(`/recruitment/interviews/${id}`);
-      toast.success("Interview record delete ho gaya.");
-      setInterviews((prev) => prev.filter((item) => (item._id || item.id) !== id));
-      if (selectedInterview && (selectedInterview._id || selectedInterview.id) === id) {
-        setSelectedInterview(null);
-      }
+      const { data } = await api.put(`/recruitment/interviews/${r._id}`, { status });
+      setRows((prev) => prev.map((x) => (x._id === r._id ? data : x)));
+      setViewing((v) => (v && v._id === r._id ? data : v));
+      toast.success(`Marked as ${IV[status].label.toLowerCase()}.`);
+      load({ silent: true });
     } catch (err) {
-      toast.error(err.response?.data?.message || "Delete nahi ho paya.");
+      toast.error(await errMsg(err, "Unable to change the status."));
     }
   };
 
-  // Status Change Inline
-  const handleStatusUpdate = async (e, id, newStatus) => {
-    e.stopPropagation();
-    try {
-      await api.put(`/recruitment/interviews/${id}`, { status: newStatus });
-      toast.success(`Status updated to ${newStatus}`);
-      setInterviews((prev) =>
-        prev.map((item) => ((item._id || item.id) === id ? { ...item, status: newStatus } : item))
-      );
-      if (selectedInterview && (selectedInterview._id || selectedInterview.id) === id) {
-        setSelectedInterview((prev) => ({ ...prev, status: newStatus }));
-      }
-    } catch (err) {
-      toast.error("Status update nahi ho paya.");
-    }
-  };
-
-  // Live Filtered Interviews
-  const filteredInterviews = useMemo(() => {
-    return interviews.filter((item) => {
-      const candName = typeof item.candidate === 'string' ? item.candidate : (item.candidate?.name || "");
-      const intName = typeof item.interviewer === 'string' ? item.interviewer : (item.interviewer?.name || "");
-      const round = (item.round || "").toLowerCase();
-      const currentStatus = String(item.status || "scheduled").toLowerCase();
-      const q = searchQuery.toLowerCase();
-
-      const matchesSearch = candName.toLowerCase().includes(q) || intName.toLowerCase().includes(q) || round.includes(q);
-      const matchesStatus = statusFilter === "all" || currentStatus === statusFilter;
-
-      return matchesSearch && matchesStatus;
+  const remove = (r) =>
+    setAsk({
+      title: "Delete this interview?",
+      text: `${cname(r.candidate)} • ${when(r.scheduledAt)}. This cannot be undone.`,
+      run: async () => {
+        try {
+          await api.delete(`/recruitment/interviews/${r._id}`);
+          toast.success("Interview deleted.");
+          await load({ silent: true });
+        } catch (err) {
+          toast.error(await errMsg(err, "Unable to delete the interview."));
+        }
+      },
     });
-  }, [interviews, searchQuery, statusFilter]);
 
-  const getModeIcon = (mode = "") => {
-    switch (mode.toLowerCase()) {
-      case "video":
-        return <Video size={13} className="text-indigo-600" />;
-      case "phone":
-        return <Phone size={13} className="text-emerald-600" />;
-      default:
-        return <Building2 size={13} className="text-slate-600" />;
-    }
+  const menuFor = (r) => [
+    { label: "View details", icon: Eye, run: () => setViewing(r) },
+    { label: "Edit", icon: Pencil, run: () => openModal(r), hidden: r.status === "completed" },
+    { label: "Join meeting", icon: ExternalLink, run: () => window.open(r.meetingLink, "_blank", "noopener,noreferrer"), hidden: !r.meetingLink || r.status !== "scheduled" },
+    { label: "Give feedback", icon: MessageSquareText, run: () => router.push("/recruitment/feedback"), hidden: r.status !== "scheduled" },
+    { label: "Delete", icon: Trash2, run: () => remove(r), hidden: !isStaff, danger: true },
+  ];
+
+  const picker = (r) => (
+    <StatusPicker value={r.status} options={statusOptions} disabled={r.status === "completed"} onChange={(v) => changeStatus(r, v)} />
+  );
+  const roundChip = (r) => <Chip tone={ROUND[r.round]?.tone}>{ROUND[r.round]?.label || r.round}</Chip>;
+  const modeChip = (r) => {
+    const M = MODE[r.mode] || MODE.video;
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+        <M.icon size={13} className="text-slate-400" /> {M.label}
+      </span>
+    );
   };
+  const mark = (r) => (
+    <div className="w-10 h-10 shrink-0 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center font-extrabold text-sm">
+      {cname(r.candidate).charAt(0).toUpperCase()}
+    </div>
+  );
+  const selectCls =
+    "px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-indigo-500 cursor-pointer max-w-full";
+  const cls = `${inputClass} border-slate-200 focus:border-indigo-500`;
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6 pb-12 animate-in fade-in duration-300">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs transition-all hover:shadow-md">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl shadow-2xs">
-              <Calendar size={22} />
-            </span>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Interview Schedule
-            </h1>
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader
+        icon={CalendarDays}
+        title="Interview Schedule"
+        subtitle="Plan interviews, assign interviewers and track each round."
+        onRefresh={refresh}
+        busy={loading || refreshing}
+      >
+        <button type="button" onClick={() => openModal()} className={primaryBtn}>
+          <Plus size={16} /> Schedule Interview
+        </button>
+      </PageHeader>
+
+      {!loading && !error && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          <StatCard icon={CalendarClock} tone="indigo" label="Upcoming" value={stats.upcoming} />
+          <StatCard icon={CalendarDays} tone="emerald" label="Today" value={stats.today} />
+          <div className="col-span-2 lg:col-span-1">
+            <StatCard icon={CalendarCheck} tone="violet" label="Completed" value={stats.done} />
           </div>
-          <p className="text-xs text-slate-500 mt-1 pl-11 font-medium">
-            Manage upcoming candidate evaluations, meeting channels, and panel assignments
-          </p>
         </div>
+      )}
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => fetchData(true)}
-            disabled={refreshing || loading}
-            title="Refresh interviews"
-            className="p-2.5 border border-slate-200/80 rounded-2xl text-slate-600 hover:bg-slate-50 hover:border-slate-300 active:scale-95 transition-all disabled:opacity-50 cursor-pointer shadow-2xs"
-          >
-            <RefreshCw size={16} className={refreshing ? "animate-spin text-indigo-600" : ""} />
-          </button>
-          <Button
-            onClick={() => handleOpenModal(null)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-2.5 font-bold text-xs shadow-md shadow-indigo-100 transition-all active:scale-95 flex items-center gap-2 cursor-pointer"
-          >
-            <Plus size={16} /> Schedule Interview
-          </Button>
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/70 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <SearchBox value={search} onChange={setSearch} placeholder="Search candidate, interviewer or role" />
+          <select value={round} onChange={(e) => setRound(e.target.value)} className={selectCls}>
+            <option value="ALL">All rounds</option>
+            {Object.entries(ROUND).map(([k, r]) => (
+              <option key={k} value={k}>
+                {r.label}
+              </option>
+            ))}
+          </select>
         </div>
+        <FilterTabs
+          tabs={[["all", "All", counts.all], ...Object.entries(IV).map(([k, s]) => [k, s.label, counts[k]])]}
+          value={tab}
+          onChange={setTab}
+        />
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs">
-        <div className="relative w-full sm:w-80">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search candidate, interviewer, round..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-xs font-semibold text-slate-700 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-2xs"
+      <ErrorBanner message={error} onRetry={() => load()} />
+
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        {loading ? (
+          <ListSkeleton />
+        ) : visible.length === 0 ? (
+          <EmptyBox
+            icon={CalendarDays}
+            title={rows.length ? "Nothing matches your search" : "No interviews yet"}
+            text={rows.length ? "Try another tab or keyword." : 'Click "Schedule Interview" to plan the first one.'}
           />
-        </div>
+        ) : (
+          <>
+            {/* mobile and tablet: cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 sm:p-4 lg:hidden">
+              {visible.map((r) => (
+                <div
+                  key={r._id}
+                  onClick={() => setViewing(r)}
+                  className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 space-y-3 hover:border-indigo-200 hover:shadow-sm transition cursor-pointer"
+                >
+                  <div className="flex items-start gap-3">
+                    {mark(r)}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-slate-900 break-words">{cname(r.candidate)}</p>
+                      <p className="text-[11px] text-slate-400">
+                        {r.candidate?.jobPosition?.title || "—"} • {r.interviewer?.name || "No interviewer"}
+                      </p>
+                    </div>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <RowMenu items={menuFor(r)} />
+                    </div>
+                  </div>
+                  <p className="text-xs font-semibold text-slate-700">{when(r.scheduledAt)}</p>
+                  <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    {picker(r)}
+                    {roundChip(r)}
+                    {modeChip(r)}
+                  </div>
+                </div>
+              ))}
+            </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
-          {[
-            { key: "all", label: "All Sessions" },
-            { key: "scheduled", label: "Scheduled" },
-            { key: "completed", label: "Completed" },
-            { key: "cancelled", label: "Cancelled" },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setStatusFilter(tab.key)}
-              className={`px-3.5 py-1.5 rounded-2xl text-xs font-bold whitespace-nowrap transition-all active:scale-95 cursor-pointer ${statusFilter === tab.key
-                ? "bg-indigo-600 text-white shadow-xs shadow-indigo-200"
-                : "bg-slate-50/80 text-slate-600 hover:bg-slate-100 border border-slate-200/60"
-                }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Main Interactive Table */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[780px]">
-            <thead>
-              <tr className="bg-slate-50/75 border-b border-slate-100 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">
-                <th className="py-4 px-6">Candidate</th>
-                <th className="py-4 px-6">Interviewer</th>
-                <th className="py-4 px-6">Round</th>
-                <th className="py-4 px-6">Date & Time</th>
-                <th className="py-4 px-6">Channel</th>
-                <th className="py-4 px-6">Status</th>
-                <th className="py-4 px-6 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-700">
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="animate-pulse">
-                    <td className="py-4 px-6"><div className="h-4 bg-slate-100 rounded w-28" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-slate-100 rounded w-24" /></td>
-                    <td className="py-4 px-6"><div className="h-5 bg-slate-100 rounded-full w-16" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-slate-100 rounded w-32" /></td>
-                    <td className="py-4 px-6"><div className="h-4 bg-slate-100 rounded w-16" /></td>
-                    <td className="py-4 px-6"><div className="h-6 bg-slate-100 rounded-full w-20" /></td>
-                    <td className="py-4 px-6 text-right"><div className="h-4 bg-slate-100 rounded w-16 ml-auto" /></td>
+            {/* desktop: table */}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600 border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                  <tr>
+                    <th className="px-5 py-3.5">Candidate</th>
+                    <th className="px-4 py-3.5">Interviewer</th>
+                    <th className="px-4 py-3.5">Round</th>
+                    <th className="px-4 py-3.5">Date and time</th>
+                    <th className="px-4 py-3.5">Mode</th>
+                    <th className="px-4 py-3.5">Status</th>
+                    <th className="px-4 py-3.5 text-center w-20">Action</th>
                   </tr>
-                ))
-              ) : filteredInterviews.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-20">
-                    <Calendar size={32} className="mx-auto text-slate-300 mb-2 stroke-[1.5]" />
-                    <p className="font-bold text-slate-800 text-sm">Koi interview schedule nahi hai</p>
-                    <p className="text-xs text-slate-400 mt-0.5 font-medium">
-                      Naya session plan karne ke liye "Schedule Interview" par click karein.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                filteredInterviews.map((item) => {
-                  const intId = item._id || item.id;
-                  const currentStatus = String(item.status || "scheduled").toLowerCase();
-                  const roundBadge = ROUND_BADGES[item.round?.toLowerCase()] || ROUND_BADGES.screening;
-                  const statusBadge = STATUS_BADGES[currentStatus] || STATUS_BADGES.scheduled;
-
-                  const candidateName = typeof item.candidate === 'object' && item.candidate !== null ? item.candidate.name : (item.candidate || "—");
-                  const interviewerName = typeof item.interviewer === 'object' && item.interviewer !== null ? item.interviewer.name : (item.interviewer || "—");
-
-                  return (
-                    <tr
-                      key={intId}
-                      onClick={() => setSelectedInterview(item)}
-                      className="hover:bg-indigo-50/50 active:bg-indigo-100/60 cursor-pointer transition-all duration-150 group"
-                    >
-                      {/* Candidate */}
-                      <td className="py-4 px-6">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-extrabold text-xs group-hover:scale-105 transition-transform shadow-2xs border border-indigo-100/60">
-                            {candidateName ? candidateName.charAt(0).toUpperCase() : "C"}
-                          </div>
-                          <div>
-                            <span className="font-bold text-slate-900 block group-hover:text-indigo-600 transition-colors">
-                              {candidateName}
-                            </span>
-                            <span className="text-[11px] font-medium text-slate-400">
-                              {typeof item.candidate === 'object' && item.candidate?.jobPosition?.title ? item.candidate.jobPosition.title : "Candidate Applicant"}
-                            </span>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visible.map((r) => (
+                    <tr key={r._id} onClick={() => setViewing(r)} className="hover:bg-indigo-50/40 transition-colors cursor-pointer">
+                      <td className="px-5 py-3 align-middle">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {mark(r)}
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 text-sm truncate max-w-[180px]">{cname(r.candidate)}</p>
+                            <p className="text-[11px] text-slate-400 truncate max-w-[180px]">{r.candidate?.jobPosition?.title || "—"}</p>
                           </div>
                         </div>
                       </td>
-
-                      {/* Interviewer */}
-                      <td className="py-4 px-6">
-                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                          <UserCheck size={13} className="text-slate-400" />
-                          <span>{interviewerName}</span>
-                        </div>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap font-semibold text-slate-700">{r.interviewer?.name || "—"}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap">{roundChip(r)}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap font-medium text-slate-700">{when(r.scheduledAt)}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap">{modeChip(r)}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        {picker(r)}
                       </td>
-
-                      {/* Round */}
-                      <td className="py-4 px-6">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border capitalize shadow-2xs ${roundBadge}`}>
-                          {item.round || "Screening"}
-                        </span>
-                      </td>
-
-                      {/* Scheduled Date Time */}
-                      <td className="py-4 px-6 text-slate-600 font-medium">
-                        <div className="flex items-center gap-1.5 font-mono text-xs">
-                          <Clock4 size={13} className="text-slate-400" />
-                          <span>
-                            {item.scheduledAt
-                              ? new Date(item.scheduledAt).toLocaleString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })
-                              : "—"}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Mode / Channel */}
-                      <td className="py-4 px-6">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-200/80 text-xs font-bold text-slate-700 capitalize shadow-2xs">
-                          {getModeIcon(item.mode)}
-                          <span>{item.mode || "Video"}</span>
-                        </span>
-                      </td>
-
-                      {/* Inline Status Dropdown */}
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={currentStatus}
-                          onChange={(e) => handleStatusUpdate(e, intId, e.target.value)}
-                          className={`pl-2.5 pr-6 py-1 border rounded-full text-[11px] font-bold capitalize appearance-none focus:outline-none cursor-pointer transition-all shadow-2xs hover:shadow-xs ${statusBadge.bg}`}
-                        >
-                          <option value="scheduled">Scheduled</option>
-                          <option value="completed">Completed</option>
-                          <option value="cancelled">Cancelled</option>
-                        </select>
-                      </td>
-
-                      {/* Edit & Delete Action Buttons */}
-                      <td className="py-4 px-6 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleOpenModal(item)}
-                            title="Edit Interview"
-                            className="p-2 bg-slate-50 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 rounded-xl border border-slate-200/80 hover:border-indigo-200 transition-all shadow-2xs cursor-pointer active:scale-95"
-                          >
-                            <Edit3 size={14} />
-                          </button>
-                          <button
-                            onClick={(e) => handleDelete(e, intId)}
-                            title="Delete Interview"
-                            className="p-2 bg-slate-50 hover:bg-rose-50 text-slate-600 hover:text-rose-600 rounded-xl border border-slate-200/80 hover:border-rose-200 transition-all shadow-2xs cursor-pointer active:scale-95"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                      <td className="px-4 py-3 align-middle text-center" onClick={(e) => e.stopPropagation()}>
+                        <RowMenu items={menuFor(r)} />
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Slide-in Details Drawer */}
-      {selectedInterview && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex justify-end animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md h-full p-6 shadow-2xl overflow-y-auto flex flex-col justify-between animate-in slide-in-from-right duration-300 border-l border-slate-100">
-            <div className="space-y-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider">
-                    Interview Dossier
-                  </span>
-                  <h2 className="text-xl font-bold text-slate-900 mt-0.5">
-                    {typeof selectedInterview.candidate === 'object' && selectedInterview.candidate !== null ? selectedInterview.candidate?.name : (selectedInterview.candidate || "Session Details")}
-                  </h2>
+      {/* schedule / edit */}
+      {modal && (
+        <Box
+          title={modal.row ? "Edit interview" : "Schedule interview"}
+          subtitle="Pick the candidate, interviewer and time"
+          onClose={() => setModal(null)}
+          onSubmit={save}
+          locked={saving}
+          size="max-w-2xl"
+          footer={<FormFooter onCancel={() => setModal(null)} busy={saving} label={modal.row ? "Save changes" : "Schedule"} />}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {modal.row ? (
+              <div>
+                <Label>Candidate</Label>
+                <input value={cname(modal.row.candidate)} disabled className={`${cls} bg-slate-100 text-slate-500`} />
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <Label>Candidate</Label>
+                  {isStaff && (
+                    <button
+                      type="button"
+                      onClick={() => setNewCandOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 active:scale-95 transition cursor-pointer"
+                    >
+                      <UserPlus size={13} /> Add new candidate
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={() => setSelectedInterview(null)}
-                  className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-2xl transition-colors cursor-pointer"
+
+                <select
+                  value={form.candidate ?? ""}
+                  onChange={(e) => set("candidate", e.target.value)}
+                  disabled={cand.loading}
+                  className={`${inputClass} cursor-pointer disabled:opacity-60 ${fieldBorder(errors.candidate)}`}
                 >
-                  <X size={18} />
-                </button>
-              </div>
+                  <option value="">
+                    {cand.loading ? "Loading candidates..." : pool.length ? "Select candidate" : "No candidate available"}
+                  </option>
+                  {pool.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {cname(c)}
+                      {c.jobPosition?.title ? ` — ${c.jobPosition.title}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <FieldError>{errors.candidate}</FieldError>
 
-              {/* Status & Round Badges */}
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border capitalize shadow-2xs ${STATUS_BADGES[selectedInterview.status]?.bg || "bg-slate-100 text-slate-700"}`}>
-                  {selectedInterview.status || "Scheduled"}
-                </span>
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border capitalize shadow-2xs ${ROUND_BADGES[selectedInterview.round?.toLowerCase()] || ROUND_BADGES.screening}`}>
-                  {selectedInterview.round} Round
-                </span>
+                {cand.error && (
+                  <div className="flex items-center justify-between gap-3 mt-1.5 text-[11px] font-semibold text-rose-600">
+                    <span>{cand.error}</span>
+                    <button type="button" onClick={cand.reload} className="inline-flex items-center gap-1 underline cursor-pointer shrink-0">
+                      <RefreshCw size={11} /> Retry
+                    </button>
+                  </div>
+                )}
+                {!cand.loading && !cand.error && pool.length === 0 && (
+                  <p className="text-[11px] font-semibold text-amber-600 mt-1.5">
+                    {explainEmpty(cand.candidates, [
+                      ["hired", (c) => c.status === "hired"],
+                      ["rejected", (c) => c.status === "rejected"],
+                      ["already offered", (c) => c.status === "offered"],
+                    ])}
+                  </p>
+                )}
               </div>
+            )}
 
-              {/* Specifications Card */}
-              <div className="bg-slate-50/80 rounded-3xl p-5 space-y-3.5 border border-slate-200/60 text-xs shadow-2xs">
-                <div className="flex justify-between py-1 border-b border-slate-200/60">
-                  <span className="text-slate-400 font-bold uppercase text-[10px]">Candidate Email</span>
-                  <span className="font-bold text-slate-800 font-mono">
-                    {typeof selectedInterview.candidate === 'object' && selectedInterview.candidate !== null ? (selectedInterview.candidate?.email || "—") : "—"}
-                  </span>
+            <div>
+              <Label>Interviewer</Label>
+              <select
+                value={form.interviewer ?? ""}
+                onChange={(e) => set("interviewer", e.target.value)}
+                disabled={staff.loading}
+                className={`${inputClass} cursor-pointer disabled:opacity-60 ${fieldBorder(errors.interviewer)}`}
+              >
+                <option value="">{staff.loading ? "Loading interviewers..." : "Select interviewer"}</option>
+                {staff.people.map((e) => (
+                  <option key={e._id} value={e._id}>
+                    {e.name} ({e.employeeId || "—"})
+                  </option>
+                ))}
+              </select>
+              <FieldError>{errors.interviewer}</FieldError>
+              {staff.error && (
+                <div className="flex items-center justify-between gap-3 mt-1.5 text-[11px] font-semibold text-rose-600">
+                  <span>{staff.error}</span>
+                  <button type="button" onClick={staff.reload} className="inline-flex items-center gap-1 underline cursor-pointer shrink-0">
+                    <RefreshCw size={11} /> Retry
+                  </button>
                 </div>
-                <div className="flex justify-between py-1 border-b border-slate-200/60">
-                  <span className="text-slate-400 font-bold uppercase text-[10px]">Panelist / Interviewer</span>
-                  <span className="font-bold text-slate-800">
-                    {typeof selectedInterview.interviewer === 'object' && selectedInterview.interviewer !== null ? selectedInterview.interviewer?.name : (selectedInterview.interviewer || "—")}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-200/60">
-                  <span className="text-slate-400 font-bold uppercase text-[10px]">Mode</span>
-                  <span className="font-bold text-slate-800 capitalize flex items-center gap-1.5">
-                    {getModeIcon(selectedInterview.mode)} {selectedInterview.mode}
-                  </span>
-                </div>
-                <div className="flex justify-between py-1">
-                  <span className="text-slate-400 font-bold uppercase text-[10px]">Scheduled Time</span>
-                  <span className="font-bold text-slate-800 font-mono">
-                    {selectedInterview.scheduledAt
-                      ? new Date(selectedInterview.scheduledAt).toLocaleString()
-                      : "—"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Join Link (If available) */}
-              {selectedInterview.meetingLink && (
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
-                    Session Link
-                  </h4>
-                  <a
-                    href={selectedInterview.meetingLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-between p-3.5 bg-indigo-50/80 hover:bg-indigo-100 rounded-2xl border border-indigo-200/60 text-xs font-bold text-indigo-700 transition-all shadow-2xs hover:shadow-xs"
-                  >
-                    <span>Launch Virtual Room</span>
-                    <ExternalLink size={14} />
-                  </a>
-                </div>
+              )}
+              {!staff.loading && !staff.error && staff.people.length === 0 && (
+                <p className="text-[11px] font-semibold text-amber-600 mt-1.5">No employee is available to take the interview.</p>
               )}
             </div>
 
-            <div className="pt-6 border-t border-slate-100">
-              <Button
-                onClick={() => setSelectedInterview(null)}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-2xl py-3 font-bold text-xs shadow-md transition-all cursor-pointer"
-              >
-                Close Dossier
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Redesigned Schedule Modal (Create & Edit) */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-100 space-y-6 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl shadow-2xs">
-                  <Calendar size={22} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">
-                    {editId ? "Edit Interview Schedule" : "Schedule Candidate Interview"}
-                  </h3>
-                  <p className="text-xs font-semibold text-slate-400 mt-0.5">
-                    {editId ? "Modify panelist, time, or interview round" : "Set panelist, assessment round, and meeting platform"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-2xl transition-colors cursor-pointer"
-              >
-                <X size={18} />
-              </button>
+            <div>
+              <Label>Round</Label>
+              <select value={form.round ?? ""} onChange={(e) => set("round", e.target.value)} className={`${cls} cursor-pointer`}>
+                {Object.entries(ROUND).map(([k, r]) => (
+                  <option key={k} value={k}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <form onSubmit={handleSubmitForm} className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-slate-700">Select Candidate *</label>
-                <select
-                  required
-                  value={form.candidate}
-                  onChange={(e) => setForm({ ...form, candidate: e.target.value })}
-                  className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-2xs cursor-pointer"
-                >
-                  <option value="">-- Choose Candidate --</option>
-                  {candidates.map((c) => (
-                    <option key={c._id || c.id} value={c._id || c.id}>
-                      {c.name} {c.jobPosition?.title ? `(${c.jobPosition.title})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-700">Assign Interviewer *</label>
-                <select
-                  required
-                  value={form.interviewer}
-                  onChange={(e) => setForm({ ...form, interviewer: e.target.value })}
-                  className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-2xs cursor-pointer"
-                >
-                  <option value="">-- Choose Staff / Panelist --</option>
-                  {employees.map((e) => (
-                    <option key={e._id || e.id} value={e._id || e.id}>
-                      {e.name} {e.designation ? `(${e.designation})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700">Interview Round</label>
-                  <select
-                    value={form.round}
-                    onChange={(e) => setForm({ ...form, round: e.target.value })}
-                    className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-2xs cursor-pointer"
+            <div>
+              <Label>Mode</Label>
+              <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl">
+                {Object.entries(MODE).map(([k, m]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => set("mode", k)}
+                    className={`inline-flex items-center justify-center gap-1 py-2.5 sm:py-2 text-[11px] font-bold rounded-lg transition cursor-pointer ${form.mode === k ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                      }`}
                   >
-                    <option value="screening">Screening</option>
-                    <option value="technical">Technical</option>
-                    <option value="hr">HR Round</option>
-                    <option value="final">Final Executive</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700">Medium / Mode</label>
-                  <select
-                    value={form.mode}
-                    onChange={(e) => setForm({ ...form, mode: e.target.value })}
-                    className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-2xs cursor-pointer"
-                  >
-                    <option value="video">Google Meet / Video</option>
-                    <option value="in-person">In-Person Office</option>
-                    <option value="phone">Telephonic</option>
-                  </select>
-                </div>
+                    <m.icon size={12} /> {k === "in-person" ? "Office" : k === "video" ? "Video" : "Phone"}
+                  </button>
+                ))}
               </div>
+            </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700">Date & Time *</label>
-                <input
-                  type="datetime-local"
-                  required
-                  value={form.scheduledAt}
-                  onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
-                  className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-2xs font-mono"
-                />
-              </div>
+            <div>
+              <Label>Date and time</Label>
+              <input
+                type="datetime-local"
+                value={form.scheduledAt ?? ""}
+                min={modal.row ? undefined : toLocalInput(new Date())}
+                onChange={(e) => set("scheduledAt", e.target.value)}
+                className={`${inputClass} cursor-pointer ${fieldBorder(errors.scheduledAt)}`}
+              />
+              <FieldError>{errors.scheduledAt}</FieldError>
+            </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700">Meeting Link / Room (Optional)</label>
+            <div>
+              <Label>Duration (minutes)</Label>
+              <input
+                type="number"
+                min="15"
+                max="480"
+                step="5"
+                value={form.durationMins ?? ""}
+                onChange={(e) => set("durationMins", e.target.value)}
+                className={`${inputClass} ${fieldBorder(errors.durationMins)}`}
+              />
+              <FieldError>{errors.durationMins}</FieldError>
+            </div>
+
+            {form.mode === "video" && (
+              <div className="sm:col-span-2">
+                <Label>Meeting link (optional)</Label>
                 <input
                   type="url"
-                  value={form.meetingLink}
-                  onChange={(e) => setForm({ ...form, meetingLink: e.target.value })}
-                  placeholder="https://meet.google.com/xyz-abc"
-                  className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 transition-all shadow-2xs"
+                  value={form.meetingLink ?? ""}
+                  maxLength={500}
+                  onChange={(e) => set("meetingLink", e.target.value)}
+                  placeholder="https://meet.google.com/..."
+                  className={`${inputClass} ${fieldBorder(errors.meetingLink)}`}
+                />
+                <FieldError>{errors.meetingLink}</FieldError>
+              </div>
+            )}
+
+            {form.mode === "in-person" && (
+              <div className="sm:col-span-2">
+                <Label>Location (optional)</Label>
+                <input
+                  value={form.location ?? ""}
+                  maxLength={200}
+                  onChange={(e) => set("location", e.target.value)}
+                  placeholder="e.g. Conference room 2, Jaipur office"
+                  className={cls}
                 />
               </div>
+            )}
+          </div>
 
-              <div className="pt-2 flex items-center gap-3 border-t border-slate-100">
-                <Button
-                  type="submit"
-                  loading={submitting}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-3.5 font-bold text-xs shadow-md shadow-indigo-100 transition-all active:scale-95 cursor-pointer"
-                >
-                  {editId ? "Update Schedule" : "Confirm Schedule"}
-                </Button>
+          <div>
+            <Label>Notes (optional)</Label>
+            <textarea
+              rows={3}
+              value={form.notes ?? ""}
+              maxLength={1000}
+              onChange={(e) => set("notes", e.target.value)}
+              placeholder="Topics to cover, documents to carry..."
+              className={`${cls} resize-none`}
+            />
+          </div>
+        </Box>
+      )}
+
+      {/* naya candidate popup: modal ke bahar, sibling ke roop me (form ke andar form nahi banta) */}
+      {newCandOpen && (
+        <NewCandidateDialog jobs={cand.jobs} onClose={() => setNewCandOpen(false)} onCreated={onCandidateAdded} />
+      )}
+
+      {/* details */}
+      {viewing && (
+        <Box
+          title={cname(viewing.candidate)}
+          subtitle={`${ROUND[viewing.round]?.label || viewing.round} • ${when(viewing.scheduledAt)}`}
+          onClose={() => setViewing(null)}
+          footer={
+            <FooterBar>
+              {viewing.status === "scheduled" && (
+                <button type="button" onClick={() => router.push("/recruitment/feedback")} className={primaryBtn}>
+                  <MessageSquareText size={14} /> Give feedback
+                </button>
+              )}
+              {viewing.status !== "completed" && (
                 <button
                   type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="px-5 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-2xl transition-all cursor-pointer active:scale-95"
+                  onClick={() => {
+                    const r = viewing;
+                    setViewing(null);
+                    openModal(r);
+                  }}
+                  className={ghostBtn}
                 >
-                  Cancel
+                  <Pencil size={14} /> Edit
                 </button>
-              </div>
-            </form>
+              )}
+              <button type="button" onClick={() => setViewing(null)} className={ghostBtn}>
+                Close
+              </button>
+            </FooterBar>
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip tone={IV[viewing.status]?.tone} dot>
+              {IV[viewing.status]?.label}
+            </Chip>
+            {roundChip(viewing)}
           </div>
-        </div>
+          <Info
+            rows={[
+              ["Candidate", cname(viewing.candidate)],
+              ["Email", viewing.candidate?.email],
+              ["Phone", viewing.candidate?.phone],
+              ["Applied for", viewing.candidate?.jobPosition?.title],
+              ["Interviewer", viewing.interviewer?.name],
+              ["Date and time", when(viewing.scheduledAt)],
+              ["Duration", `${viewing.durationMins || 45} minutes`],
+              ["Mode", (MODE[viewing.mode] || MODE.video).label],
+              ["Location", viewing.location],
+              ["Scheduled by", viewing.scheduledBy?.name],
+            ]}
+          />
+          {viewing.meetingLink && viewing.status === "scheduled" && (
+            <a
+              href={viewing.meetingLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition"
+            >
+              <span>Join meeting</span>
+              <ExternalLink size={14} />
+            </a>
+          )}
+          {viewing.notes && (
+            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50/70 border border-slate-200 rounded-2xl p-3.5 whitespace-pre-line break-words">
+              {viewing.notes}
+            </p>
+          )}
+          {viewing.status === "completed" && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Stars value={viewing.rating} size={15} />
+                {viewing.recommendation && (
+                  <Chip tone={RECO[viewing.recommendation]?.tone}>{RECO[viewing.recommendation]?.label}</Chip>
+                )}
+              </div>
+              <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-line break-words">{viewing.feedback}</p>
+            </div>
+          )}
+        </Box>
       )}
+
+      {ask && <ConfirmDialog title={ask.title} text={ask.text} label="Delete" danger onConfirm={ask.run} onClose={() => setAsk(null)} />}
     </div>
   );
 }

@@ -1,145 +1,87 @@
-// src/app/(dashboard)/performance/ratings/page.jsx
 "use client";
-import { useEffect, useState } from "react";
-import { Loader2, Star, Trophy, CalendarClock, RefreshCw } from "lucide-react";
-import api from "@/lib/api";
-import { toast } from "react-toastify";
-import Table from "@/components/ui/Table";
+
+import { useMemo, useState } from "react";
+import { Award, Eye, Star, Trophy, Users } from "lucide-react";
+import { ErrorBanner } from "@/components/payroll/ui";
+import { PageHeader } from "@/components/payroll/common";
+import AppraisalDetail from "@/components/performance/AppraisalDetail";
+import { Bar, DataPanel, Person, Stars, Stats, Toolbar, selectCls, useApi } from "@/components/performance/pui";
 
 export default function PerformanceRatingPage() {
-  const [appraisals, setAppraisals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState("");
+  const [search, setSearch] = useState("");
+  const [viewing, setViewing] = useState(null);
+  const { data, loading, refreshing, error, load } = useApi("/performance/ratings", period ? { period } : {});
+  const d = data || { rows: [], distribution: [], byDepartment: [], periods: [], total: 0, average: 0 };
 
-  const fetchRatings = async () => {
-    setLoading(true);
-    try {
-      // Status filter hata diya hai taaki saare appraisals fetch ho sakein
-      const response = await api.get("/performance/appraisals");
-
-      const data = response?.data;
-      const list = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.data)
-          ? data.data
-          : Array.isArray(data?.appraisals)
-            ? data.appraisals
-            : [];
-
-      // Sort by rating safely (highest to lowest)
-      const sortedData = list.sort((a, b) => (b.rating || b.score || 0) - (a.rating || a.score || 0));
-
-      setAppraisals(sortedData);
-    } catch (err) {
-      console.error("Error fetching ratings:", err);
-      toast.error("Failed to load performance ratings. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchRatings();
-  }, []);
-
-  const columns = [
-    {
-      key: "employee",
-      label: "Employee",
-      render: (r) => (
-        <div className="flex items-center gap-3 py-1">
-          <div className="h-9 w-9 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-sm font-bold text-indigo-600 shadow-sm">
-            {r.employee?.name?.charAt(0) || r.employeeName?.charAt(0) || "U"}
-          </div>
-          <span className="font-bold text-slate-800">{r.employee?.name || r.employeeName || "Unknown Employee"}</span>
-        </div>
-      )
-    },
-    {
-      key: "designation",
-      label: "Role / Designation",
-      render: (r) => (
-        <span className="text-slate-600 font-medium">
-          {r.employee?.designation || r.designation || "Not specified"}
-        </span>
-      )
-    },
-    {
-      key: "reviewPeriod",
-      label: "Review Period",
-      render: (r) => (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-50 text-slate-600 text-xs font-medium border border-slate-100">
-          <CalendarClock size={14} className="text-slate-400" />
-          {r.reviewPeriod || r.period || "N/A"}
-        </span>
-      )
-    },
-    {
-      key: "rating",
-      label: "Final Rating",
-      render: (r) => {
-        const ratingVal = Number(r.rating || r.score || 0);
-        return (
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center gap-0.5">
-              {[1, 2, 3, 4, 5].map((s) => (
-                <Star
-                  key={s}
-                  size={16}
-                  className={`${s <= ratingVal
-                    ? "fill-amber-400 text-amber-400 drop-shadow-sm"
-                    : "fill-slate-100 text-slate-250 text-slate-200"
-                    } transition-all`}
-                />
-              ))}
-            </div>
-            <div className="flex items-center justify-center bg-amber-50 px-2 py-0.5 rounded text-sm font-bold text-amber-700 border border-amber-100/50">
-              {ratingVal.toFixed(1)}<span className="text-amber-500/70 text-xs font-semibold ml-0.5">/5</span>
-            </div>
-          </div>
-        );
-      },
-    },
-  ];
-
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
-        <Loader2 className="animate-spin text-indigo-600" size={32} />
-        <p className="text-sm text-slate-500 font-medium animate-pulse">Loading employee ratings...</p>
-      </div>
-    );
-  }
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return d.rows.filter((a) => !q || `${a.employee?.name || ""} ${a.employee?.employeeId || ""} ${a.employee?.department || ""}`.toLowerCase().includes(q));
+  }, [d.rows, search]);
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto p-4 sm:p-3 lg:p-4 font-sans">
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-sm">
-        <div>
-          <h1 className="text-2xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
-            <Trophy className="text-amber-500" size={28} />
-            Performance Ratings
-          </h1>
-          <p className="text-sm text-slate-500 mt-1.5">
-            Overview of all employee performance ratings and evaluation rankings.
-          </p>
-        </div>
-        <button
-          onClick={fetchRatings}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 text-sm font-semibold rounded-xl border border-slate-200 hover:border-indigo-200 transition-all shadow-sm cursor-pointer"
-        >
-          <RefreshCw size={16} />
-          <span>Refresh Ratings</span>
-        </button>
-      </div>
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={Trophy} title="Performance Ratings" subtitle="Final ratings, best first." onRefresh={() => load({ silent: true })} busy={loading || refreshing} />
 
-      {/* Table Section */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <Table
-          columns={columns}
-          data={appraisals}
-          emptyText="No performance ratings found. Complete an appraisal cycle to see rankings here."
-        />
-      </div>
+      {!loading && !error && <Stats items={[["Average rating", d.total ? d.average.toFixed(1) : "—", Star, "indigo"], ["Rated reviews", d.total, Users, "emerald"], ["Outstanding (5★)", d.distribution[0]?.count || 0, Award, "violet"]]} />}
+
+      {!loading && d.total > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <section className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 sm:p-5">
+            <h2 className="text-sm font-bold text-slate-900 mb-3">Rating spread</h2>
+            <ul className="space-y-2.5">
+              {d.distribution.map((r) => (
+                <li key={r.rating}>
+                  <div className="flex items-center justify-between text-xs mb-1"><span className="inline-flex items-center gap-2 font-bold text-slate-700"><Stars value={r.rating} size={11} />{r.label}</span><span className="font-bold text-slate-800">{r.count} <span className="text-slate-400 font-semibold">({r.percent}%)</span></span></div>
+                  <Bar value={r.percent} tone="bg-amber-400" />
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 sm:p-5">
+            <h2 className="text-sm font-bold text-slate-900 mb-3">By department</h2>
+            <ul className="space-y-3">
+              {d.byDepartment.slice(0, 6).map((x) => (
+                <li key={x.name}>
+                  <div className="flex items-center justify-between text-xs mb-1"><span className="font-bold text-slate-700 truncate">{x.name}</span><span className="text-slate-500 font-semibold shrink-0 ml-3">{x.average} ★ • {x.count}</span></div>
+                  <Bar value={(x.average / 5) * 100} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
+
+      <Toolbar search={search} onSearch={setSearch} placeholder="Search employee or department">
+        {d.periods.length > 0 && (
+          <select value={period} onChange={(e) => setPeriod(e.target.value)} className={selectCls}>
+            <option value="">All periods</option>
+            {d.periods.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
+      </Toolbar>
+      <ErrorBanner message={error} onRetry={() => load()} />
+
+      <DataPanel
+        loading={loading} rows={visible} icon={Trophy}
+        empty={["No ratings yet", "Ratings appear after managers complete appraisals."]}
+        onOpen={setViewing}
+        menu={(a) => [{ label: "View review", icon: Eye, run: () => setViewing(a) }]}
+        cols={[
+          { h: "Employee", cell: (a) => <Person p={a.employee} /> },
+          { h: "Designation", cell: (a) => a.employee?.designation || "—" },
+          { h: "Period", cell: (a) => <span className="font-mono font-semibold text-slate-700">{a.reviewPeriod}</span> },
+          { h: "Rating", cell: (a) => <span className="inline-flex items-center gap-2"><Stars value={a.rating} size={15} /><b className="font-mono text-slate-800">{a.rating}.0</b><span className="text-[11px] text-slate-400">{a.ratingLabel}</span></span> },
+        ]}
+        card={(a) => (
+          <div className="space-y-2.5">
+            <Person p={a.employee} sub={`${a.reviewPeriod} • ${a.employee?.designation || ""}`} />
+            <div className="flex items-center gap-2"><Stars value={a.rating} size={15} /><b className="font-mono text-slate-800 text-sm">{a.rating}.0</b><span className="text-[11px] text-slate-400">{a.ratingLabel}</span></div>
+          </div>
+        )}
+      />
+
+      {viewing && <AppraisalDetail a={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }

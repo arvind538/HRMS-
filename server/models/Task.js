@@ -14,6 +14,8 @@ const taskSchema = new mongoose.Schema(
         },
         dueDate: { type: Date },
         completedAt: { type: Date },
+        startDate: { type: Date },
+        estimatedHours: { type: Number, min: 0, max: 10000 },
 
         // Overall progress (0-100), updated by the employee every day
         progress: { type: Number, min: 0, max: 100, default: 0 },
@@ -42,6 +44,7 @@ const taskSchema = new mongoose.Schema(
             reviewedAt: { type: Date },
             reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
         },
+
     },
     { timestamps: true }
 );

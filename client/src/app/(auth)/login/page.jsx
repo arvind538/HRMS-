@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Mail, Lock, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { toast } from "react-toastify";
 import { useAuth } from "@/context/AuthContext";
 import AuthShell, { AuthField, AuthButton } from "@/components/auth/AuthShell";
@@ -10,15 +10,26 @@ import AuthShell, { AuthField, AuthButton } from "@/components/auth/AuthShell";
 const REMEMBER_KEY = "hrms_remember_email";
 const EMAIL_REGEX = /^\S+@\S+\.\S+$/;
 
+const friendlyError = (err) => {
+    if (err?.response?.status === 401) return "Email or Password is incorrect. Please check and try again.";
+    if (err?.response?.status === 403) return err?.response?.data?.message || "Your account is closed. Contact the admin.";
+    if (err?.response?.status === 429) return "Too many attempts have been made. Try again after a while.";
+    if (err?.response?.status >= 500) return "There is some problem with the server.Try again after a while";
+    if (err?.code === "ERR_NETWORK") return "Unable to connect to the server. Please check your internet or the server.";
+    if (err?.code === "ECONNABORTED") return "The server did not respond in time. Try again.";
+    return err?.response?.data?.message || err?.message || "Login failed. Try again.";
+};
+
 export default function LoginPage() {
     const { login } = useAuth();
     const [form, setForm] = useState({ email: "", password: "" });
     const [remember, setRemember] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [errors, setErrors] = useState({});
+    const [formError, setFormError] = useState("");
     const [loading, setLoading] = useState(false);
 
-    /* Fill the saved email if "Remember me" was used earlier */
+    /* Saved email fill karo agar "Remember me" pehle use hua tha */
     useEffect(() => {
         try {
             const saved = localStorage.getItem(REMEMBER_KEY);
@@ -32,7 +43,11 @@ export default function LoginPage() {
     const handleChange = (e) => {
         const { name, value } = e.target;
         setErrors((prev) => ({ ...prev, [name]: "" }));
-        setForm((prev) => ({ ...prev, [name]: name === "email" ? value.replace(/\s/g, "") : value }));
+        setFormError("");
+        setForm((prev) => ({
+            ...prev,
+            [name]: name === "email" ? value.replace(/\s/g, "") : value,
+        }));
     };
 
     const handleSubmit = async (e) => {
@@ -40,37 +55,33 @@ export default function LoginPage() {
         if (loading) return;
 
         const email = form.email.trim().toLowerCase();
+        const password = form.password;
+
         const next = {};
         if (!email) next.email = "Email address is required";
         else if (!EMAIL_REGEX.test(email)) next.email = "Please enter a valid email address";
-        if (!form.password) next.password = "Password is required";
+        if (!password) next.password = "Password is required";
 
         setErrors(next);
+        setFormError("");
         if (Object.keys(next).length) return;
 
         setLoading(true);
         try {
-            await login(email, form.password);
+            await login(email, password);
+
             try {
                 if (remember) localStorage.setItem(REMEMBER_KEY, email);
                 else localStorage.removeItem(REMEMBER_KEY);
             } catch { }
+
             toast.success("Login successful!");
         } catch (err) {
-            const backendErrors = err?.response?.data?.errors;
-            if (backendErrors?.length) {
-                const map = {};
-                backendErrors.forEach((item) => {
-                    map[item.field] = item.message;
-                });
-                setErrors(map);
-                toast.error("Please fix the errors below.");
-            } else {
-                toast.error(
-                    err?.response?.data?.message ||
-                    (err?.response ? "Invalid email or password." : "Unable to reach the server. Please try again.")
-                );
-            }
+            /* Error aane par button wapas enable hota hai, password khali hota hai aur focus wahin jata hai */
+            const message = friendlyError(err);
+            setFormError(message);
+            setForm((prev) => ({ ...prev, password: "" }));
+            setTimeout(() => document.getElementById("password")?.focus(), 0);
         } finally {
             setLoading(false);
         }
@@ -83,6 +94,16 @@ export default function LoginPage() {
             footer="Don't have an account? Please contact your HR or admin."
         >
             <form onSubmit={handleSubmit} noValidate className="space-y-5">
+                {formError && (
+                    <div
+                        role="alert"
+                        className="flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm font-medium text-rose-700"
+                    >
+                        <AlertCircle size={17} className="mt-0.5 shrink-0 text-rose-500" />
+                        <span>{formError}</span>
+                    </div>
+                )}
+
                 <AuthField
                     id="email"
                     name="email"
@@ -95,6 +116,7 @@ export default function LoginPage() {
                     value={form.email}
                     onChange={handleChange}
                     error={errors.email}
+                    disabled={loading}
                 />
 
                 <AuthField
@@ -108,6 +130,7 @@ export default function LoginPage() {
                     value={form.password}
                     onChange={handleChange}
                     error={errors.password}
+                    disabled={loading}
                     right={
                         <button
                             type="button"
@@ -126,6 +149,7 @@ export default function LoginPage() {
                             type="checkbox"
                             checked={remember}
                             onChange={(e) => setRemember(e.target.checked)}
+                            disabled={loading}
                             className="h-4 w-4 rounded border-slate-300 accent-indigo-600"
                         />
                         Remember me
@@ -144,134 +168,3 @@ export default function LoginPage() {
 }
 
 
-
-// "use client";
-// import { useState } from "react";
-// import Link from "next/link";
-// import { useAuth } from "@/context/AuthContext";
-// import { Loader2, Eye, EyeOff, LayoutGrid, Mail, Lock } from "lucide-react";
-// import { toast } from "react-toastify";
-
-// export default function LoginPage() {
-//     const { login } = useAuth();
-//     const [form, setForm] = useState({ email: "", password: "" });
-//     const [showPassword, setShowPassword] = useState(false);
-//     const [fieldErrors, setFieldErrors] = useState({});
-//     const [loading, setLoading] = useState(false);
-
-//     const handleChange = (e) => {
-//         setFieldErrors((prev) => ({ ...prev, [e.target.name]: "" }));
-//         setForm({ ...form, [e.target.name]: e.target.value });
-//     };
-
-//     const handleSubmit = async (e) => {
-//         e.preventDefault();
-//         setFieldErrors({});
-//         setLoading(true);
-
-//         try {
-//             await login(form.email, form.password);
-//             toast.success("Login successful!");
-//         } catch (err) {
-//             const backendErrors = err.response?.data?.errors;
-//             if (backendErrors?.length) {
-//                 const errorMap = {};
-//                 backendErrors.forEach((e) => {
-//                     errorMap[e.field] = e.message;
-//                 });
-//                 setFieldErrors(errorMap);
-//                 toast.error("Please fix the errors below");
-//             } else {
-//                 toast.error(err.response?.data?.message || "Invalid email ya password");
-//             }
-//         } finally {
-//             setLoading(false);
-//         }
-//     };
-
-//     return (
-//         <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-100 to-slate-100 px-4 py-10">
-//             <div className="w-full max-w-md">
-//                 {/* Card */}
-//                 <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100 p-6 sm:p-8">
-//                     {/* Brand */}
-//                     <div className="flex items-center gap-2.5 justify-center mb-8">
-//                         <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-200">
-//                             <LayoutGrid size={20} />
-//                         </div>
-//                         <span className="text-xl font-bold text-slate-900 tracking-tight">HRMS Portal</span>
-//                     </div>
-//                     <h2 className="text-xl font-bold text-slate-900 mb-1">Welcome to back</h2>
-//                     <p className="text-sm text-slate-500 mb-6">Log in to access your dashboard.</p>
-
-//                     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-//                         {/* Email */}
-//                         <div>
-//                             <label className="text-sm font-medium text-slate-700">Email</label>
-//                             <div className="relative mt-1.5">
-//                                 <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-//                                 <input
-//                                     type="email"
-//                                     value={form.email}
-//                                     onChange={(e) => handleChange({ target: { name: "email", value: e.target.value } })}
-//                                     className={`w-full pl-10 pr-3.5 py-2.5 border rounded-xl text-sm outline-none transition-shadow focus:ring-2 ${fieldErrors.email
-//                                         ? "border-red-300 focus:ring-red-500"
-//                                         : "border-slate-200 focus:ring-indigo-500 focus:border-indigo-500"
-//                                         }`}
-//                                     placeholder="you@company.com"
-//                                 />
-//                             </div>
-//                             {fieldErrors.email && (
-//                                 <p className="text-xs text-red-500 mt-1">{fieldErrors.email}</p>
-//                             )}
-//                         </div>
-
-//                         {/* Password */}
-//                         <div>
-//                             <label className="text-sm font-medium text-slate-700">Password</label>
-//                             <div className="relative mt-1.5">
-//                                 <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-//                                 <input
-//                                     type={showPassword ? "text" : "password"}
-//                                     value={form.password}
-//                                     onChange={(e) => handleChange({ target: { name: "password", value: e.target.value } })}
-//                                     className={`w-full pl-10 pr-10 py-2.5 border rounded-xl text-sm outline-none transition-shadow focus:ring-2 ${fieldErrors.password
-//                                         ? "border-red-300 focus:ring-red-500"
-//                                         : "border-slate-200 focus:ring-indigo-500 focus:border-indigo-500"
-//                                         }`}
-//                                     placeholder="••••••••"
-//                                 />
-//                                 <button
-//                                     type="button"
-//                                     onClick={() => setShowPassword(!showPassword)}
-//                                     className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-//                                 >
-//                                     {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-//                                 </button>
-//                             </div>
-//                             {fieldErrors.password && (
-//                                 <p className="text-xs text-red-500 mt-1">{fieldErrors.password}</p>
-//                             )}
-//                         </div>
-
-//                         <button
-//                             type="submit"
-//                             disabled={loading}
-//                             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 disabled:opacity-60 transition-colors shadow-sm shadow-indigo-200"
-//                         >
-//                             {loading && <Loader2 size={16} className="animate-spin" />}
-//                             {loading ? "Logging in..." : "Login"}
-//                         </button>
-
-//                         {/* <p className="text-sm text-slate-500 text-center mt-6">
-//                             Don't have an account?{" "}
-//                             <Link href="/register" className="text-indigo-600 font-semibold hover:text-indigo-700">
-//                                 Register here
-//                             </Link>
-//                         </p> */}
-//                     </form>
-//                 </div>
-//             </div>
-//         </div>
-//     );
-// }

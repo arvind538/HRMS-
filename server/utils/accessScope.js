@@ -1,171 +1,159 @@
 const mongoose = require("mongoose");
-const User = require("../models/User");
 const Employee = require("../models/Employee");
-
-const TZ = "Asia/Kolkata";
-const DAY_MS = 24 * 60 * 60 * 1000;
-const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-const lower = (v) => String(v || "").trim().toLowerCase();
-const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const pad2 = (n) => String(n).padStart(2, "0");
-
-/* ------------------------- dates (India time) ------------------------- */
-
-const ymdIST = (value = new Date()) => new Date(value).toLocaleDateString("en-CA", { timeZone: TZ });
-const dayStartIST = (ymd) => new Date(`${ymd}T00:00:00.000+05:30`);
-
-const dayRangeIST = (ymd) => {
-    let day = YMD_RE.test(String(ymd || "")) ? String(ymd) : ymdIST();
-    let start = dayStartIST(day);
-    if (Number.isNaN(start.getTime())) {
-        day = ymdIST();
-        start = dayStartIST(day);
-    }
-    return { ymd: day, start, end: new Date(start.getTime() + DAY_MS) };
-};
-
-const monthRangeIST = (month, year) => {
-    const m = Number(month);
-    const y = Number(year);
-    const start = dayStartIST(`${y}-${pad2(m)}-01`);
-    const end = dayStartIST(`${m === 12 ? y + 1 : y}-${pad2(m === 12 ? 1 : m + 1)}-01`);
-    return { start, end };
-};
-
-/* ------------------------------- roles -------------------------------- */
+const User = require("../models/User");
+const { myEmployee, teamFilter, lower } = require("./teamScope");
+const base = require("./accessScopeBase");
 
 const roleOf = (req) => lower(req.user?.role);
-const isPrivileged = (req) => ["admin", "hr"].includes(roleOf(req));
+const isPrivileged = (req) => ["admin", "hr"].includes(roleOf(req)); // admin and HR see everything
 
-/*
- * Which ids can this user see?  null = everyone (admin, HR).
- * Attendance and leave records use the User id, payroll uses the Employee id,
- * so both ids are returned (older records may hold either one).
- */
+/* null = sees everything. Otherwise a list of ids (employee ids and login ids) the person may see. */
 async function getScopeIds(req) {
-    const role = roleOf(req);
-    if (role === "admin" || role === "hr") return null;
+    if (!req.user) return [];
+    if (isPrivileged(req)) return null;
+    if (req._scopeIds) return req._scopeIds;
 
-    const me = String(req.user._id);
-    const myEmployeeId = req.user.employee ? String(req.user.employee._id || req.user.employee) : "";
-    const own = [me, myEmployeeId].filter(Boolean);
+    const ids = new Set([String(req.user._id)]);
+    const me = await myEmployee(req);
+    if (me) ids.add(String(me._id));
 
-    if (role !== "manager") return own;
-
-    const profile = myEmployeeId ? await Employee.findById(myEmployeeId).select("name department").lean() : null;
-    const myName = String(profile?.name || req.user.name || "").trim();
-
-    const conditions = [];
-    if (myName) conditions.push({ reportingManager: new RegExp(`^${escapeRegex(myName)}$`, "i") });
-    if (profile?.department) conditions.push({ department: profile.department });
-    if (!conditions.length) return own;
-
-    const team = await Employee.find({ $or: conditions }).select("_id").lean();
-    const teamIds = team.map((t) => t._id);
-    const users = await User.find({ employee: { $in: teamIds } }).select("_id").lean();
-
-    return [...new Set([...own, ...teamIds.map(String), ...users.map((u) => String(u._id))])];
+    if (roleOf(req) === "manager" && me) {
+        const team = await Employee.find(teamFilter(me)).select("_id email loginEmail").lean();
+        const emails = team.flatMap((t) => [t.email, t.loginEmail]).map(lower).filter(Boolean);
+        team.forEach((t) => ids.add(String(t._id)));
+        if (team.length) {
+            const users = await User.find({
+                $or: [{ employee: { $in: team.map((t) => t._id) } }, { email: { $in: emails } }],
+            })
+                .select("_id")
+                .lean();
+            users.forEach((u) => ids.add(String(u._id)));
+        }
+    }
+    req._scopeIds = [...ids];
+    return req._scopeIds;
 }
 
-const inScope = (ids, id) => ids === null || ids.includes(String(id?._id || id || ""));
+const inScope = (scope, id) => scope === null || scope.includes(String(id?._id || id));
 
-/* ------------------------------- ids ---------------------------------- */
-
-/* A User id or an Employee id goes in, every id of the same person comes out */
-async function expandIds(id) {
-    const out = new Set([String(id)]);
-    if (!mongoose.isValidObjectId(id)) return [...out];
-    const user = await User.findById(id).select("employee").lean();
-    if (user?.employee) out.add(String(user.employee));
-    const users = await User.find({ employee: id }).select("_id").lean();
-    users.forEach((u) => out.add(String(u._id)));
-    return [...out];
-}
-
-/* Employee id or User id in, User id out (null when the employee has no login) */
-async function resolveUserId(id) {
+/* a task points to a login id. This accepts a login id or an employee id and returns the login id (or null). */
+async function resolveUserId(v) {
+    const id = String(v?._id || v || "");
     if (!mongoose.isValidObjectId(id)) return null;
-    const user = await User.findById(id).select("_id").lean();
-    if (user) return String(user._id);
-    const linked = await User.findOne({ employee: id }).select("_id").lean();
-    return linked ? String(linked._id) : null;
+
+    const direct = await User.findOne({ _id: id, isActive: { $ne: false } }).select("_id").lean();
+    if (direct) return String(direct._id);
+
+    const byRef = await User.findOne({ employee: id, isActive: { $ne: false } }).select("_id").lean();
+    if (byRef) return String(byRef._id);
+
+    const emp = await Employee.findById(id).select("email loginEmail").lean();
+    if (!emp) return null;
+
+    const emails = [emp.loginEmail, emp.email].map(lower).filter(Boolean);
+    const u = emails.length
+        ? await User.findOne({ email: { $in: emails }, isActive: { $ne: false } }).select("_id").lean()
+        : null;
+    return u ? String(u._id) : null;
 }
 
-/* ---------------- employee details inside any record ------------------ */
+/* fields used when the caller does not pass any (this was the cause of the crash) */
+const DEFAULT_PEOPLE_FIELDS = ["employee", "user", "assignedTo", "assignedBy", "createdBy", "approvedBy"];
 
-const personFromUser = (u) => ({
-    _id: u._id,
-    name: u.employee?.name || u.name || "",
-    email: u.email || "",
-    role: u.role || "",
-    employeeId: u.employee?.employeeId || "",
-    designation: u.employee?.designation || "",
-    department: u.employee?.department || "",
-});
-
-const personFromEmployee = (e) => ({
-    _id: e._id,
-    name: e.name || "",
-    email: e.loginEmail || e.email || "",
-    role: lower(e.role),
-    employeeId: e.employeeId || "",
-    designation: e.designation || "",
-    department: e.department || "",
-});
+const isPlainRef = (x) => x && typeof x === "object" && !(x instanceof mongoose.Types.ObjectId);
 
 /*
- * Replaces the id fields (for example "employee") of every record with a small object:
- * { _id, name, email, role, employeeId, designation, department }
- */
-async function attachPeople(records, paths = ["employee"]) {
-    const list = records.map((r) => (typeof r.toObject === "function" ? r.toObject() : r));
+  Replaces ids in the given fields by { _id, userId, name, email, role, employeeId }.
+  - attachPeople(docs)                    -> uses DEFAULT_PEOPLE_FIELDS
+  - attachPeople(docs, "employee")        -> single field
+  - attachPeople(docs, ["employee","x"])  -> many fields
+  An id can be a login (User) id OR an Employee id. Both work.
+  Returns an array if you passed an array, otherwise a single object.
+*/
+async function attachPeople(docs, fields = DEFAULT_PEOPLE_FIELDS) {
+    if (!docs) return Array.isArray(docs) ? [] : docs;
+
+    const wasArray = Array.isArray(docs);
+    const fieldList = (Array.isArray(fields) ? fields : [fields]).filter(Boolean);
+    const list = (wasArray ? docs : [docs]).map((d) => (d && d.toObject ? d.toObject() : { ...d }));
+    const finish = () => (wasArray ? list : list[0]);
+
+    if (!fieldList.length) return finish();
+
+    /* 1. collect every referenced id */
     const ids = new Set();
-    list.forEach((r) =>
-        paths.forEach((p) => {
-            const id = String(r[p]?._id || r[p] || "");
-            if (mongoose.isValidObjectId(id)) ids.add(id);
-        })
+    list.forEach((d) =>
+        fieldList.forEach((f) =>
+            [].concat(d[f] || []).forEach((x) => {
+                const id = String(x?._id || x || "");
+                if (mongoose.isValidObjectId(id)) ids.add(id);
+            })
+        )
     );
-    if (!ids.size) return list;
+    if (!ids.size) return finish();
+    const idList = [...ids];
 
-    const idArr = [...ids];
-    const users = await User.find({ _id: { $in: idArr } })
+    /* 2. look them up as login ids and as employee ids */
+    const users = await User.find({ $or: [{ _id: { $in: idList } }, { employee: { $in: idList } }] })
         .select("name email role employee")
-        .populate("employee", "employeeId name designation department")
+        .populate("employee", "employeeId")
         .lean();
-    const map = new Map(users.map((u) => [String(u._id), personFromUser(u)]));
 
-    // Older records can hold an Employee id instead of a User id
-    const missing = idArr.filter((id) => !map.has(id));
+    const map = new Map();
+    users.forEach((u) => {
+        const empId = u.employee?._id ? String(u.employee._id) : u.employee ? String(u.employee) : "";
+        const info = {
+            userId: u._id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            employeeId: u.employee?.employeeId || "",
+        };
+        map.set(String(u._id), { _id: u._id, ...info });
+        if (empId) map.set(empId, { _id: empId, ...info });
+    });
+
+    /* 3. fallback: ids that are only Employee ids (no login account) */
+    const missing = idList.filter((id) => !map.has(id));
     if (missing.length) {
-        const employees = await Employee.find({ _id: { $in: missing } })
-            .select("employeeId name email loginEmail role designation department")
+        const emps = await Employee.find({ _id: { $in: missing } })
+            .select("name email loginEmail employeeId")
             .lean();
-        employees.forEach((e) => map.set(String(e._id), personFromEmployee(e)));
+        emps.forEach((e) =>
+            map.set(String(e._id), {
+                _id: e._id,
+                userId: null,
+                name: e.name,
+                email: e.email || e.loginEmail,
+                role: "",
+                employeeId: e.employeeId || "",
+            })
+        );
     }
 
-    return list.map((r) => {
-        const copy = { ...r };
-        paths.forEach((p) => {
-            const id = String(r[p]?._id || r[p] || "");
-            if (id) copy[p] = map.get(id) || { _id: id };
-        });
-        return copy;
-    });
+    /* 4. swap ids with the people info */
+    const swap = (x) => {
+        if (!x) return x;
+        const found = map.get(String(x._id || x));
+        if (!found) return x;
+        return isPlainRef(x) ? { ...found, ...x } : found; // keep already-populated fields
+    };
+
+    list.forEach((d) =>
+        fieldList.forEach((f) => {
+            if (d[f]) d[f] = Array.isArray(d[f]) ? d[f].map(swap) : swap(d[f]);
+        })
+    );
+
+    return finish();
 }
 
 module.exports = {
-    TZ,
-    ymdIST,
-    dayStartIST,
-    dayRangeIST,
-    monthRangeIST,
+    ...base,
     roleOf,
     isPrivileged,
     getScopeIds,
     inScope,
-    expandIds,
-    resolveUserId,
     attachPeople,
+    resolveUserId,
 };

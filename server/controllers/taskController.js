@@ -2,7 +2,10 @@ const mongoose = require("mongoose");
 const Task = require("../models/Task");
 const { roleOf, isPrivileged, getScopeIds, inScope, attachPeople, resolveUserId } = require("../utils/accessScope");
 const { todayIST } = require("../utils/Shiftutils");
-
+const { notify } = require("../utils/notify");
+const tell = async (to, title, message, exclude) => {
+    try { if (to) await notify([to], { type: "general", title, message, link: "/tasks", exclude }); } catch { /* a failed notification never stops the work */ }
+};
 const PRIORITIES = ["low", "medium", "high", "urgent"];
 const STATUSES = ["pending", "in-progress", "submitted", "completed", "cancelled"];
 // "submitted" can only be set through the submit endpoint, and "completed" by an assignee only through review
@@ -68,6 +71,10 @@ exports.getTasks = async (req, res, next) => {
     }
 };
 
+
+
+
+
 // @route POST /api/tasks
 exports.createTask = async (req, res, next) => {
     try {
@@ -75,6 +82,12 @@ exports.createTask = async (req, res, next) => {
         const title = text(req.body.title, 150);
         const priority = String(req.body.priority || "medium").toLowerCase();
         const due = parseDue(req.body.dueDate);
+
+        const start = parseDue(req.body.startDate);
+        if (start === undefined) return res.status(400).json({ message: "Invalid start date." });
+        if (start && due && due < start) return res.status(400).json({ message: "The due date cannot be before the start date." });
+        const hours = req.body.estimatedHours === null || req.body.estimatedHours === undefined || req.body.estimatedHours === "" ? undefined : Number(req.body.estimatedHours);
+        if (hours !== undefined && (!Number.isFinite(hours) || hours < 0 || hours > 10000)) return res.status(400).json({ message: "Invalid estimated hours." });
 
         if (title.length < 2) return res.status(400).json({ message: "Please enter a task title." });
         if (!PRIORITIES.includes(priority)) return res.status(400).json({ message: "Invalid priority." });
@@ -93,6 +106,8 @@ exports.createTask = async (req, res, next) => {
             assignee = resolved;
         }
 
+
+
         const task = await Task.create({
             title,
             description: text(req.body.description, 2000),
@@ -100,7 +115,10 @@ exports.createTask = async (req, res, next) => {
             assignedBy: req.user._id,
             priority,
             dueDate: due || undefined,
+            startDate: start || undefined, estimatedHours: hours,
         });
+
+
 
         await respond(res, task, 201);
     } catch (err) {
@@ -126,6 +144,16 @@ exports.updateTask = async (req, res, next) => {
 
         // The person who created the task (and admin / HR) can edit everything. The assignee can change the status.
         if (reviewer) {
+            if (req.body.startDate !== undefined) {
+                const s = parseDue(req.body.startDate);
+                if (s === undefined) return res.status(400).json({ message: "Invalid start date." });
+                task.startDate = s || undefined;
+            }
+            if (req.body.estimatedHours !== undefined) {
+                const h = req.body.estimatedHours === null || req.body.estimatedHours === "" ? undefined : Number(req.body.estimatedHours);
+                if (h !== undefined && (!Number.isFinite(h) || h < 0 || h > 10000)) return res.status(400).json({ message: "Invalid estimated hours." });
+                task.estimatedHours = h;
+            }
             if (req.body.title !== undefined) {
                 const title = text(req.body.title, 150);
                 if (title.length < 2) return res.status(400).json({ message: "Please enter a task title." });
@@ -247,6 +275,7 @@ exports.submitTask = async (req, res, next) => {
         }
 
         await task.save();
+
         await respond(res, task);
     } catch (err) {
         next(err);
@@ -309,169 +338,3 @@ exports.deleteTask = async (req, res, next) => {
 };
 
 
-
-
-
-
-
-
-
-
-// const mongoose = require("mongoose");
-// const Task = require("../models/Task");
-// const { roleOf, isPrivileged, getScopeIds, inScope, attachPeople, resolveUserId } = require("../utils/accessScope");
-
-// const PRIORITIES = ["low", "medium", "high", "urgent"];
-// const STATUSES = ["pending", "in-progress", "completed", "cancelled"];
-
-// const text = (v, max) => String(v ?? "").trim().slice(0, max);
-// const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-// /* null = no due date, undefined = invalid date */
-// const parseDue = (v) => {
-//     if (!v) return null;
-//     const d = new Date(`${String(v).slice(0, 10)}T00:00:00.000+05:30`);
-//     return Number.isNaN(d.getTime()) ? undefined : d;
-// };
-
-// // @route GET /api/tasks?status=&priority=&assignedTo=&q=
-// exports.getTasks = async (req, res, next) => {
-//     try {
-//         const scope = await getScopeIds(req);
-//         const and = [];
-
-//         if (scope !== null) {
-//             and.push({ $or: [{ assignedTo: { $in: scope } }, { assignedBy: req.user._id }] });
-//         }
-
-//         const { status, priority, assignedTo, q } = req.query;
-//         if (status && STATUSES.includes(String(status))) and.push({ status: String(status) });
-//         if (priority && PRIORITIES.includes(String(priority))) and.push({ priority: String(priority) });
-//         if (q) and.push({ title: new RegExp(escapeRegex(q), "i") });
-//         if (assignedTo) {
-//             if (!mongoose.isValidObjectId(assignedTo) || !inScope(scope, assignedTo)) {
-//                 return res.status(200).json({ success: true, count: 0, tasks: [], data: [] });
-//             }
-//             and.push({ assignedTo });
-//         }
-
-//         const found = await Task.find(and.length ? { $and: and } : {}).sort({ createdAt: -1 }).limit(500);
-//         const tasks = await attachPeople(found, ["assignedTo", "assignedBy"]);
-
-//         res.status(200).json({ success: true, count: tasks.length, tasks, data: tasks });
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route POST /api/tasks
-// exports.createTask = async (req, res, next) => {
-//     try {
-//         const canAssign = ["admin", "hr", "manager"].includes(roleOf(req));
-//         const title = text(req.body.title, 150);
-//         const priority = String(req.body.priority || "medium").toLowerCase();
-//         const due = parseDue(req.body.dueDate);
-
-//         if (title.length < 2) return res.status(400).json({ message: "Please enter a task title." });
-//         if (!PRIORITIES.includes(priority)) return res.status(400).json({ message: "Invalid priority." });
-//         if (due === undefined) return res.status(400).json({ message: "Invalid due date." });
-
-//         let assignee = String(req.user._id); // employees can create tasks only for themselves
-//         if (canAssign && req.body.assignedTo) {
-//             const resolved = await resolveUserId(req.body.assignedTo);
-//             if (!resolved) {
-//                 return res.status(400).json({ message: "This employee does not have a login account yet, so a task cannot be assigned." });
-//             }
-//             const scope = await getScopeIds(req);
-//             if (!inScope(scope, resolved)) {
-//                 return res.status(403).json({ message: "You can assign tasks only to your own team." });
-//             }
-//             assignee = resolved;
-//         }
-
-//         const task = await Task.create({
-//             title,
-//             description: text(req.body.description, 2000),
-//             assignedTo: assignee,
-//             assignedBy: req.user._id,
-//             priority,
-//             dueDate: due || undefined,
-//         });
-
-//         const [out] = await attachPeople([task], ["assignedTo", "assignedBy"]);
-//         res.status(201).json(out);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route PUT /api/tasks/:id
-// exports.updateTask = async (req, res, next) => {
-//     try {
-//         if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ message: "Task not found." });
-
-//         const task = await Task.findById(req.params.id);
-//         if (!task) return res.status(404).json({ message: "Task not found." });
-
-//         const me = String(req.user._id);
-//         const isAssignee = String(task.assignedTo) === me;
-//         const isAssigner = String(task.assignedBy) === me;
-//         const privileged = isPrivileged(req);
-
-//         if (!privileged && !isAssignee && !isAssigner) {
-//             return res.status(403).json({ message: "You are not allowed to change this task." });
-//         }
-
-//         // The person who created the task (and admin / HR) can edit everything. The assignee can change the status.
-//         if (privileged || isAssigner) {
-//             if (req.body.title !== undefined) {
-//                 const title = text(req.body.title, 150);
-//                 if (title.length < 2) return res.status(400).json({ message: "Please enter a task title." });
-//                 task.title = title;
-//             }
-//             if (req.body.description !== undefined) task.description = text(req.body.description, 2000);
-//             if (req.body.priority !== undefined) {
-//                 const priority = String(req.body.priority).toLowerCase();
-//                 if (!PRIORITIES.includes(priority)) return res.status(400).json({ message: "Invalid priority." });
-//                 task.priority = priority;
-//             }
-//             if (req.body.dueDate !== undefined) {
-//                 const due = parseDue(req.body.dueDate);
-//                 if (due === undefined) return res.status(400).json({ message: "Invalid due date." });
-//                 task.dueDate = due || undefined;
-//             }
-//         }
-
-//         if (req.body.status !== undefined) {
-//             const status = String(req.body.status);
-//             if (!STATUSES.includes(status)) return res.status(400).json({ message: "Invalid status." });
-//             task.status = status;
-//             task.completedAt = status === "completed" ? new Date() : undefined;
-//         }
-
-//         await task.save();
-//         const [out] = await attachPeople([task], ["assignedTo", "assignedBy"]);
-//         res.status(200).json(out);
-//     } catch (err) {
-//         next(err);
-//     }
-// };
-
-// // @route DELETE /api/tasks/:id
-// exports.deleteTask = async (req, res, next) => {
-//     try {
-//         if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ message: "Task not found." });
-
-//         const task = await Task.findById(req.params.id);
-//         if (!task) return res.status(404).json({ message: "Task not found." });
-
-//         if (!isPrivileged(req) && String(task.assignedBy) !== String(req.user._id)) {
-//             return res.status(403).json({ message: "Only the person who created the task, or an admin, can delete it." });
-//         }
-
-//         await task.deleteOne();
-//         res.status(200).json({ success: true, message: "Task deleted successfully." });
-//     } catch (err) {
-//         next(err);
-//     }
-// };

@@ -38,7 +38,7 @@ node_modules
 .env.local
 build
 dist
-
+README.md
 # vercel
 .render
 

@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState, Suspense } from "react";
@@ -26,7 +25,8 @@ import {
     Phone,
     CreditCard,
     MapPin,
-    Hash,
+    Search,
+    LocateFixed,
     RefreshCw,
     KeyRound,
     Eye,
@@ -46,6 +46,11 @@ import { useAuth } from "@/context/AuthContext";
 /* -------------------------------------------------------------------------- */
 
 const COMPANY_NAME = "HRMS Portal"; // shown in the login details message. Change it to your company name.
+const ID_PREFIX = "FPS"; // employee ids look like FPS0001, FPS0002 ... (the server assigns them)
+
+const PHONE_DIGITS = 10; // phone number length (country code + mobile number, for example 919876543210)
+const PHONE_REGEX = new RegExp(`^[1-9]\\d{${PHONE_DIGITS - 1}}$`);
+const INDIA_BBOX = "68.1,6.7,97.5,35.7"; // minLon,minLat,maxLon,maxLat: location search stays inside India
 
 const GENDER_OPTIONS = [
     { value: "male", label: "Male", sub: "Identify as male" },
@@ -66,15 +71,8 @@ const EMPLOYMENT_TYPES = [
 
 const EMPLOYEE_STATUS_OPTIONS = [
     "Active",
-    "Probation",
-    "Notice Period",
-    "On Leave",
-    "Permanent",
-    "Freelancer",
     "Inactive",
 ];
-
-const REPORTING_MANAGER_OPTIONS = ["Sanjay Sir", "Nitesh Sir", "Vimal Sir", "Admin"];
 
 /* Access role of the login account. "Admin" is shown only when an existing admin is being edited. */
 const ROLE_OPTIONS = ["Employee", "Manager", "HR"];
@@ -136,19 +134,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB (original file, before compressi
 
 /* Fields validated at each step */
 const STEP_FIELDS = {
-    1: [
-        "employeeId",
-        "profilePhotoData",
-        "firstName",
-        "lastName",
-        "email",
-        "phone",
-        "gender",
-        "address",
-        "city",
-        "state",
-        "pincode",
-    ],
+    1: ["employeeId", "firstName", "lastName", "email", "phone", "gender", "address", "city", "state", "pincode"],
     2: [
         "designation",
         "designationOther",
@@ -157,7 +143,6 @@ const STEP_FIELDS = {
         "employmentType",
         "employeeStatus",
         "reportingManager",
-        "reportingManagerOther",
         "dateOfJoining",
         "salary",
     ],
@@ -175,6 +160,9 @@ const AADHAAR_REGEX = /^[2-9]\d{11}$/;
 const PAN_REGEX = /^[A-Z]{5}\d{4}[A-Z]$/;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,32}$/;
 const PASSWORD_MESSAGE = "Password must be 8-32 characters with an uppercase letter, a lowercase letter and a number";
+const OBJECT_ID_REGEX = /^[a-f\d]{24}$/i;
+
+const isObjectId = (v) => OBJECT_ID_REGEX.test(String(v || ""));
 
 const nameField = (label, max = 30) =>
     z
@@ -187,15 +175,11 @@ const nameField = (label, max = 30) =>
 const oneOf = (list, message) => z.string().refine((v) => list.includes(v), message);
 
 const step1Schema = z.object({
+    /* the server assigns the ID, so an empty value is fine */
     employeeId: z
         .string()
         .trim()
-        .min(1, "Employee ID is required")
-        .regex(
-            /^[A-Za-z0-9-]{3,20}$/,
-            "Employee ID must be 3 to 20 characters (letters, numbers and hyphens only)"
-        ),
-    profilePhotoData: z.string().min(1, "Profile photo is required"),
+        .regex(/^([A-Za-z0-9-]{3,20})?$/, "Employee ID must be 3 to 20 characters (letters, numbers and hyphens only)"),
     firstName: nameField("First name"),
     lastName: nameField("Last name"),
     email: z
@@ -208,7 +192,7 @@ const step1Schema = z.object({
         .string()
         .trim()
         .min(1, "Phone number is required")
-        .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit mobile number starting with 6, 7, 8 or 9"),
+        .regex(PHONE_REGEX, `Enter a valid ${PHONE_DIGITS}-digit number with the country code (for example, 919876543210)`),
     gender: oneOf(
         GENDER_OPTIONS.map((g) => g.value),
         "Please select a gender"
@@ -234,8 +218,11 @@ const step2Schema = z
         departmentOther: z.string().optional(),
         employmentType: oneOf(EMPLOYMENT_TYPES, "Please select an employment type"),
         employeeStatus: oneOf(EMPLOYEE_STATUS_OPTIONS, "Please select an employee status"),
-        reportingManager: z.string().min(1, "Please select a reporting manager"),
-        reportingManagerOther: z.string().optional(),
+        /* Empty = no manager. Otherwise it must be a real employee id. */
+        reportingManager: z
+            .string()
+            .optional()
+            .refine((v) => !v || isObjectId(v), "Please select the reporting manager from the list"),
         dateOfJoining: z
             .string()
             .min(1, "Joining date is required")
@@ -266,15 +253,6 @@ const step2Schema = z
         };
         checkOther("designation", "designationOther", "designation");
         checkOther("department", "departmentOther", "department");
-
-        if (data.reportingManager === "Other") {
-            const value = (data.reportingManagerOther || "").trim();
-            if (value.length < 2) {
-                ctx.addIssue({ code: "custom", path: ["reportingManagerOther"], message: "Please enter the manager name" });
-            } else if (!NAME_REGEX.test(value)) {
-                ctx.addIssue({ code: "custom", path: ["reportingManagerOther"], message: "Manager name can contain only letters" });
-            }
-        }
     });
 
 const step3Schema = z.object({
@@ -319,6 +297,7 @@ const step4Schema = z.object({
         .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, "Enter a valid IFSC code (for example, SBIN0001234)"),
 });
 
+/* hasLogin = this employee already has a login account (then a blank password means "keep the current one") */
 const step5Schema = z
     .object({
         loginEmail: z
@@ -329,10 +308,10 @@ const step5Schema = z
             .email("Please enter a valid login email address"),
         password: z.string(),
         role: oneOf(ALL_ROLES, "Please select an access role"),
-        isEdit: z.boolean().optional(),
+        hasLogin: z.boolean().optional(),
     })
     .superRefine((data, ctx) => {
-        if (!data.isEdit && !data.password) {
+        if (!data.hasLogin && !data.password) {
             ctx.addIssue({ code: "custom", path: ["password"], message: "Password is required for the employee login" });
         } else if (data.password && !PASSWORD_REGEX.test(data.password)) {
             ctx.addIssue({ code: "custom", path: ["password"], message: PASSWORD_MESSAGE });
@@ -361,7 +340,6 @@ const clean = {
             .replace(/\s{2,}/g, " ")
             .slice(0, max),
     alnumUpper: (max) => (v) => v.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, max),
-    employeeId: (v) => v.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 20),
     email: (v) => v.replace(/\s/g, "").slice(0, 100),
     loginEmail: (v) => v.replace(/\s/g, "").toLowerCase().slice(0, 100),
     password: (v) => v.replace(/\s/g, "").slice(0, 32),
@@ -380,9 +358,15 @@ const clean = {
             .slice(0, max),
 };
 
+/* An old 10-digit mobile number becomes 91 + number. Anything longer is cut to the last PHONE_DIGITS digits. */
+const normalizePhone = (v) => {
+    const d = String(v || "").replace(/\D/g, "");
+    return d.length === 10 ? `91${d}` : d.slice(-PHONE_DIGITS);
+};
+
 const getEmployeeName = (employee) => {
     if (!employee) return "";
-    return employee.name || `${employee.firstName || ""} ${employee.lastName || ""}`.trim();
+    return employee.name || employee.fullName || `${employee.firstName || ""} ${employee.lastName || ""}`.trim();
 };
 
 const getLookupId = (item) => {
@@ -399,15 +383,27 @@ const getLookupLabel = (item) => {
     return item;
 };
 
-/* Generates the next employee ID from the highest existing EMP-### number */
+/* Next employee id from the highest existing FPS number: FPS0001, FPS0002 ... (old ids like EMP-001 are ignored) */
 const generateEmployeeId = (list) => {
+    const pattern = new RegExp(`^${ID_PREFIX}(\\d+)$`, "i");
     let max = 0;
     list.forEach((emp) => {
-        const match = /^EMP-(\d+)$/i.exec(String(emp?.employeeId || ""));
+        const match = pattern.exec(String(emp?.employeeId || ""));
         if (match) max = Math.max(max, Number(match[1]));
     });
-    const next = Math.max(max, list.length) + 1;
-    return `EMP-${String(next).padStart(3, "0")}`;
+    return `${ID_PREFIX}${String(max + 1).padStart(4, "0")}`;
+};
+
+/* The server knows every employee, so it gives the safest next id. If it is not available, the list is used. */
+const getNextEmployeeId = async (list) => {
+    try {
+        const res = await api.get("/employees/next-id");
+        const id = res?.data?.employeeId;
+        if (id) return String(id).toUpperCase();
+    } catch {
+        /* use the local list below */
+    }
+    return generateEmployeeId(list);
 };
 
 /* Random password: 12 characters, always has an uppercase letter, a lowercase letter and a number */
@@ -487,6 +483,137 @@ const compressImage = (file, maxSize = 1600, quality = 0.82) =>
         };
         reader.readAsDataURL(file);
     });
+
+/* ---------------------------- location helpers ---------------------------- */
+/* Photon (OpenStreetMap data) gives the suggestions. India Post gives the city and state of a pincode. */
+
+const fetchJson = async (url, { signal, timeout = 8000 } = {}) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    const onAbort = () => ctrl.abort();
+    signal?.addEventListener("abort", onAbort);
+    try {
+        const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: "application/json" } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+    } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+    }
+};
+
+const photonToLocation = (feature) => {
+    const p = feature?.properties || {};
+    const [lon, lat] = feature?.geometry?.coordinates || [];
+    const place = p.name && ![p.city, p.state, p.county].includes(p.name) ? p.name : "";
+    const street = [p.housenumber, p.street].filter(Boolean).join(" ");
+    const area = p.locality || p.district || "";
+    const city = p.city || p.county || p.district || "";
+    const pin = String(p.postcode || "").replace(/\D/g, "").slice(0, 6);
+    return {
+        id: `${p.osm_type || ""}${p.osm_id || `${lat},${lon}`}`,
+        line: [...new Set([place, street, area].filter(Boolean))].join(", "),
+        city,
+        state: p.state || "",
+        pincode: /^[1-9]\d{5}$/.test(pin) ? pin : "",
+        label: [...new Set([place, street, area, city, p.state, pin].filter(Boolean))].join(", "),
+    };
+};
+
+const photonSearch = async (query, signal) => {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=6&lang=en&bbox=${INDIA_BBOX}`;
+    const data = await fetchJson(url, { signal });
+    return (data?.features || [])
+        .filter((f) => !f.properties?.countrycode || f.properties.countrycode === "IN")
+        .map(photonToLocation)
+        .filter((r) => r.label);
+};
+
+const photonReverse = async (lat, lon) => {
+    const data = await fetchJson(`https://photon.komoot.io/reverse?lon=${lon}&lat=${lat}&lang=en`);
+    const feature = data?.features?.[0];
+    return feature ? photonToLocation(feature) : null;
+};
+
+const lookupPincode = async (pin) => {
+    const data = await fetchJson(`https://api.postalpincode.in/pincode/${pin}`);
+    const entry = Array.isArray(data) ? data[0] : null;
+    const office = entry?.Status === "Success" ? entry.PostOffice?.[0] : null;
+    return office ? { city: office.District || office.Block || "", state: office.State || "" } : null;
+};
+
+/* The data of ONE step, exactly as it is saved in the database */
+const buildStepPayload = (step, data) => {
+    const t = (v) => String(v ?? "").trim();
+    switch (step) {
+        case 1: {
+            const photo = data.profilePhotoData || data.avatar || "";
+            const id = t(data.employeeId).toUpperCase();
+            return {
+                ...(id ? { employeeId: id } : {}),
+                firstName: t(data.firstName),
+                lastName: t(data.lastName),
+                name: `${t(data.firstName)} ${t(data.lastName)}`.trim(),
+                email: t(data.email).toLowerCase(),
+                phone: normalizePhone(data.phone),
+                gender: data.gender,
+                timeZone: data.timeZone,
+                address: t(data.address),
+                city: t(data.city),
+                state: t(data.state),
+                pincode: t(data.pincode),
+                avatar: photo,
+                documents: { passportPhotoFileName: data.passportPhotoFileName || "", passportPhotoData: data.passportPhotoData || photo },
+            };
+        }
+        case 2:
+            return {
+                designation: data.designation === "Other" ? t(data.designationOther) : data.designation,
+                department: data.department === "Other" ? t(data.departmentOther) : data.department,
+                employmentType: data.employmentType,
+                employeeStatus: data.employeeStatus,
+                reportingManager: data.reportingManager || null, // the manager's employee id, or null for no manager
+                dateOfJoining: data.dateOfJoining,
+                salary: Number(data.salary) || 0,
+            };
+        case 3: {
+            const aadhaar = t(data.aadhaarNumber);
+            return {
+                nationalIdType: "Aadhaar Card",
+                nationalId: aadhaar,
+                idProofNumber: aadhaar,
+                aadhaarNumber: aadhaar,
+                panNumber: t(data.panNumber).toUpperCase(),
+                documents: {
+                    nationalIdFrontFileName: data.nationalIdFrontFileName,
+                    nationalIdFrontFileData: data.nationalIdFrontFileData,
+                    nationalIdBackFileName: data.nationalIdBackFileName,
+                    nationalIdBackFileData: data.nationalIdBackFileData,
+                    panCardFileName: data.panCardFileName,
+                    panCardFileData: data.panCardFileData,
+                },
+            };
+        }
+        case 4:
+            return {
+                bankDetails: {
+                    accountName: t(data.accountName),
+                    bankName: t(data.bankName),
+                    branchName: t(data.branchName),
+                    accountNumber: t(data.accountNumber),
+                    ifscCode: t(data.ifscCode).toUpperCase(),
+                },
+            };
+        case 5:
+            return {
+                loginEmail: t(data.loginEmail).toLowerCase(),
+                role: data.role,
+                ...(data.password ? { password: data.password } : {}), // blank = keep the current password
+            };
+        default:
+            return {};
+    }
+};
 
 /* -------------------------------------------------------------------------- */
 /* SUB-COMPONENTS                                                             */
@@ -751,16 +878,20 @@ function CredentialsModal({ data, onDone }) {
 /* MAIN FORM COMPONENT                                                        */
 /* -------------------------------------------------------------------------- */
 
-function EmployeeFormContent() {
+function EmployeeFormContent({ routeId, onDraftCreated }) {
     const router = useRouter();
-    const searchParams = useSearchParams();
-    const editId = searchParams.get("id");
+
+    /* the employee this page was opened for (?id=...). It never changes while this form is mounted. */
+    const initialEditId = useRef(routeId || "").current;
+    const isNew = !initialEditId;
 
     /* Login access (Step 5) belongs to the admin only. HR and managers never see it. */
     const { user: authUser } = useAuth();
     const isAdmin = String(authUser?.role || "").toLowerCase() === "admin";
     const STEPS = useMemo(() => (isAdmin ? ALL_STEPS : ALL_STEPS.filter((s) => s.step !== 5)), [isAdmin]);
     const LAST_STEP = STEPS.length;
+    const lastStepRef = useRef(LAST_STEP);
+    lastStepRef.current = LAST_STEP;
 
     const frontIdRef = useRef(null);
     const backIdRef = useRef(null);
@@ -768,23 +899,39 @@ function EmployeeFormContent() {
     const passportPhotoRef = useRef(null);
     const stepRef = useRef(1); // lets the resolver know which step is active
 
+    /* location helpers */
+    const placeBoxRef = useRef(null);
+    const skipSearchRef = useRef(false); // do not search again after the user picked a suggestion
+    const autoAddressRef = useRef(""); // the last address line filled by the map (the admin's own text is never overwritten)
+    const lastPinRef = useRef(""); // the last pincode that was already looked up
+
     const [currentStep, setCurrentStep] = useState(1);
+    const [employeeDbId, setEmployeeDbId] = useState(initialEditId); // the saved employee (exists after Step 1 is saved)
+    const [isDraft, setIsDraft] = useState(false); // saved, but not all steps are finished
+    const [savedUpTo, setSavedUpTo] = useState(0); // the highest step that is saved in the database
+    const [hasLogin, setHasLogin] = useState(false);
     const [departmentsList, setDepartmentsList] = useState([]);
     const [designationsList, setDesignationsList] = useState([]);
     const [employeesList, setEmployeesList] = useState([]);
+    const [managerOptions, setManagerOptions] = useState([]); // employees with the Manager role (/employees/manager-options)
+    const [savedManager, setSavedManager] = useState(null); // the manager already saved on this employee (edit mode)
+    const [legacyManager, setLegacyManager] = useState(""); // old records saved the manager as plain text
     const [lookupsLoaded, setLookupsLoaded] = useState(false);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
-    const [fetching, setFetching] = useState(false);
+    const [fetching, setFetching] = useState(Boolean(initialEditId));
     const [showPassword, setShowPassword] = useState(false);
     const [credentials, setCredentials] = useState(null);
-    const [duplicateErrors, setDuplicateErrors] = useState({
-        employeeId: "",
-        name: "",
-        email: "",
-        phone: "",
-        loginEmail: "",
-    });
+    const [duplicateErrors, setDuplicateErrors] = useState({ name: "", email: "", phone: "", loginEmail: "" });
+
+    /* location search state */
+    const [placeQuery, setPlaceQuery] = useState("");
+    const [placeResults, setPlaceResults] = useState([]);
+    const [placeOpen, setPlaceOpen] = useState(false);
+    const [placeBusy, setPlaceBusy] = useState(false);
+    const [placeMsg, setPlaceMsg] = useState("");
+    const [locBusy, setLocBusy] = useState(false);
+    const [pinStatus, setPinStatus] = useState(""); // "", loading, ok, filled, missing, notfound, error
 
     const {
         register,
@@ -814,7 +961,6 @@ function EmployeeFormContent() {
             departmentOther: "",
             employmentType: "Full-time",
             reportingManager: "",
-            reportingManagerOther: "",
             dateOfJoining: "",
             employeeStatus: "Active",
             salary: "",
@@ -842,7 +988,7 @@ function EmployeeFormContent() {
             role: "Employee",
             loginEmail: "",
             password: "",
-            isEdit: Boolean(editId),
+            hasLogin: false,
         },
     });
 
@@ -877,26 +1023,28 @@ function EmployeeFormContent() {
         return trigger(STEP_FIELDS[step]);
     };
 
-    const hasDuplicates = Object.values(duplicateErrors).some(Boolean);
-
-    /* Which step contains the duplicate problem (the login email problem exists only for the admin) */
-    const duplicateStep = () => {
-        if (duplicateErrors.employeeId || duplicateErrors.name || duplicateErrors.email || duplicateErrors.phone) return 1;
-        if (isAdmin && duplicateErrors.loginEmail) return 5;
-        return null;
+    /* the duplicate problem of a step, if any (the login email problem exists only for the admin) */
+    const duplicateAt = (step) => {
+        if (step === 1) return duplicateErrors.name || duplicateErrors.email || duplicateErrors.phone || "";
+        if (step === 5 && isAdmin) return duplicateErrors.loginEmail || "";
+        return "";
     };
 
-    /* Load lookups & employees */
+    /* ----------------------------- load the page data ----------------------------- */
+
+    /* lookups, employees, managers, and the next employee id */
     useEffect(() => {
         async function loadLookups() {
+            let list = [];
             try {
                 const results = await Promise.allSettled([
                     api.get("/organization/departments?status=active"),
                     api.get("/organization/designations?status=active"),
                     api.get("/employees"),
+                    api.get("/employees/manager-options"),
                 ]);
 
-                const [deptRes, desigRes, employeesRes] = results;
+                const [deptRes, desigRes, employeesRes, managersRes] = results;
 
                 if (deptRes.status === "fulfilled") {
                     const raw = deptRes.value?.data;
@@ -908,30 +1056,35 @@ function EmployeeFormContent() {
                 }
                 if (employeesRes.status === "fulfilled") {
                     const raw = employeesRes.value?.data;
-                    const list = Array.isArray(raw) ? raw : raw?.data || raw?.employees || [];
+                    list = Array.isArray(raw) ? raw : raw?.data || raw?.employees || [];
                     setEmployeesList(list);
-
-                    if (!editId) {
-                        setValue("employeeId", generateEmployeeId(list));
-                    }
                 }
+                if (managersRes.status === "fulfilled") {
+                    const raw = managersRes.value?.data;
+                    setManagerOptions(Array.isArray(raw) ? raw : raw?.managers || raw?.data || []);
+                }
+                /* if /employees/manager-options is not available, the employees with role "manager" are used instead */
             } catch (err) {
                 console.error("Failed to load options", err);
             } finally {
                 setLookupsLoaded(true);
             }
+
+            if (!initialEditId) {
+                setValue("employeeId", await getNextEmployeeId(list));
+            }
         }
         loadLookups();
-    }, [editId, setValue]);
+    }, [initialEditId, setValue]);
 
-    /* Load employee for edit */
+    /* the employee to edit, or the draft to continue */
     useEffect(() => {
-        if (!editId) return;
+        if (!initialEditId) return;
 
         async function loadEmployee() {
             try {
                 setFetching(true);
-                const res = await api.get(`/employees/${editId}`);
+                const res = await api.get(`/employees/${initialEditId}`);
                 const emp = res?.data?.employee || res?.data?.data || res?.data;
                 if (!emp) return;
 
@@ -942,14 +1095,14 @@ function EmployeeFormContent() {
                 const profilePhoto = emp.avatar || emp.profilePhoto || emp.profilePhotoData || emp.photo || "";
                 const docs = emp.documents || {};
 
-                setValue("employeeId", emp.employeeId || `EMP-${String(editId).slice(-4).toUpperCase()}`);
+                setValue("employeeId", emp.employeeId || "");
                 setValue("firstName", firstName);
                 setValue("lastName", lastName);
                 setValue("name", fullName);
                 setValue("email", emp.email || "");
-                setValue("loginEmail", String(emp.loginEmail || emp.email || "").toLowerCase());
+                setValue("loginEmail", String(emp.loginEmail || "").toLowerCase());
                 setValue("role", emp.role || "Employee");
-                setValue("phone", String(emp.phone || "").replace(/\D/g, "").slice(-10));
+                setValue("phone", normalizePhone(emp.phone));
                 setValue("gender", String(emp.gender || "male").toLowerCase());
                 setValue("avatar", profilePhoto);
                 setValue("profilePhotoData", profilePhoto);
@@ -959,12 +1112,16 @@ function EmployeeFormContent() {
                 setValue("employmentType", emp.employmentType || "Full-time");
                 setValue("employeeStatus", emp.employeeStatus || "Active");
 
-                const manager = emp.reportingManager || "";
-                if (manager && !REPORTING_MANAGER_OPTIONS.includes(manager)) {
-                    setValue("reportingManager", "Other");
-                    setValue("reportingManagerOther", manager);
-                } else {
-                    setValue("reportingManager", manager);
+                /* Reporting manager: a real employee id (or populated object). An old record can hold a plain name. */
+                const savedRef = emp.reportingManager;
+                const savedId = String(getLookupId(savedRef) || "");
+                if (isObjectId(savedId)) {
+                    setValue("reportingManager", savedId);
+                    const savedName =
+                        (savedRef && typeof savedRef === "object" && getEmployeeName(savedRef)) || emp.reportingManagerName || "";
+                    if (savedName) setSavedManager({ value: savedId, name: savedName });
+                } else if (savedId) {
+                    setLegacyManager(savedId);
                 }
 
                 setValue("dateOfJoining", emp.dateOfJoining ? String(emp.dateOfJoining).split("T")[0] : "");
@@ -1004,6 +1161,22 @@ function EmployeeFormContent() {
                 setValue("city", emp.city || "");
                 setValue("state", emp.state || "");
                 setValue("pincode", emp.pincode || "");
+                lastPinRef.current = String(emp.pincode || ""); // saved data: no pincode lookup needed
+
+                /* does the login exist, and which steps are already saved */
+                setHasLogin(Boolean(emp.hasLogin));
+                setValue("hasLogin", Boolean(emp.hasLogin));
+                const draft = emp.onboarding?.status === "draft";
+                const doneStep = draft ? Number(emp.onboarding?.step) || 0 : 5;
+                setIsDraft(draft);
+                setSavedUpTo(doneStep);
+
+                /* a draft opens at the first step that is not saved yet */
+                if (draft) {
+                    const next = Math.min(doneStep + 1, lastStepRef.current);
+                    stepRef.current = next;
+                    setCurrentStep(next);
+                }
             } catch (err) {
                 console.error(err);
                 setError("Failed to fetch employee record.");
@@ -1012,9 +1185,10 @@ function EmployeeFormContent() {
             }
         }
         loadEmployee();
-    }, [editId, setValue]);
+    }, [initialEditId, setValue]);
 
-    /* Designation & department options */
+    /* ------------------------------ lookups and options ------------------------------ */
+
     const designationOptions = useMemo(() => {
         const apiOpts = designationsList
             .map((item) => ({ value: getLookupId(item), label: getLookupLabel(item) }))
@@ -1039,9 +1213,47 @@ function EmployeeFormContent() {
         return [...map.values()];
     }, [departmentsList]);
 
+    /* Reporting manager choices: only employees with the Manager role, active, never the employee being edited */
+    const managerChoices = useMemo(() => {
+        const source = managerOptions.length
+            ? managerOptions
+            : employeesList.filter((e) => String(e.role || "").toLowerCase() === "manager");
+
+        const list = source
+            .filter((m) => !/^(inactive|exited|exit)$/i.test(String(m.employeeStatus || "")))
+            .map((m) => ({ value: String(m._id || m.id || ""), name: getEmployeeName(m) }))
+            .filter((m) => isObjectId(m.value) && m.name && m.value !== String(employeeDbId || ""));
+
+        /* the manager already saved on this employee stays selectable, so editing never drops him silently */
+        if (savedManager && savedManager.value !== String(employeeDbId || "") && !list.some((m) => m.value === savedManager.value)) {
+            list.push(savedManager);
+        }
+        return list.sort((a, b) => a.name.localeCompare(b.name));
+    }, [managerOptions, employeesList, savedManager, employeeDbId]);
+
+    const selectedManager = useMemo(
+        () => managerChoices.find((m) => m.value === watchedForm.reportingManager) || null,
+        [managerChoices, watchedForm.reportingManager]
+    );
+
+    /* An old record saved the manager as a name (for example "Sanjay Sir"). Match it to a real manager. */
+    useEffect(() => {
+        if (!legacyManager || !lookupsLoaded || getValues("reportingManager")) return;
+        const wanted = legacyManager.trim().toLowerCase();
+        const wantedNoSir = wanted.replace(/\s+sir$/, "");
+        const hit = managerChoices.find((m) => {
+            const n = m.name.trim().toLowerCase();
+            return n === wanted || n === wantedNoSir;
+        });
+        if (hit) {
+            setValue("reportingManager", hit.value);
+            setLegacyManager("");
+        }
+    }, [legacyManager, lookupsLoaded, managerChoices, getValues, setValue]);
+
     /* Edit mode: if a saved custom designation/department is not in the list, show it under "Other" */
     useEffect(() => {
-        if (!editId || fetching || !lookupsLoaded) return;
+        if (!initialEditId || fetching || !lookupsLoaded) return;
         const d = getValues("designation");
         if (d && d !== "Other" && !designationOptions.some((o) => o.value === d)) {
             setValue("designation", "Other");
@@ -1052,7 +1264,7 @@ function EmployeeFormContent() {
             setValue("department", "Other");
             setValue("departmentOther", dep);
         }
-    }, [editId, fetching, lookupsLoaded, designationOptions, departmentOptions, getValues, setValue]);
+    }, [initialEditId, fetching, lookupsLoaded, designationOptions, departmentOptions, getValues, setValue]);
 
     const selectedDesignation = useMemo(() => {
         const opt = designationOptions.find((i) => i.value === watchedForm.designation);
@@ -1064,48 +1276,210 @@ function EmployeeFormContent() {
         return opt?.label || watchedForm.departmentOther || watchedForm.department || "—";
     }, [departmentOptions, watchedForm.department, watchedForm.departmentOther]);
 
-    /* Duplicate check (ID, name, personal email, phone, and the login email for the admin) */
+    /* Duplicate check (name, personal email, phone, and the login email for the admin). The server checks the ID. */
     useEffect(() => {
         if (!employeesList.length) return;
-        const candidateId = (watchedForm.employeeId || "").trim().toLowerCase();
         const candidateName = `${watchedForm.firstName || ""} ${watchedForm.lastName || ""}`.trim().toLowerCase();
         const candidateEmail = (watchedForm.email || "").trim().toLowerCase();
-        const candidatePhone = (watchedForm.phone || "").replace(/\D/g, "");
+        const candidatePhone = normalizePhone(watchedForm.phone);
         const candidateLogin = isAdmin ? (watchedForm.loginEmail || "").trim().toLowerCase() : "";
 
-        const errorsObj = { employeeId: "", name: "", email: "", phone: "", loginEmail: "" };
+        const next = { name: "", email: "", phone: "", loginEmail: "" };
         employeesList.forEach((emp) => {
             const empId = emp._id || emp.id || emp.employeeId;
-            if (editId && String(empId) === String(editId)) return;
+            if (employeeDbId && String(empId) === String(employeeDbId)) return;
 
-            const empCode = String(emp.employeeId || "").toLowerCase();
             const empName = getEmployeeName(emp).toLowerCase();
             const empEmail = (emp.email || "").toLowerCase();
             const empLogin = (emp.loginEmail || emp.email || "").toLowerCase();
-            const empPhone = (emp.phone || "").replace(/\D/g, "").slice(-10);
+            const empPhone = normalizePhone(emp.phone);
 
-            if (candidateId && empCode && candidateId === empCode) errorsObj.employeeId = "This Employee ID is already in use.";
-            if (candidateName && empName && candidateName === empName) errorsObj.name = "An employee with this name already exists.";
-            if (candidateEmail && empEmail && candidateEmail === empEmail) errorsObj.email = "This email address is already registered.";
-            if (candidatePhone && empPhone && candidatePhone === empPhone) errorsObj.phone = "This phone number is already registered.";
+            if (candidateName && empName && candidateName === empName) next.name = "An employee with this name already exists.";
+            if (candidateEmail && empEmail && candidateEmail === empEmail) next.email = "This email address is already registered.";
+            if (candidatePhone.length === PHONE_DIGITS && empPhone && candidatePhone === empPhone) next.phone = "This phone number is already registered.";
             if (candidateLogin && (candidateLogin === empLogin || candidateLogin === empEmail)) {
-                errorsObj.loginEmail = "This login email is already assigned to another employee.";
+                next.loginEmail = "This login email is already assigned to another employee.";
             }
         });
-        setDuplicateErrors(errorsObj);
+        setDuplicateErrors(next);
     }, [
         employeesList,
         isAdmin,
-        watchedForm.employeeId,
+        employeeDbId,
         watchedForm.firstName,
         watchedForm.lastName,
         watchedForm.email,
         watchedForm.phone,
         watchedForm.loginEmail,
-        editId,
     ]);
 
-    /* File helpers: images only, compressed before they are stored in the form */
+    /* ------------------------------ address and location ------------------------------ */
+
+    /* fills the address, city, state and pincode from a place */
+    const applyLocation = (loc) => {
+        const opts = { shouldValidate: true, shouldDirty: true };
+        const current = String(getValues("address") || "").trim();
+
+        // the admin's own address text is kept. Only an empty or a map-filled address is replaced.
+        if (loc.line && (!current || current === autoAddressRef.current)) {
+            const line = clean.text(200)(loc.line);
+            autoAddressRef.current = line;
+            setValue("address", line, opts);
+        }
+        if (loc.city) setValue("city", clean.name(40)(loc.city), opts);
+        if (loc.state) setValue("state", clean.name(40)(loc.state), opts);
+
+        if (/^[1-9]\d{5}$/.test(loc.pincode || "")) {
+            lastPinRef.current = loc.pincode; // already known, no second lookup
+            setValue("pincode", loc.pincode, opts);
+            setPinStatus("filled");
+        } else {
+            setPinStatus("missing");
+        }
+    };
+
+    const pickPlace = (loc) => {
+        skipSearchRef.current = true;
+        setPlaceQuery(loc.label);
+        setPlaceResults([]);
+        setPlaceOpen(false);
+        setPlaceMsg("");
+        applyLocation(loc);
+    };
+
+    /* suggestions while typing (waits 450 ms, needs 3 letters, cancels the older request) */
+    useEffect(() => {
+        if (skipSearchRef.current) {
+            skipSearchRef.current = false;
+            return undefined;
+        }
+        const q = placeQuery.trim();
+        if (q.length < 3) {
+            setPlaceResults([]);
+            setPlaceBusy(false);
+            return undefined;
+        }
+
+        const ctrl = new AbortController();
+        const timer = setTimeout(async () => {
+            setPlaceBusy(true);
+            setPlaceMsg("");
+            try {
+                const list = await photonSearch(q, ctrl.signal);
+                if (ctrl.signal.aborted) return;
+                setPlaceResults(list);
+                if (!list.length) setPlaceMsg("No place found. Try a nearby landmark, or type the address yourself.");
+            } catch {
+                if (ctrl.signal.aborted) return;
+                setPlaceResults([]);
+                setPlaceMsg("Location suggestions are not available right now. Please type the address yourself.");
+            } finally {
+                if (!ctrl.signal.aborted) setPlaceBusy(false);
+            }
+        }, 450);
+
+        return () => {
+            clearTimeout(timer);
+            ctrl.abort();
+        };
+    }, [placeQuery]);
+
+    /* close the suggestion list when the admin clicks outside of it */
+    useEffect(() => {
+        const onDown = (e) => {
+            if (placeBoxRef.current && !placeBoxRef.current.contains(e.target)) setPlaceOpen(false);
+        };
+        document.addEventListener("mousedown", onDown);
+        return () => document.removeEventListener("mousedown", onDown);
+    }, []);
+
+    /* the current location of the device */
+    const handleUseLocation = () => {
+        if (typeof navigator === "undefined" || !navigator.geolocation) {
+            setPlaceMsg("This browser cannot detect the location. Please search or type the address.");
+            return;
+        }
+        setLocBusy(true);
+        setPlaceMsg("");
+        navigator.geolocation.getCurrentPosition(
+            async ({ coords }) => {
+                try {
+                    const loc = await photonReverse(coords.latitude, coords.longitude);
+                    if (loc) {
+                        skipSearchRef.current = true;
+                        setPlaceQuery(loc.label);
+                        applyLocation(loc);
+                        toast.success("Location filled. Please check the address.");
+                    } else {
+                        setPlaceMsg("Could not find an address for this location. Please type it yourself.");
+                    }
+                } catch {
+                    setPlaceMsg("Could not read the address of this location. Please type it yourself.");
+                } finally {
+                    setLocBusy(false);
+                }
+            },
+            (err) => {
+                setLocBusy(false);
+                setPlaceMsg(
+                    err.code === 1
+                        ? "Location permission was denied. Allow it in the browser, or search / type the address."
+                        : err.code === 3
+                            ? "The location request timed out. Please try again."
+                            : "Your location is not available right now."
+                );
+            },
+            { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+        );
+    };
+
+    /* pincode -> city and state (India Post) */
+    const pinValue = watchedForm.pincode;
+    useEffect(() => {
+        const pin = String(pinValue || "");
+        if (!/^[1-9]\d{5}$/.test(pin)) {
+            if (pin.length < 6) setPinStatus((s) => (s === "loading" || s === "ok" || s === "notfound" || s === "error" ? "" : s));
+            return undefined;
+        }
+        if (lastPinRef.current === pin) return undefined;
+
+        let cancelled = false;
+        setPinStatus("loading");
+        lookupPincode(pin)
+            .then((found) => {
+                if (cancelled) return;
+                lastPinRef.current = pin;
+                if (found) {
+                    const opts = { shouldValidate: true, shouldDirty: true };
+                    if (found.city) setValue("city", clean.name(40)(found.city), opts);
+                    if (found.state) setValue("state", clean.name(40)(found.state), opts);
+                    setPinStatus("ok");
+                } else {
+                    setPinStatus("notfound");
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setPinStatus("error");
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [pinValue, setValue]);
+
+    const pinHint =
+        {
+            loading: "Finding the city and state...",
+            ok: "City and state were filled from the pincode.",
+            filled: "Location filled. Please check the address, city and state.",
+            missing: "The map has no pincode for this place. Enter the pincode and the city and state fill automatically.",
+            notfound: "Pincode not found. Please enter the city and state yourself.",
+            error: "Could not check the pincode right now. Please enter the city and state yourself.",
+        }[pinStatus] || "";
+    const pinWarn = ["missing", "notfound", "error"].includes(pinStatus);
+
+    /* ------------------------------ files ------------------------------ */
+
     const readFile = async (file, callback, maxSize = 1600) => {
         if (!file) return;
         if (file.size > MAX_FILE_SIZE) {
@@ -1130,7 +1504,7 @@ function EmployeeFormContent() {
             file,
             (data, name) => {
                 setValue("avatar", data);
-                setValue("profilePhotoData", data, { shouldValidate: true, shouldDirty: true });
+                setValue("profilePhotoData", data, { shouldDirty: true });
                 setValue("profilePhotoFileName", name);
                 setValue("passportPhotoData", data);
                 setValue("passportPhotoFileName", name);
@@ -1142,7 +1516,7 @@ function EmployeeFormContent() {
 
     const removeProfilePhoto = () => {
         setValue("avatar", "");
-        setValue("profilePhotoData", "", { shouldValidate: true });
+        setValue("profilePhotoData", "");
         setValue("profilePhotoFileName", "");
         setValue("passportPhotoData", "");
         setValue("passportPhotoFileName", "");
@@ -1162,8 +1536,111 @@ function EmployeeFormContent() {
         setValue(nameKey, "");
     };
 
-    /* Step navigation with validation */
+    /* ------------------------------ save step by step ------------------------------ */
+
+    /*
+      Saves ONE step in the database.
+      Step 1 creates the employee as a draft (POST). Every other step updates the same employee (PUT).
+      Returns true when the step is saved.
+    */
+    const persistStep = async (step) => {
+        const body = buildStepPayload(step, getValues());
+        setLoading(true);
+        setError("");
+        try {
+            if (!employeeDbId) {
+                if (step !== 1) throw new Error("Please save Step 1 first.");
+
+                const res = await api.post("/employees", { ...body, draft: true, onboardingStep: 1 });
+                const created = res?.data?.employee || res?.data?.data;
+                if (!created?._id) throw new Error("The server did not return the employee id.");
+
+                const newId = String(created._id);
+                onDraftCreated?.(newId); // tell the page shell: this id is ours, do not reset the form
+                setEmployeeDbId(newId);
+                setIsDraft(true);
+                if (created.employeeId) setValue("employeeId", created.employeeId);
+
+                // a refresh now reopens this draft instead of starting a new one
+                if (typeof window !== "undefined") window.history.replaceState(null, "", `${window.location.pathname}?id=${newId}`);
+            } else {
+                await api.put(`/employees/${employeeDbId}`, { ...body, onboardingStep: step });
+            }
+
+            setSavedUpTo((prev) => Math.max(prev, step));
+            return true;
+        } catch (err) {
+            const msg = err?.response?.data?.message || err?.response?.data?.error || err?.message || "Failed to save this step.";
+            setError(msg);
+            toast.error(msg);
+
+            // the server says the ID is taken: give a fresh one and ask the admin to press Continue again
+            if (err?.response?.status === 409 && /employee id/i.test(msg) && !employeeDbId) {
+                const id = await getNextEmployeeId(employeesList);
+                setValue("employeeId", id);
+                setError(`${msg} A new ID was assigned. Please press Continue again.`);
+            }
+            return false;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    /* the last step is saved: show the login details (admin) or go back to the list */
+    const finishFlow = () => {
+        const data = getValues();
+        const registering = isNew || isDraft;
+        const fullName = `${data.firstName} ${data.lastName}`.trim();
+        const newPassword = isAdmin ? data.password : "";
+
+        setIsDraft(false);
+        toast.success(registering ? "Employee registered successfully!" : "Employee updated successfully!");
+        if (!isAdmin && registering) toast.info("An admin must add the login access before this employee can log in.");
+
+        if (newPassword) {
+            setCredentials({
+                name: fullName,
+                loginEmail: String(data.loginEmail || "").trim().toLowerCase(),
+                password: newPassword,
+                isEdit: !registering,
+            });
+        } else {
+            router.push("/employees");
+        }
+    };
+
+    /* Continue = check this step, save it in the database, then open the next step */
+    const handleNext = async () => {
+        if (loading) return;
+        setError("");
+
+        const ok = await validateStep(currentStep);
+        if (!ok) {
+            setError("Please fill in all required fields correctly before continuing.");
+            if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+            return;
+        }
+
+        const dup = duplicateAt(currentStep);
+        if (dup) {
+            setError(dup);
+            return;
+        }
+
+        const saved = await persistStep(currentStep);
+        if (!saved) return;
+
+        if (currentStep < LAST_STEP) {
+            toast.success(`Step ${currentStep} saved.`);
+            changeStep(currentStep + 1);
+            return;
+        }
+        finishFlow();
+    };
+
+    /* a click on a later step tab saves every step in between, one by one */
     const goToStep = async (target) => {
+        if (loading) return;
         setError("");
         if (target <= currentStep) {
             changeStep(target);
@@ -1176,152 +1653,24 @@ function EmployeeFormContent() {
                 setError("Please complete all required fields correctly before moving to the next step.");
                 return;
             }
-        }
-        const dupAt = duplicateStep();
-        if (dupAt) {
-            changeStep(dupAt);
-            setError("Please resolve the duplicate details before continuing.");
-            return;
+            const dup = duplicateAt(s);
+            if (dup) {
+                changeStep(s);
+                setError(dup);
+                return;
+            }
+            const saved = await persistStep(s);
+            if (!saved) {
+                changeStep(s);
+                return;
+            }
         }
         changeStep(target);
     };
 
-    const handleNext = async () => {
-        setError("");
-
-        const ok = await validateStep(currentStep);
-        if (!ok) {
-            setError("Please fill in all required fields correctly before continuing.");
-            if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
-            return;
-        }
-
-        const dupAt = hasDuplicates ? duplicateStep() : null;
-        if (dupAt) {
-            setError("Please resolve the duplicate details before continuing.");
-            changeStep(dupAt);
-            return;
-        }
-
-        if (currentStep < LAST_STEP) {
-            changeStep(currentStep + 1);
-            return;
-        }
-
-        /* Final step: re-validate every step before saving */
-        for (let s = 1; s <= LAST_STEP; s++) {
-            const valid = await validateStep(s);
-            if (!valid) {
-                changeStep(s);
-                setError("Some required details are missing or invalid. Please review this step.");
-                return;
-            }
-        }
-        handleSubmitForm();
-    };
-
-    const handleSubmitForm = async () => {
-        setLoading(true);
-        setError("");
-        try {
-            const data = getValues();
-            const finalDesignation = data.designation === "Other" ? data.designationOther.trim() : data.designation;
-            const finalDepartment = data.department === "Other" ? data.departmentOther.trim() : data.department;
-            const finalManager = data.reportingManager === "Other" ? data.reportingManagerOther.trim() : data.reportingManager;
-            const aadhaar = data.aadhaarNumber.trim();
-            const pan = data.panNumber.trim().toUpperCase();
-            const loginEmail = data.loginEmail.trim().toLowerCase();
-            const newPassword = isAdmin ? data.password : "";
-            const fullName = `${data.firstName} ${data.lastName}`.trim();
-
-            const payload = {
-                ...data,
-                employeeId: data.employeeId.trim().toUpperCase(),
-                firstName: data.firstName.trim(),
-                lastName: data.lastName.trim(),
-                name: fullName,
-                email: data.email.trim().toLowerCase(),
-                loginEmail,
-                role: data.role,
-                phone: data.phone.trim(),
-                designation: finalDesignation,
-                department: finalDepartment,
-                reportingManager: finalManager,
-                salary: Number(data.salary) || 0,
-                nationalIdType: "Aadhaar Card",
-                nationalId: aadhaar,
-                idProofNumber: aadhaar,
-                aadhaarNumber: aadhaar,
-                panNumber: pan,
-                address: data.address.trim(),
-                city: data.city.trim(),
-                state: data.state.trim(),
-                pincode: data.pincode.trim(),
-                bankDetails: {
-                    accountName: data.accountName.trim(),
-                    bankName: data.bankName.trim(),
-                    branchName: data.branchName.trim(),
-                    accountNumber: data.accountNumber.trim(),
-                    ifscCode: data.ifscCode.trim().toUpperCase(),
-                },
-                documents: {
-                    nationalIdFrontFileName: data.nationalIdFrontFileName,
-                    nationalIdFrontFileData: data.nationalIdFrontFileData,
-                    nationalIdBackFileName: data.nationalIdBackFileName,
-                    nationalIdBackFileData: data.nationalIdBackFileData,
-                    panCardFileName: data.panCardFileName,
-                    panCardFileData: data.panCardFileData,
-                    passportPhotoFileName: data.passportPhotoFileName,
-                    passportPhotoData: data.passportPhotoData,
-                },
-                avatar: data.profilePhotoData || data.avatar || "",
-            };
-
-            delete payload.isEdit;
-            if (!isAdmin) {
-                // Login access belongs to the admin. HR and managers never send it.
-                delete payload.loginEmail;
-                delete payload.password;
-                delete payload.role;
-            } else if (!newPassword) {
-                delete payload.password; // edit mode: blank means "keep the current password"
-            }
-
-            if (editId) {
-                await api.put(`/employees/${editId}`, payload);
-                toast.success("Employee updated successfully!");
-            } else {
-                await api.post("/employees", payload);
-                toast.success(isAdmin ? "Employee registered successfully!" : "Employee profile saved!");
-                if (!isAdmin) {
-                    toast.info("An admin must add the login access before this employee can log in.");
-                }
-            }
-
-            if (newPassword) {
-                setCredentials({
-                    name: fullName,
-                    loginEmail,
-                    password: newPassword,
-                    isEdit: Boolean(editId),
-                });
-            } else {
-                router.push("/employees");
-            }
-        } catch (err) {
-            console.error(err);
-            const msg = err?.response?.data?.message || err?.response?.data?.error || "Failed to save employee record.";
-            setError(msg);
-            toast.error(msg);
-        } finally {
-            setLoading(false);
-        }
-    };
-
     /* Step completion flags (based on the real Zod schemas) */
     const stepDone = (n) => STEP_SCHEMAS[n].safeParse(watchedForm).success;
-    const isStep1Done =
-        stepDone(1) && !duplicateErrors.employeeId && !duplicateErrors.name && !duplicateErrors.email && !duplicateErrors.phone;
+    const isStep1Done = stepDone(1) && !duplicateErrors.name && !duplicateErrors.email && !duplicateErrors.phone;
     const isStep2Done = stepDone(2);
     const isStep3Done = stepDone(3);
     const isStep4Done = stepDone(4);
@@ -1329,6 +1678,7 @@ function EmployeeFormContent() {
     const doneCount = [isStep1Done, isStep2Done, isStep3Done, isStep4Done, isAdmin && isStep5Done].filter(Boolean).length;
 
     const roleChoices = watchedForm.role === "Admin" ? ALL_ROLES : ROLE_OPTIONS;
+    const registering = isNew || isDraft;
 
     if (fetching) {
         return (
@@ -1353,7 +1703,7 @@ function EmployeeFormContent() {
                             </div>
                             <div className="min-w-0">
                                 <h1 className="text-base sm:text-xl font-bold text-slate-900 truncate">
-                                    {editId ? "Edit Employee" : "Add Employee"}
+                                    {isNew ? "Add Employee" : isDraft ? "Complete Employee Profile" : "Edit Employee"}
                                 </h1>
                                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate">
                                     Create a complete professional employee profile
@@ -1375,6 +1725,7 @@ function EmployeeFormContent() {
                             {STEPS.map((item) => {
                                 const active = currentStep === item.step;
                                 const passed = currentStep > item.step;
+                                const saved = item.step <= savedUpTo;
                                 const Icon = item.icon;
                                 const spanFull = item.step === LAST_STEP && STEPS.length % 2 === 1;
                                 return (
@@ -1385,7 +1736,7 @@ function EmployeeFormContent() {
                                         className={`text-left rounded-2xl border p-2.5 sm:p-3 transition-all ${spanFull ? "col-span-2 lg:col-span-1" : ""
                                             } ${active
                                                 ? "border-indigo-300 bg-indigo-50 shadow-sm"
-                                                : passed
+                                                : passed || saved
                                                     ? "border-emerald-200 bg-emerald-50/40"
                                                     : "border-slate-200 bg-white hover:border-indigo-200"
                                             }`}
@@ -1394,16 +1745,17 @@ function EmployeeFormContent() {
                                             <div
                                                 className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center ${active
                                                     ? "bg-indigo-600 text-white"
-                                                    : passed
+                                                    : passed || saved
                                                         ? "bg-emerald-600 text-white"
                                                         : "bg-slate-100 text-slate-500"
                                                     }`}
                                             >
-                                                {passed ? <CheckCircle2 size={15} /> : <Icon size={15} />}
+                                                {passed || saved ? <CheckCircle2 size={15} /> : <Icon size={15} />}
                                             </div>
                                             <div className="min-w-0">
                                                 <p className="text-[9px] uppercase tracking-widest font-bold text-slate-400">Step {item.step}</p>
                                                 <p className="text-xs font-bold text-slate-800 truncate">{item.title}</p>
+                                                {saved && <p className="text-[10px] font-semibold text-emerald-600">Saved</p>}
                                             </div>
                                         </div>
                                     </button>
@@ -1411,6 +1763,19 @@ function EmployeeFormContent() {
                             })}
                         </div>
                     </div>
+
+                    {/* Draft info */}
+                    {employeeDbId && isDraft && (
+                        <div className="mx-4 sm:mx-8 mt-4 sm:mt-5 flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+                            <CheckCircle2 size={17} className="shrink-0 mt-0.5" />
+                            <div>
+                                <p className="text-xs font-bold">Draft saved</p>
+                                <p className="text-[11px] mt-0.5">
+                                    Each step is saved when you press Continue. You can leave now and finish the rest later from All Employees.
+                                </p>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Global error banner */}
                     {error && (
@@ -1462,7 +1827,7 @@ function EmployeeFormContent() {
                                         </p>
                                         <p className="text-[11px] text-slate-400 truncate">{watchedForm.email || "Employee profile"}</p>
                                         <span className="inline-block mt-1 text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded border border-indigo-200">
-                                            {watchedForm.employeeId || "—"}
+                                            {watchedForm.employeeId || "ID is assigned on save"}
                                         </span>
                                     </div>
                                 </div>
@@ -1471,7 +1836,7 @@ function EmployeeFormContent() {
                             <SummaryCard icon={User} title="Personal Info" active={currentStep === 1} status={isStep1Done ? "Done" : "In progress"}>
                                 <SummaryRow label="Name" value={`${watchedForm.firstName} ${watchedForm.lastName}`.trim()} />
                                 <SummaryRow label="Email" value={watchedForm.email} />
-                                <SummaryRow label="Phone" value={watchedForm.phone ? `+91 ${watchedForm.phone}` : ""} />
+                                <SummaryRow label="Phone" value={watchedForm.phone ? `+${watchedForm.phone}` : ""} />
                                 <SummaryRow label="Gender" value={watchedForm.gender} />
                             </SummaryCard>
 
@@ -1480,6 +1845,7 @@ function EmployeeFormContent() {
                                 <SummaryRow label="Department" value={selectedDepartment} />
                                 <SummaryRow label="Employment" value={watchedForm.employmentType} />
                                 <SummaryRow label="Status" value={watchedForm.employeeStatus} />
+                                <SummaryRow label="Manager" value={selectedManager?.name} />
                             </SummaryCard>
 
                             <SummaryCard icon={FileText} title="Documents" active={currentStep === 3} status={isStep3Done ? "Done" : "Pending"}>
@@ -1513,7 +1879,7 @@ function EmployeeFormContent() {
                                     <SummaryRow label="Role" value={watchedForm.role} />
                                     <SummaryRow
                                         label="Password"
-                                        value={watchedForm.password ? "Set" : editId ? "Unchanged" : ""}
+                                        value={watchedForm.password ? "Set" : hasLogin ? "Unchanged" : ""}
                                     />
                                 </SummaryCard>
                             )}
@@ -1527,7 +1893,7 @@ function EmployeeFormContent() {
                                     <div className="space-y-5 sm:space-y-6">
                                         <SectionTitle title="Personal Information" description="Basic identity and profile information of the employee." />
 
-                                        {/* Profile photo */}
+                                        {/* Profile photo (optional) */}
                                         <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
                                             <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-5">
                                                 <div className="relative shrink-0">
@@ -1538,17 +1904,14 @@ function EmployeeFormContent() {
                                                             className="w-24 h-24 rounded-2xl object-cover border border-slate-200 shadow-sm"
                                                         />
                                                     ) : (
-                                                        <div
-                                                            className={`w-24 h-24 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border ${errors.profilePhotoData ? "border-red-300" : "border-indigo-100"
-                                                                }`}
-                                                        >
+                                                        <div className="w-24 h-24 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
                                                             <Camera size={28} />
                                                         </div>
                                                     )}
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-sm font-bold text-slate-900">
-                                                        Passport Size Profile Photo <span className="text-red-500">*</span>
+                                                        Passport Size Profile Photo <span className="text-xs font-semibold text-slate-400">(optional)</span>
                                                     </p>
                                                     <p className="text-xs text-slate-500 mt-1">Upload a clear, professional photo (JPG, PNG or WEBP).</p>
                                                     <div className="flex flex-wrap items-center gap-2 mt-3 sm:mt-4">
@@ -1573,7 +1936,6 @@ function EmployeeFormContent() {
                                                     {watchedForm.profilePhotoFileName && (
                                                         <p className="text-[11px] text-emerald-600 font-semibold mt-2 truncate">{watchedForm.profilePhotoFileName}</p>
                                                     )}
-                                                    <FieldError>{errors.profilePhotoData?.message}</FieldError>
                                                 </div>
                                             </div>
                                             <input
@@ -1583,44 +1945,6 @@ function EmployeeFormContent() {
                                                 onChange={handleProfilePhoto}
                                                 className="hidden"
                                             />
-                                        </div>
-
-                                        {/* Employee ID (manual + auto generate) */}
-                                        <div>
-                                            <label className="field-label">
-                                                Employee ID <span className="text-red-500">*</span>
-                                            </label>
-                                            <div className="flex gap-2">
-                                                <div className="relative flex-1">
-                                                    <Hash size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                                                    <input
-                                                        {...reg("employeeId", clean.employeeId)}
-                                                        placeholder="EMP-001"
-                                                        maxLength={20}
-                                                        autoCapitalize="characters"
-                                                        className={`${errors.employeeId || duplicateErrors.employeeId ? errorInputClass : inputClass} pl-10 font-mono uppercase`}
-                                                    />
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        setValue("employeeId", generateEmployeeId(employeesList), {
-                                                            shouldValidate: true,
-                                                            shouldDirty: true,
-                                                        })
-                                                    }
-                                                    className="inline-flex items-center justify-center gap-1.5 px-3 sm:px-4 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold transition shrink-0"
-                                                    title="Generate the next available ID"
-                                                >
-                                                    <RefreshCw size={14} />
-                                                    <span className="hidden sm:inline">Auto Generate</span>
-                                                </button>
-                                            </div>
-                                            <p className="text-[11px] text-slate-400 mt-1.5">
-                                                The ID is generated automatically, but you can edit it manually.
-                                            </p>
-                                            <FieldError>{errors.employeeId?.message}</FieldError>
-                                            <FieldError>{duplicateErrors.employeeId}</FieldError>
                                         </div>
 
                                         {/* Names */}
@@ -1689,23 +2013,21 @@ function EmployeeFormContent() {
                                             <label className="field-label">
                                                 Phone Number <span className="text-red-500">*</span>
                                             </label>
-                                            <div className="flex">
-                                                <div className="flex items-center px-3 bg-slate-100 border border-r-0 border-slate-200 rounded-l-xl text-xs font-bold text-slate-600 whitespace-nowrap">
-                                                    IN +91
-                                                </div>
-                                                <div className="relative flex-1 min-w-0">
-                                                    <Phone size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                                    <input
-                                                        type="tel"
-                                                        inputMode="numeric"
-                                                        autoComplete="tel-national"
-                                                        {...reg("phone", clean.digits(10))}
-                                                        placeholder="9876543210"
-                                                        maxLength={10}
-                                                        className={`${errors.phone || duplicateErrors.phone ? errorInputClass : inputClass} pl-9 rounded-l-none`}
-                                                    />
-                                                </div>
+                                            <div className="relative">
+                                                <Phone size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <input
+                                                    type="tel"
+                                                    inputMode="numeric"
+                                                    autoComplete="tel-national"
+                                                    {...reg("phone", clean.digits(PHONE_DIGITS))}
+                                                    placeholder="919876543210"
+                                                    maxLength={PHONE_DIGITS}
+                                                    className={`${errors.phone || duplicateErrors.phone ? errorInputClass : inputClass} pl-10 font-mono`}
+                                                />
                                             </div>
+                                            <p className="text-[11px] text-slate-400 mt-1.5">
+                                                Enter {PHONE_DIGITS} digits with the country code, for example 919876543210.
+                                            </p>
                                             <FieldError>{errors.phone?.message}</FieldError>
                                             <FieldError>{duplicateErrors.phone}</FieldError>
                                         </div>
@@ -1747,6 +2069,67 @@ function EmployeeFormContent() {
                                                     Address <span className="text-red-500">*</span>
                                                 </span>
                                             </div>
+
+                                            {/* Search the location: suggestions fill the address, city, state and pincode */}
+                                            <div ref={placeBoxRef} className="relative mb-3 rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3.5">
+                                                <div className="flex flex-col sm:flex-row gap-2">
+                                                    <div className="relative flex-1 min-w-0">
+                                                        <Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                                        <input
+                                                            value={placeQuery}
+                                                            onChange={(e) => {
+                                                                setPlaceQuery(e.target.value);
+                                                                setPlaceOpen(true);
+                                                            }}
+                                                            onFocus={() => setPlaceOpen(true)}
+                                                            placeholder="Search area, society or landmark (for example Malviya Nagar Jaipur)"
+                                                            autoComplete="off"
+                                                            className={`${inputClass} pl-10 pr-10`}
+                                                        />
+                                                        {placeBusy && (
+                                                            <Loader2 size={15} className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin text-indigo-500" />
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleUseLocation}
+                                                        disabled={locBusy}
+                                                        className="inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2.5 rounded-xl border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100 text-xs font-bold transition shrink-0 disabled:opacity-60"
+                                                    >
+                                                        {locBusy ? <Loader2 size={14} className="animate-spin" /> : <LocateFixed size={14} />}
+                                                        Use my location
+                                                    </button>
+                                                </div>
+
+                                                {placeOpen && placeResults.length > 0 && (
+                                                    <ul className="absolute z-30 left-3.5 right-3.5 top-full -mt-1 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10 divide-y divide-slate-100">
+                                                        {placeResults.map((r) => (
+                                                            <li key={r.id}>
+                                                                <button
+                                                                    type="button"
+                                                                    onMouseDown={(e) => e.preventDefault()}
+                                                                    onClick={() => pickPlace(r)}
+                                                                    className="w-full flex items-start gap-2.5 px-3.5 py-3 text-left hover:bg-indigo-50 transition"
+                                                                >
+                                                                    <MapPin size={15} className="text-indigo-500 shrink-0 mt-0.5" />
+                                                                    <span className="min-w-0">
+                                                                        <span className="block text-xs font-semibold text-slate-800 break-words">{r.label}</span>
+                                                                        <span className="block text-[10px] text-slate-400 mt-0.5">
+                                                                            {[r.city, r.state, r.pincode].filter(Boolean).join(" • ")}
+                                                                        </span>
+                                                                    </span>
+                                                                </button>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+
+                                                {placeMsg && <p className="text-[11px] font-medium text-amber-700 mt-2.5">{placeMsg}</p>}
+                                                <p className="text-[10px] text-slate-400 mt-2.5">
+                                                    Pick a suggestion and the address, city, state and pincode are filled for you. You can always edit them.
+                                                </p>
+                                            </div>
+
                                             <textarea
                                                 {...reg("address", clean.text(200))}
                                                 rows={3}
@@ -1757,6 +2140,17 @@ function EmployeeFormContent() {
                                             <FieldError>{errors.address?.message}</FieldError>
 
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                                                <div>
+                                                    <input
+                                                        {...reg("pincode", clean.digits(6))}
+                                                        inputMode="numeric"
+                                                        placeholder="Pincode"
+                                                        maxLength={6}
+                                                        autoComplete="postal-code"
+                                                        className={errors.pincode ? errorInputClass : inputClass}
+                                                    />
+                                                    <FieldError>{errors.pincode?.message}</FieldError>
+                                                </div>
                                                 <div>
                                                     <input
                                                         {...reg("city", clean.name(40))}
@@ -1777,18 +2171,12 @@ function EmployeeFormContent() {
                                                     />
                                                     <FieldError>{errors.state?.message}</FieldError>
                                                 </div>
-                                                <div>
-                                                    <input
-                                                        {...reg("pincode", clean.digits(6))}
-                                                        inputMode="numeric"
-                                                        placeholder="Pincode"
-                                                        maxLength={6}
-                                                        autoComplete="postal-code"
-                                                        className={errors.pincode ? errorInputClass : inputClass}
-                                                    />
-                                                    <FieldError>{errors.pincode?.message}</FieldError>
-                                                </div>
                                             </div>
+                                            {pinHint && (
+                                                <p className={`text-[11px] font-medium mt-2 ${pinWarn ? "text-amber-700" : pinStatus === "loading" ? "text-slate-400" : "text-emerald-600"}`}>
+                                                    {pinHint}
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -1893,33 +2281,33 @@ function EmployeeFormContent() {
                                         </div>
 
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            {/* Reporting manager: only employees with the Manager role, shown by name. The employee id is saved. */}
                                             <div>
-                                                <label className="field-label">
-                                                    Reporting Manager <span className="text-red-500">*</span>
-                                                </label>
+                                                <label className="field-label">Reporting Manager</label>
                                                 <select
                                                     {...register("reportingManager")}
                                                     className={`${errors.reportingManager ? errorInputClass : inputClass} cursor-pointer`}
                                                 >
-                                                    <option value="">Select Manager</option>
-                                                    {REPORTING_MANAGER_OPTIONS.map((manager) => (
-                                                        <option key={manager} value={manager}>
-                                                            {manager}
+                                                    <option value="">No manager</option>
+                                                    {managerChoices.map((m) => (
+                                                        <option key={m.value} value={m.value}>
+                                                            {m.name}
                                                         </option>
                                                     ))}
-                                                    <option value="Other">+ Add Reporting Manager</option>
                                                 </select>
                                                 <FieldError>{errors.reportingManager?.message}</FieldError>
-                                                {watchedForm.reportingManager === "Other" && (
-                                                    <>
-                                                        <input
-                                                            {...reg("reportingManagerOther", clean.name(40))}
-                                                            placeholder="Enter manager name"
-                                                            maxLength={40}
-                                                            className={`${errors.reportingManagerOther ? errorInputClass : inputClass} mt-3`}
-                                                        />
-                                                        <FieldError>{errors.reportingManagerOther?.message}</FieldError>
-                                                    </>
+
+                                                {legacyManager && !watchedForm.reportingManager && (
+                                                    <p className="text-[11px] font-medium text-amber-700 mt-1.5">
+                                                        This employee was saved earlier with the manager name "{legacyManager}". Please select the
+                                                        manager from the list.
+                                                    </p>
+                                                )}
+                                                {lookupsLoaded && managerChoices.length === 0 && (
+                                                    <p className="text-[11px] text-slate-400 mt-1.5">
+                                                        No manager found. The admin must first add an employee with the Manager role (Login Access),
+                                                        then he will appear here.
+                                                    </p>
                                                 )}
                                             </div>
 
@@ -2163,7 +2551,7 @@ function EmployeeFormContent() {
                                         </div>
 
                                         {/* HR and managers do not set the login. They are told what happens next. */}
-                                        {!isAdmin && !editId && (
+                                        {!isAdmin && registering && (
                                             <div className="flex items-start gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3.5 text-indigo-800">
                                                 <Info size={17} className="shrink-0 mt-0.5" />
                                                 <p className="text-[11px] sm:text-xs font-medium leading-relaxed">
@@ -2233,7 +2621,7 @@ function EmployeeFormContent() {
                                             {/* Password */}
                                             <div>
                                                 <label className="field-label">
-                                                    Login Password {!editId && <span className="text-red-500">*</span>}
+                                                    Login Password {!hasLogin && <span className="text-red-500">*</span>}
                                                 </label>
                                                 <div className="flex gap-2">
                                                     <div className="relative flex-1 min-w-0">
@@ -2242,7 +2630,7 @@ function EmployeeFormContent() {
                                                             type={showPassword ? "text" : "password"}
                                                             autoComplete="new-password"
                                                             {...reg("password", clean.password)}
-                                                            placeholder={editId ? "Leave blank to keep the current password" : "Create a password"}
+                                                            placeholder={hasLogin ? "Leave blank to keep the current password" : "Create a password"}
                                                             maxLength={32}
                                                             className={`${errors.password ? errorInputClass : inputClass} pl-10 pr-11 font-mono`}
                                                         />
@@ -2335,7 +2723,7 @@ function EmployeeFormContent() {
                                             type="button"
                                             onClick={handleNext}
                                             disabled={loading}
-                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 sm:min-w-[130px] px-6 py-3 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-60"
+                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 sm:min-w-[150px] px-6 py-3 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-60"
                                         >
                                             {loading ? (
                                                 <>
@@ -2343,11 +2731,11 @@ function EmployeeFormContent() {
                                                 </>
                                             ) : currentStep === LAST_STEP ? (
                                                 <>
-                                                    <Save size={15} /> {editId ? "Update Employee" : "Save Employee"}
+                                                    <Save size={15} /> {registering ? "Save Employee" : "Update Employee"}
                                                 </>
                                             ) : (
                                                 <>
-                                                    Continue <ChevronRight size={15} />
+                                                    Save & Continue <ChevronRight size={15} />
                                                 </>
                                             )}
                                         </button>
@@ -2379,6 +2767,38 @@ function EmployeeFormContent() {
     );
 }
 
+/*
+  The shell reads ?id= from the URL.
+  - Another employee (or a blank "Add Employee") is opened  -> the form is rebuilt from zero.
+  - The form itself puts ?id= in the URL after Step 1 is saved -> the form is NOT rebuilt.
+*/
+function EmployeeFormShell() {
+    const searchParams = useSearchParams();
+    const routeId = searchParams.get("id") || "";
+
+    const ownDraftRef = useRef("");
+    const seenRef = useRef(routeId);
+    const [instance, setInstance] = useState(0);
+
+    useEffect(() => {
+        if (seenRef.current === routeId) return;
+        seenRef.current = routeId;
+        if (routeId && routeId === ownDraftRef.current) return; // our own URL update
+        ownDraftRef.current = "";
+        setInstance((n) => n + 1);
+    }, [routeId]);
+
+    return (
+        <EmployeeFormContent
+            key={instance}
+            routeId={routeId}
+            onDraftCreated={(id) => {
+                ownDraftRef.current = id;
+            }}
+        />
+    );
+}
+
 export default function AddEmployeePage() {
     return (
         <Suspense
@@ -2388,10 +2808,19 @@ export default function AddEmployeePage() {
                 </div>
             }
         >
-            <EmployeeFormContent />
+            <EmployeeFormShell />
         </Suspense>
     );
 }
+
+
+
+
+
+
+
+
+
 
 
 // "use client";
@@ -2441,6 +2870,7 @@ export default function AddEmployeePage() {
 // /* -------------------------------------------------------------------------- */
 
 // const COMPANY_NAME = "HRMS Portal"; // shown in the login details message. Change it to your company name.
+// const ID_PREFIX = "FPS"; // employee ids look like FPS0001, FPS0002 ...
 
 // const GENDER_OPTIONS = [
 //     { value: "male", label: "Male", sub: "Identify as male" },
@@ -2469,14 +2899,9 @@ export default function AddEmployeePage() {
 //     "Inactive",
 // ];
 
-// const REPORTING_MANAGER_OPTIONS = ["Sanjay Sir", "Nitesh Sir", "Vimal Sir"];
-
 // /* Access role of the login account. "Admin" is shown only when an existing admin is being edited. */
 // const ROLE_OPTIONS = ["Employee", "Manager", "HR"];
 // const ALL_ROLES = [...ROLE_OPTIONS, "Admin"];
-
-// /* Terms shown to the admin and copied into the message that is sent to the employee */
-
 
 // const DESIGNATION_PRESETS = [
 //     "Software Engineer",
@@ -2555,7 +2980,6 @@ export default function AddEmployeePage() {
 //         "employmentType",
 //         "employeeStatus",
 //         "reportingManager",
-//         "reportingManagerOther",
 //         "dateOfJoining",
 //         "salary",
 //     ],
@@ -2573,6 +2997,9 @@ export default function AddEmployeePage() {
 // const PAN_REGEX = /^[A-Z]{5}\d{4}[A-Z]$/;
 // const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,32}$/;
 // const PASSWORD_MESSAGE = "Password must be 8-32 characters with an uppercase letter, a lowercase letter and a number";
+// const OBJECT_ID_REGEX = /^[a-f\d]{24}$/i;
+
+// const isObjectId = (v) => OBJECT_ID_REGEX.test(String(v || ""));
 
 // const nameField = (label, max = 30) =>
 //     z
@@ -2588,12 +3015,12 @@ export default function AddEmployeePage() {
 //     employeeId: z
 //         .string()
 //         .trim()
-//         .min(1, "Employee ID is required")
+//         // .min(1, "Employee ID is required")
 //         .regex(
 //             /^[A-Za-z0-9-]{3,20}$/,
 //             "Employee ID must be 3 to 20 characters (letters, numbers and hyphens only)"
 //         ),
-//     profilePhotoData: z.string().min(1, "Profile photo is required"),
+//     // profilePhotoData: z.string().min(1, "Profile photo is required"),
 //     firstName: nameField("First name"),
 //     lastName: nameField("Last name"),
 //     email: z
@@ -2632,8 +3059,11 @@ export default function AddEmployeePage() {
 //         departmentOther: z.string().optional(),
 //         employmentType: oneOf(EMPLOYMENT_TYPES, "Please select an employment type"),
 //         employeeStatus: oneOf(EMPLOYEE_STATUS_OPTIONS, "Please select an employee status"),
-//         reportingManager: z.string().min(1, "Please select a reporting manager"),
-//         reportingManagerOther: z.string().optional(),
+//         /* Empty = no manager. Otherwise it must be a real employee id. */
+//         reportingManager: z
+//             .string()
+//             .optional()
+//             .refine((v) => !v || isObjectId(v), "Please select the reporting manager from the list"),
 //         dateOfJoining: z
 //             .string()
 //             .min(1, "Joining date is required")
@@ -2664,15 +3094,6 @@ export default function AddEmployeePage() {
 //         };
 //         checkOther("designation", "designationOther", "designation");
 //         checkOther("department", "departmentOther", "department");
-
-//         if (data.reportingManager === "Other") {
-//             const value = (data.reportingManagerOther || "").trim();
-//             if (value.length < 2) {
-//                 ctx.addIssue({ code: "custom", path: ["reportingManagerOther"], message: "Please enter the manager name" });
-//             } else if (!NAME_REGEX.test(value)) {
-//                 ctx.addIssue({ code: "custom", path: ["reportingManagerOther"], message: "Manager name can contain only letters" });
-//             }
-//         }
 //     });
 
 // const step3Schema = z.object({
@@ -2780,7 +3201,7 @@ export default function AddEmployeePage() {
 
 // const getEmployeeName = (employee) => {
 //     if (!employee) return "";
-//     return employee.name || `${employee.firstName || ""} ${employee.lastName || ""}`.trim();
+//     return employee.name || employee.fullName || `${employee.firstName || ""} ${employee.lastName || ""}`.trim();
 // };
 
 // const getLookupId = (item) => {
@@ -2797,15 +3218,27 @@ export default function AddEmployeePage() {
 //     return item;
 // };
 
-// /* Generates the next employee ID from the highest existing EMP-### number */
+// /* Next employee id from the highest existing FPS number: FPS0001, FPS0002 ... (old ids like EMP-001 are ignored) */
 // const generateEmployeeId = (list) => {
+//     const pattern = new RegExp(`^${ID_PREFIX}(\\d+)$`, "i");
 //     let max = 0;
 //     list.forEach((emp) => {
-//         const match = /^EMP-(\d+)$/i.exec(String(emp?.employeeId || ""));
+//         const match = pattern.exec(String(emp?.employeeId || ""));
 //         if (match) max = Math.max(max, Number(match[1]));
 //     });
-//     const next = Math.max(max, list.length) + 1;
-//     return `EMP-${String(next).padStart(3, "0")}`;
+//     return `${ID_PREFIX}${String(max + 1).padStart(4, "0")}`;
+// };
+
+// /* The server knows every employee, so it gives the safest next id. If it is not available, the list is used. */
+// const getNextEmployeeId = async (list) => {
+//     try {
+//         const res = await api.get("/employees/next-id");
+//         const id = res?.data?.employeeId;
+//         if (id) return String(id).toUpperCase();
+//     } catch {
+//         /* use the local list below */
+//     }
+//     return generateEmployeeId(list);
 // };
 
 // /* Random password: 12 characters, always has an uppercase letter, a lowercase letter and a number */
@@ -2831,8 +3264,11 @@ export default function AddEmployeePage() {
 //     return chars.join("");
 // };
 
-// /* The message the admin sends to the employee: name, login email, password and the terms (no website link) */
-// const buildLoginMessage = ({ name, loginEmail, password, isEdit }) =>
+// /* The login page URL. Works on localhost and on the live site automatically. */
+// const getLoginUrl = () => (typeof window !== "undefined" ? `${window.location.origin}/login` : "/login");
+
+// /* The message the admin sends to the employee: login URL, login email, password and the forgot password note */
+// const buildLoginMessage = ({ name, loginUrl, loginEmail, password, isEdit }) =>
 //     [
 //         `Welcome to ${COMPANY_NAME}`,
 //         "",
@@ -2842,11 +3278,12 @@ export default function AddEmployeePage() {
 //             ? "Your HRMS password has been updated by the admin. Your login details are given below."
 //             : "Your HRMS account has been created. Your login details are given below.",
 //         "",
-//         `Name: ${name}`,
+//         `Login URL: ${loginUrl}`,
 //         `Login Email: ${loginEmail}`,
 //         `Password: ${password}`,
 //         "",
-
+//         'If you forget your password, use "Forgot Password" on the login page.',
+//         "",
 //         "Regards,",
 //         `HR & Admin Team, ${COMPANY_NAME}`,
 //     ].join("\n");
@@ -2996,13 +3433,14 @@ export default function AddEmployeePage() {
 //     );
 // }
 
-// /* Shown once after the admin saves login access: login details and terms, ready to send to the employee */
+// /* Shown once after the admin saves login access: login URL, email and password, ready to send to the employee */
 // function CredentialsModal({ data, onDone }) {
 //     const [copied, setCopied] = useState("");
 //     const [reveal, setReveal] = useState(false);
 
 //     const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
-//     const message = buildLoginMessage(data);
+//     const loginUrl = getLoginUrl();
+//     const message = buildLoginMessage({ ...data, loginUrl });
 
 //     useEffect(() => {
 //         const previous = document.body.style.overflow;
@@ -3040,7 +3478,7 @@ export default function AddEmployeePage() {
 //     };
 
 //     const rows = [
-//         { key: "name", label: "Name", value: data.name },
+//         { key: "url", label: "Login URL", value: loginUrl, copy: true },
 //         { key: "email", label: "Login Email", value: data.loginEmail, copy: true },
 //         { key: "password", label: "Password", value: data.password, secret: true, copy: true },
 //     ];
@@ -3054,10 +3492,10 @@ export default function AddEmployeePage() {
 //                             <CheckCircle2 size={28} />
 //                         </div>
 //                         <h3 className="text-lg font-bold text-slate-900">
-//                             {data.isEdit ? "Login access updated" : "Employee registered"}
+//                             {data.isEdit ? "Employee updated" : "Employee registered"}
 //                         </h3>
 //                         <p className="text-xs text-slate-500">
-//                             Send these login details to <span className="font-semibold text-slate-700">{data.name}</span>.
+//                             Share these login details with <span className="font-semibold text-slate-700">{data.name}</span>.
 //                         </p>
 //                     </div>
 
@@ -3097,26 +3535,11 @@ export default function AddEmployeePage() {
 //                         ))}
 //                     </div>
 
-//                     {/* Terms */}
-//                     {/* <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-//                         <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-3">Terms & Conditions</p>
-//                         {/* <ol className="space-y-2">
-//                             {LOGIN_TERMS.map((term, i) => (
-//                                 <li key={i} className="flex gap-2.5 text-[12px] leading-relaxed text-slate-600">
-//                                     <span className="shrink-0 w-5 h-5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500 flex items-center justify-center mt-px">
-//                                         {i + 1}
-//                                     </span>
-//                                     <span>{term}</span>
-//                                 </li>
-//                             ))}
-//                         </ol> */}
-//                     {/* </div>  */}
-
 //                     <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-amber-800">
 //                         <AlertCircle size={15} className="shrink-0 mt-0.5" />
 //                         <p className="text-[11px] font-medium leading-relaxed">
-//                             This password is shown only once and cannot be viewed again later. Copy the details now. If it
-//                             is lost, the employee can use "Forgot Password", or you can set a new one from the Edit Employee form.
+//                             This password is shown only once and cannot be viewed again later. Copy it now. If it is lost,
+//                             the employee can use "Forgot Password", or you can set a new one from the Edit Employee form.
 //                         </p>
 //                     </div>
 //                 </div>
@@ -3146,7 +3569,7 @@ export default function AddEmployeePage() {
 //                             className="sm:flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg shadow-indigo-600/20"
 //                         >
 //                             {copied === "all" ? <Check size={15} /> : <Copy size={15} />}
-//                             {copied === "all" ? "Copied" : "Copy message"}
+//                             {copied === "all" ? "Copied" : "Copy all details"}
 //                         </button>
 //                     </div>
 //                 </div>
@@ -3180,6 +3603,9 @@ export default function AddEmployeePage() {
 //     const [departmentsList, setDepartmentsList] = useState([]);
 //     const [designationsList, setDesignationsList] = useState([]);
 //     const [employeesList, setEmployeesList] = useState([]);
+//     const [managerOptions, setManagerOptions] = useState([]); // employees with the Manager role (/employees/manager-options)
+//     const [savedManager, setSavedManager] = useState(null); // the manager already saved on this employee (edit mode)
+//     const [legacyManager, setLegacyManager] = useState(""); // old records saved the manager as plain text
 //     const [lookupsLoaded, setLookupsLoaded] = useState(false);
 //     const [error, setError] = useState("");
 //     const [loading, setLoading] = useState(false);
@@ -3222,7 +3648,6 @@ export default function AddEmployeePage() {
 //             departmentOther: "",
 //             employmentType: "Full-time",
 //             reportingManager: "",
-//             reportingManagerOther: "",
 //             dateOfJoining: "",
 //             employeeStatus: "Active",
 //             salary: "",
@@ -3294,17 +3719,19 @@ export default function AddEmployeePage() {
 //         return null;
 //     };
 
-//     /* Load lookups & employees */
+//     /* Load lookups, employees, the managers, and the next employee id */
 //     useEffect(() => {
 //         async function loadLookups() {
+//             let list = [];
 //             try {
 //                 const results = await Promise.allSettled([
 //                     api.get("/organization/departments?status=active"),
 //                     api.get("/organization/designations?status=active"),
 //                     api.get("/employees"),
+//                     api.get("/employees/manager-options"),
 //                 ]);
 
-//                 const [deptRes, desigRes, employeesRes] = results;
+//                 const [deptRes, desigRes, employeesRes, managersRes] = results;
 
 //                 if (deptRes.status === "fulfilled") {
 //                     const raw = deptRes.value?.data;
@@ -3316,17 +3743,22 @@ export default function AddEmployeePage() {
 //                 }
 //                 if (employeesRes.status === "fulfilled") {
 //                     const raw = employeesRes.value?.data;
-//                     const list = Array.isArray(raw) ? raw : raw?.data || raw?.employees || [];
+//                     list = Array.isArray(raw) ? raw : raw?.data || raw?.employees || [];
 //                     setEmployeesList(list);
-
-//                     if (!editId) {
-//                         setValue("employeeId", generateEmployeeId(list));
-//                     }
 //                 }
+//                 if (managersRes.status === "fulfilled") {
+//                     const raw = managersRes.value?.data;
+//                     setManagerOptions(Array.isArray(raw) ? raw : raw?.managers || raw?.data || []);
+//                 }
+//                 /* if /employees/manager-options is not available, the employees with role "manager" are used instead */
 //             } catch (err) {
 //                 console.error("Failed to load options", err);
 //             } finally {
 //                 setLookupsLoaded(true);
+//             }
+
+//             if (!editId) {
+//                 setValue("employeeId", await getNextEmployeeId(list));
 //             }
 //         }
 //         loadLookups();
@@ -3350,7 +3782,7 @@ export default function AddEmployeePage() {
 //                 const profilePhoto = emp.avatar || emp.profilePhoto || emp.profilePhotoData || emp.photo || "";
 //                 const docs = emp.documents || {};
 
-//                 setValue("employeeId", emp.employeeId || `EMP-${String(editId).slice(-4).toUpperCase()}`);
+//                 setValue("employeeId", emp.employeeId || `${ID_PREFIX}${String(editId).slice(-4).toUpperCase()}`);
 //                 setValue("firstName", firstName);
 //                 setValue("lastName", lastName);
 //                 setValue("name", fullName);
@@ -3367,13 +3799,27 @@ export default function AddEmployeePage() {
 //                 setValue("employmentType", emp.employmentType || "Full-time");
 //                 setValue("employeeStatus", emp.employeeStatus || "Active");
 
-//                 const manager = emp.reportingManager || "";
-//                 if (manager && !REPORTING_MANAGER_OPTIONS.includes(manager)) {
-//                     setValue("reportingManager", "Other");
-//                     setValue("reportingManagerOther", manager);
-//                 } else {
-//                     setValue("reportingManager", manager);
+//                 /* Reporting manager: a real employee id (or populated object). An old record can hold a plain name. */
+//                 const savedRef = emp.reportingManager;
+//                 const savedId = String(getLookupId(savedRef) || "");
+
+//                 if (isObjectId(savedId)) {
+//                     setValue("reportingManager", savedId);
+//                     const savedName =
+//                         (savedRef && typeof savedRef === "object" && getEmployeeName(savedRef)) || emp.reportingManagerName || "";
+//                     if (savedName) setSavedManager({ value: savedId, name: savedName });
+//                 } else if (savedId) {
+//                     setLegacyManager(savedId);
 //                 }
+
+//                 // if (isObjectId(savedId)) {
+//                 //     setValue("reportingManager", savedId);
+//                 //     if (savedRef && typeof savedRef === "object" && getEmployeeName(savedRef)) {
+//                 //         setSavedManager({ value: savedId, name: getEmployeeName(savedRef) });
+//                 //     }
+//                 // } else if (savedId) {
+//                 //     setLegacyManager(savedId);
+//                 // }
 
 //                 setValue("dateOfJoining", emp.dateOfJoining ? String(emp.dateOfJoining).split("T")[0] : "");
 //                 setValue("salary", emp.salary !== undefined && emp.salary !== null ? String(emp.salary) : "");
@@ -3446,6 +3892,44 @@ export default function AddEmployeePage() {
 //         });
 //         return [...map.values()];
 //     }, [departmentsList]);
+
+//     /* Reporting manager choices: only employees with the Manager role, active, never the employee being edited */
+//     const managerChoices = useMemo(() => {
+//         const source = managerOptions.length
+//             ? managerOptions
+//             : employeesList.filter((e) => String(e.role || "").toLowerCase() === "manager");
+
+//         const list = source
+//             .filter((m) => !/^(inactive|exited|exit)$/i.test(String(m.employeeStatus || "")))
+//             .map((m) => ({ value: String(m._id || m.id || ""), name: getEmployeeName(m) }))
+//             .filter((m) => isObjectId(m.value) && m.name && m.value !== String(editId || ""));
+
+//         /* the manager already saved on this employee stays selectable, so editing never drops him silently */
+//         if (savedManager && savedManager.value !== String(editId || "") && !list.some((m) => m.value === savedManager.value)) {
+//             list.push(savedManager);
+//         }
+//         return list.sort((a, b) => a.name.localeCompare(b.name));
+//     }, [managerOptions, employeesList, savedManager, editId]);
+
+//     const selectedManager = useMemo(
+//         () => managerChoices.find((m) => m.value === watchedForm.reportingManager) || null,
+//         [managerChoices, watchedForm.reportingManager]
+//     );
+
+//     /* An old record saved the manager as a name (for example "Sanjay Sir"). Match it to a real manager. */
+//     useEffect(() => {
+//         if (!legacyManager || !lookupsLoaded || getValues("reportingManager")) return;
+//         const wanted = legacyManager.trim().toLowerCase();
+//         const wantedNoSir = wanted.replace(/\s+sir$/, "");
+//         const hit = managerChoices.find((m) => {
+//             const n = m.name.trim().toLowerCase();
+//             return n === wanted || n === wantedNoSir;
+//         });
+//         if (hit) {
+//             setValue("reportingManager", hit.value);
+//             setLegacyManager("");
+//         }
+//     }, [legacyManager, lookupsLoaded, managerChoices, getValues, setValue]);
 
 //     /* Edit mode: if a saved custom designation/department is not in the list, show it under "Other" */
 //     useEffect(() => {
@@ -3635,7 +4119,6 @@ export default function AddEmployeePage() {
 //             const data = getValues();
 //             const finalDesignation = data.designation === "Other" ? data.designationOther.trim() : data.designation;
 //             const finalDepartment = data.department === "Other" ? data.departmentOther.trim() : data.department;
-//             const finalManager = data.reportingManager === "Other" ? data.reportingManagerOther.trim() : data.reportingManager;
 //             const aadhaar = data.aadhaarNumber.trim();
 //             const pan = data.panNumber.trim().toUpperCase();
 //             const loginEmail = data.loginEmail.trim().toLowerCase();
@@ -3654,7 +4137,7 @@ export default function AddEmployeePage() {
 //                 phone: data.phone.trim(),
 //                 designation: finalDesignation,
 //                 department: finalDepartment,
-//                 reportingManager: finalManager,
+//                 reportingManager: data.reportingManager || null, // the manager's employee id, or null for no manager
 //                 salary: Number(data.salary) || 0,
 //                 nationalIdType: "Aadhaar Card",
 //                 nationalId: aadhaar,
@@ -3721,6 +4204,8 @@ export default function AddEmployeePage() {
 //             const msg = err?.response?.data?.message || err?.response?.data?.error || "Failed to save employee record.";
 //             setError(msg);
 //             toast.error(msg);
+//             /* a reporting manager problem is fixed on Step 2, so take the user there */
+//             if (/reporting|report to|manager/i.test(msg)) changeStep(2);
 //         } finally {
 //             setLoading(false);
 //         }
@@ -3888,6 +4373,7 @@ export default function AddEmployeePage() {
 //                                 <SummaryRow label="Department" value={selectedDepartment} />
 //                                 <SummaryRow label="Employment" value={watchedForm.employmentType} />
 //                                 <SummaryRow label="Status" value={watchedForm.employeeStatus} />
+//                                 <SummaryRow label="Manager" value={selectedManager?.name} />
 //                             </SummaryCard>
 
 //                             <SummaryCard icon={FileText} title="Documents" active={currentStep === 3} status={isStep3Done ? "Done" : "Pending"}>
@@ -3994,7 +4480,7 @@ export default function AddEmployeePage() {
 //                                         </div>
 
 //                                         {/* Employee ID (manual + auto generate) */}
-//                                         <div>
+//                                         {/* <div>
 //                                             <label className="field-label">
 //                                                 Employee ID <span className="text-red-500">*</span>
 //                                             </label>
@@ -4003,7 +4489,7 @@ export default function AddEmployeePage() {
 //                                                     <Hash size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
 //                                                     <input
 //                                                         {...reg("employeeId", clean.employeeId)}
-//                                                         placeholder="EMP-001"
+//                                                         placeholder="FPS0001"
 //                                                         maxLength={20}
 //                                                         autoCapitalize="characters"
 //                                                         className={`${errors.employeeId || duplicateErrors.employeeId ? errorInputClass : inputClass} pl-10 font-mono uppercase`}
@@ -4011,12 +4497,10 @@ export default function AddEmployeePage() {
 //                                                 </div>
 //                                                 <button
 //                                                     type="button"
-//                                                     onClick={() =>
-//                                                         setValue("employeeId", generateEmployeeId(employeesList), {
-//                                                             shouldValidate: true,
-//                                                             shouldDirty: true,
-//                                                         })
-//                                                     }
+//                                                     onClick={async () => {
+//                                                         const id = await getNextEmployeeId(employeesList);
+//                                                         setValue("employeeId", id, { shouldValidate: true, shouldDirty: true });
+//                                                     }}
 //                                                     className="inline-flex items-center justify-center gap-1.5 px-3 sm:px-4 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold transition shrink-0"
 //                                                     title="Generate the next available ID"
 //                                                 >
@@ -4025,11 +4509,11 @@ export default function AddEmployeePage() {
 //                                                 </button>
 //                                             </div>
 //                                             <p className="text-[11px] text-slate-400 mt-1.5">
-//                                                 The ID is generated automatically, but you can edit it manually.
+//                                                 The ID is generated automatically (FPS0001, FPS0002 ...), but you can edit it manually.
 //                                             </p>
 //                                             <FieldError>{errors.employeeId?.message}</FieldError>
 //                                             <FieldError>{duplicateErrors.employeeId}</FieldError>
-//                                         </div>
+//                                         </div> */}
 
 //                                         {/* Names */}
 //                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4301,33 +4785,33 @@ export default function AddEmployeePage() {
 //                                         </div>
 
 //                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+//                                             {/* Reporting manager: only employees with the Manager role, shown by name. The employee id is saved. */}
 //                                             <div>
-//                                                 <label className="field-label">
-//                                                     Reporting Manager <span className="text-red-500">*</span>
-//                                                 </label>
+//                                                 <label className="field-label">Reporting Manager</label>
 //                                                 <select
 //                                                     {...register("reportingManager")}
 //                                                     className={`${errors.reportingManager ? errorInputClass : inputClass} cursor-pointer`}
 //                                                 >
-//                                                     <option value="">Select Manager</option>
-//                                                     {REPORTING_MANAGER_OPTIONS.map((manager) => (
-//                                                         <option key={manager} value={manager}>
-//                                                             {manager}
+//                                                     <option value="">No manager</option>
+//                                                     {managerChoices.map((m) => (
+//                                                         <option key={m.value} value={m.value}>
+//                                                             {m.name}
 //                                                         </option>
 //                                                     ))}
-//                                                     <option value="Other">+ Add Reporting Manager</option>
 //                                                 </select>
 //                                                 <FieldError>{errors.reportingManager?.message}</FieldError>
-//                                                 {watchedForm.reportingManager === "Other" && (
-//                                                     <>
-//                                                         <input
-//                                                             {...reg("reportingManagerOther", clean.name(40))}
-//                                                             placeholder="Enter manager name"
-//                                                             maxLength={40}
-//                                                             className={`${errors.reportingManagerOther ? errorInputClass : inputClass} mt-3`}
-//                                                         />
-//                                                         <FieldError>{errors.reportingManagerOther?.message}</FieldError>
-//                                                     </>
+
+//                                                 {legacyManager && !watchedForm.reportingManager && (
+//                                                     <p className="text-[11px] font-medium text-amber-700 mt-1.5">
+//                                                         This employee was saved earlier with the manager name "{legacyManager}". Please select the
+//                                                         manager from the list.
+//                                                     </p>
+//                                                 )}
+//                                                 {lookupsLoaded && managerChoices.length === 0 && (
+//                                                     <p className="text-[11px] text-slate-400 mt-1.5">
+//                                                         No manager found. The admin must first add an employee with the Manager role (Login Access),
+//                                                         then he will appear here.
+//                                                     </p>
 //                                                 )}
 //                                             </div>
 
@@ -4594,8 +5078,8 @@ export default function AddEmployeePage() {
 //                                         <div className="flex items-start gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3.5 text-indigo-800">
 //                                             <ShieldCheck size={17} className="shrink-0 mt-0.5" />
 //                                             <p className="text-[11px] sm:text-xs font-medium leading-relaxed">
-//                                                 Only employees added here can log in. After saving, you will get the login details and terms
-//                                                 to send to the employee. The employee can reset the password later with "Forgot Password".
+//                                                 Only employees added here can log in. After saving, you will get the login URL, email and
+//                                                 password to send to the employee. The employee can reset the password later with "Forgot Password".
 //                                             </p>
 //                                         </div>
 
@@ -4802,2726 +5286,3 @@ export default function AddEmployeePage() {
 // }
 
 
-<<<<<<< HEAD
-=======
-// "use client";
-
-// import { useEffect, useMemo, useRef, useState, Suspense } from "react";
-// import { useRouter, useSearchParams } from "next/navigation";
-// import {
-//     User,
-//     Briefcase,
-//     AlertCircle,
-//     Loader2,
-//     Save,
-//     Upload,
-//     Landmark,
-//     FileText,
-//     X,
-//     CheckCircle2,
-//     ChevronRight,
-//     Camera,
-//     Image as ImageIcon,
-//     Trash2,
-//     Users,
-//     CalendarDays,
-//     IndianRupee,
-//     Building2,
-//     Mail,
-//     Phone,
-//     BadgeCheck,
-//     CreditCard,
-//     MapPin,
-// } from "lucide-react";
-// import api from "@/lib/api";
-// import { toast } from "react-toastify";
-
-// /* -------------------------------------------------------------------------- */
-// /* CONSTANTS                                                                  */
-// /* -------------------------------------------------------------------------- */
-
-// const GENDER_OPTIONS = [
-//     {
-//         value: "male",
-//         label: "Male",
-//         sub: "Identify as male",
-//     },
-//     {
-//         value: "female",
-//         label: "Female",
-//         sub: "Identify as female",
-//     },
-//     {
-//         value: "other",
-//         label: "Other",
-//         sub: "Prefer not to say",
-//     },
-// ];
-
-// const EMPLOYMENT_TYPES = [
-//     "Full-time",
-//     "Part-time",
-//     "Contract",
-//     "Probationary",
-//     "Internship",
-//     "Remote",
-//     "Hybrid",
-//     "Freelance",
-// ];
-
-// const EMPLOYEE_STATUS_OPTIONS = [
-//     "Active",
-//     "Probation",
-//     "Notice Period",
-//     "On Leave",
-//     "Permanent",
-//     "Freelancer",
-//     "Inactive",
-// ];
-
-// const REPORTING_MANAGER_OPTIONS = [
-//     "Sanjay Sir",
-//     "Nitesh Sir",
-//     "Vimal Sir",
-// ];
-
-// const NATIONAL_ID_OPTIONS = [
-//     "Aadhaar Card",
-//     "PAN Card",
-//     "Voter ID",
-//     "Driving License",
-//     "Other Official ID",
-// ];
-
-// const DESIGNATION_PRESETS = [
-//     "Software Engineer",
-//     "Senior Software Engineer",
-//     "Frontend Developer",
-//     "Backend Developer",
-//     "Full Stack Developer",
-//     "UI/UX Designer",
-//     "Product Designer",
-//     "Project Manager",
-//     "Product Manager",
-//     "Team Lead",
-//     "HR Executive",
-//     "HR Manager",
-//     "Accountant",
-//     "Finance Executive",
-//     "Sales Executive",
-//     "Business Development Executive",
-//     "Marketing Executive",
-//     "Operations Executive",
-//     "Customer Support Executive",
-//     "IT Support Executive",
-//     "Office Administrator",
-//     "Intern",
-// ];
-
-// const DEPARTMENT_PRESETS = [
-//     "Human Resources",
-//     "Engineering",
-//     "Information Technology",
-//     "Finance",
-//     "Accounts",
-//     "Sales",
-//     "Marketing",
-//     "Operations",
-//     "Administration",
-//     "Customer Support",
-//     "Product",
-//     "Design",
-//     "Legal",
-//     "Procurement",
-//     "Quality Assurance",
-// ];
-
-// const MAX_FILE_SIZE = 10 * 1024 * 1024;
-
-// const inputClass =
-//     "w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10";
-
-// const errorInputClass =
-//     "w-full px-4 py-3 bg-white border border-red-400 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 outline-none transition-all focus:border-red-500 focus:ring-4 focus:ring-red-500/10";
-
-// /* -------------------------------------------------------------------------- */
-// /* HELPERS                                                                    */
-// /* -------------------------------------------------------------------------- */
-
-// const normalizeText = (value = "") =>
-//     String(value)
-//         .trim()
-//         .replace(/\s+/g, " ")
-//         .toLowerCase();
-
-// const normalizeEmail = (value = "") =>
-//     String(value).trim().toLowerCase();
-
-// const normalizePhone = (value = "") =>
-//     String(value).replace(/\D/g, "");
-
-// const getEmployeeName = (employee) => {
-//     if (!employee) return "";
-
-//     return (
-//         employee.name ||
-//         `${employee.firstName || ""} ${employee.lastName || ""}`.trim()
-//     );
-// };
-
-// const getLookupId = (item) => {
-//     if (!item) return "";
-
-//     if (typeof item === "object") {
-//         return item._id || item.id || "";
-//     }
-
-//     return item;
-// };
-
-// const getLookupLabel = (item) => {
-//     if (!item) return "";
-
-//     if (typeof item === "object") {
-//         return (
-//             item.title ||
-//             item.name ||
-//             item.label ||
-//             item.designation ||
-//             item.department ||
-//             ""
-//         );
-//     }
-
-//     return item;
-// };
-
-// /* -------------------------------------------------------------------------- */
-// /* SMALL COMPONENTS                                                           */
-// /* -------------------------------------------------------------------------- */
-
-// function FieldError({ children }) {
-//     if (!children) return null;
-
-//     return (
-//         <div className="flex items-center gap-1.5 mt-1.5 text-[11px] font-semibold text-red-600">
-//             <AlertCircle size={13} />
-//             <span>{children}</span>
-//         </div>
-//     );
-// }
-
-// function SectionTitle({ title, description }) {
-//     return (
-//         <div>
-//             <h2 className="text-xl font-bold text-slate-900">{title}</h2>
-//             <p className="text-xs text-slate-500 mt-1">{description}</p>
-//         </div>
-//     );
-// }
-
-// function UploadCard({
-//     title,
-//     subtitle,
-//     fileName,
-//     preview,
-//     onClick,
-//     onRemove,
-//     acceptText = "JPG, PNG, PDF · up to 10MB",
-// }) {
-//     return (
-//         <div>
-//             <div
-//                 onClick={onClick}
-//                 className={`group relative min-h-[190px] border-2 border-dashed rounded-2xl cursor-pointer transition-all overflow-hidden ${fileName
-//                     ? "border-emerald-300 bg-emerald-50/40"
-//                     : "border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50/30"
-//                     }`}
-//             >
-//                 {preview ? (
-//                     <div className="absolute inset-0">
-//                         <img
-//                             src={preview}
-//                             alt={title}
-//                             className="w-full h-full object-contain p-4"
-//                         />
-
-//                         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-900/70 to-transparent px-4 pt-10 pb-3">
-//                             <p className="text-xs font-semibold text-white truncate">
-//                                 {fileName}
-//                             </p>
-//                         </div>
-//                     </div>
-//                 ) : (
-//                     <div className="h-full min-h-[190px] flex flex-col items-center justify-center p-6 text-center">
-//                         <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3">
-//                             <Upload size={21} />
-//                         </div>
-
-//                         <p className="text-xs font-bold text-slate-700">
-//                             {title}
-//                         </p>
-
-//                         <p className="text-[11px] text-slate-400 mt-1">
-//                             {subtitle}
-//                         </p>
-
-//                         <p className="text-[10px] text-slate-400 mt-3">
-//                             {acceptText}
-//                         </p>
-//                     </div>
-//                 )}
-
-//                 {fileName && (
-//                     <button
-//                         type="button"
-//                         onClick={(e) => {
-//                             e.stopPropagation();
-//                             onRemove?.();
-//                         }}
-//                         className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/95 border border-slate-200 text-red-500 flex items-center justify-center shadow-sm hover:bg-red-50"
-//                     >
-//                         <Trash2 size={14} />
-//                     </button>
-//                 )}
-//             </div>
-//         </div>
-//     );
-// }
-
-// function SummaryCard({
-//     icon: Icon,
-//     title,
-//     status,
-//     active,
-//     children,
-// }) {
-//     return (
-//         <div
-//             className={`rounded-2xl border p-4 transition-all ${active
-//                 ? "border-indigo-500 bg-indigo-50/40 shadow-sm"
-//                 : "border-slate-200 bg-white"
-//                 }`}
-//         >
-//             <div className="flex items-center justify-between mb-3">
-//                 <div className="flex items-center gap-2">
-//                     <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-//                         <Icon size={15} />
-//                     </div>
-
-//                     <span className="text-xs font-bold text-slate-900">
-//                         {title}
-//                     </span>
-//                 </div>
-
-//                 <span
-//                     className={`text-[10px] font-bold px-2 py-1 rounded-full ${status === "Done"
-//                         ? "bg-emerald-50 text-emerald-700"
-//                         : "bg-amber-50 text-amber-700"
-//                         }`}
-//                 >
-//                     {status}
-//                 </span>
-//             </div>
-
-//             <div className="space-y-2">{children}</div>
-//         </div>
-//     );
-// }
-
-// function SummaryRow({ label, value }) {
-//     return (
-//         <div className="flex items-center justify-between gap-3 text-xs">
-//             <span className="text-slate-400 shrink-0">{label}</span>
-//             <span className="font-semibold text-slate-700 text-right truncate max-w-[160px]">
-//                 {value || "—"}
-//             </span>
-//         </div>
-//     );
-// }
-
-// /* -------------------------------------------------------------------------- */
-// /* MAIN                                                                       */
-// /* -------------------------------------------------------------------------- */
-
-// function EmployeeFormContent() {
-//     const router = useRouter();
-//     const searchParams = useSearchParams();
-
-//     const editId = searchParams.get("id");
-
-//     const frontIdRef = useRef(null);
-//     const backIdRef = useRef(null);
-//     const passportPhotoRef = useRef(null);
-
-//     const [currentStep, setCurrentStep] = useState(1);
-
-//     const [form, setForm] = useState({
-//         employeeId: "",
-
-//         // Personal
-//         firstName: "",
-//         lastName: "",
-//         name: "",
-//         email: "",
-//         phone: "",
-//         gender: "male",
-//         timeZone: "Asia/Kolkata (GMT+5:30)",
-
-//         // Profile photo
-//         avatar: "",
-//         profilePhotoFileName: "",
-//         profilePhotoData: "",
-
-//         // Job
-//         designation: "",
-//         designationOther: "",
-//         department: "",
-//         departmentOther: "",
-//         employmentType: "Full-time",
-//         reportingManager: "",
-//         reportingManagerOther: "",
-//         dateOfJoining: "",
-//         employeeStatus: "Active",
-//         salary: "",
-
-//         // Documents
-//         nationalIdType: "Aadhaar Card",
-//         nationalIdOther: "",
-//         nationalId: "",
-
-//         nationalIdFrontFileName: "",
-//         nationalIdFrontFileData: "",
-
-//         nationalIdBackFileName: "",
-//         nationalIdBackFileData: "",
-
-//         passportPhotoFileName: "",
-//         passportPhotoData: "",
-
-//         // Banking
-//         accountName: "",
-//         bankName: "",
-//         branchName: "",
-//         accountNumber: "",
-//         ifscCode: "",
-//         // Address
-//         address: "",
-//         city: "",
-//         state: "",
-//         pincode: "",
-
-//         role: "Employee",
-//     });
-
-//     const [departmentsList, setDepartmentsList] = useState([]);
-//     const [designationsList, setDesignationsList] = useState([]);
-//     const [managersList, setManagersList] = useState([]);
-//     const [employeesList, setEmployeesList] = useState([]);
-
-//     const [error, setError] = useState("");
-//     const [loading, setLoading] = useState(false);
-//     const [fetching, setFetching] = useState(false);
-
-//     const [duplicateErrors, setDuplicateErrors] = useState({
-//         name: "",
-//         email: "",
-//         phone: "",
-//     });
-
-//     /* ------------------------------------------------------------------------ */
-//     /* LOOKUPS                                                                  */
-//     /* ------------------------------------------------------------------------ */
-
-//     useEffect(() => {
-//         async function loadLookups() {
-//             try {
-//                 const results = await Promise.allSettled([
-//                     api.get("/organization/departments?status=active"),
-//                     api.get("/organization/designations?status=active"),
-//                     api.get("/employees"),
-//                 ]);
-
-//                 const [deptRes, desigRes, employeesRes] = results;
-
-//                 if (deptRes.status === "fulfilled") {
-//                     const raw = deptRes.value?.data;
-
-//                     const list = Array.isArray(raw)
-//                         ? raw
-//                         : raw?.data ||
-//                         raw?.departments ||
-//                         [];
-
-//                     setDepartmentsList(list);
-//                 }
-
-//                 if (desigRes.status === "fulfilled") {
-//                     const raw = desigRes.value?.data;
-
-//                     const list = Array.isArray(raw)
-//                         ? raw
-//                         : raw?.data ||
-//                         raw?.designations ||
-//                         [];
-
-//                     setDesignationsList(list);
-//                 }
-
-//                 if (employeesRes.status === "fulfilled") {
-//                     const raw = employeesRes.value?.data;
-
-//                     const list = Array.isArray(raw)
-//                         ? raw
-//                         : raw?.data ||
-//                         raw?.employees ||
-//                         [];
-
-//                     setEmployeesList(list);
-//                     setManagersList(list);
-
-//                     if (!editId) {
-//                         const nextNum = list.length + 1;
-
-//                         setForm((prev) => ({
-//                             ...prev,
-//                             employeeId: `EMP-${String(nextNum).padStart(3, "0")}`,
-//                         }));
-//                     }
-//                 }
-//             } catch (err) {
-//                 console.error("Failed to load employee options", err);
-//             }
-//         }
-
-//         loadLookups();
-//     }, [editId]);
-
-//     /* ------------------------------------------------------------------------ */
-//     /* EDIT EMPLOYEE                                                            */
-//     /* ------------------------------------------------------------------------ */
-
-//     useEffect(() => {
-//         if (!editId) return;
-
-//         async function loadEmployee() {
-//             try {
-//                 setFetching(true);
-
-//                 const res = await api.get(`/employees/${editId}`);
-
-//                 const emp =
-//                     res?.data?.employee ||
-//                     res?.data?.data ||
-//                     res?.data;
-
-//                 if (!emp) return;
-
-//                 const fullName =
-//                     emp.name ||
-//                     `${emp.firstName || ""} ${emp.lastName || ""}`.trim();
-
-//                 const parts = fullName.split(" ");
-
-//                 const firstName =
-//                     emp.firstName ||
-//                     parts[0] ||
-//                     "";
-
-//                 const lastName =
-//                     emp.lastName ||
-//                     parts.slice(1).join(" ") ||
-//                     "";
-
-//                 const profilePhoto =
-//                     emp.avatar ||
-//                     emp.profilePhoto ||
-//                     emp.profilePhotoData ||
-//                     emp.photo ||
-//                     "";
-
-//                 setForm((prev) => ({
-//                     ...prev,
-
-//                     employeeId:
-//                         emp.employeeId ||
-//                         `EMP-${String(editId).slice(-4)}`,
-
-//                     firstName,
-//                     lastName,
-//                     name: fullName,
-
-//                     email: emp.email || "",
-//                     phone: emp.phone || "",
-
-//                     gender:
-//                         String(emp.gender || "male").toLowerCase(),
-
-//                     avatar: profilePhoto,
-//                     profilePhotoData: profilePhoto,
-
-//                     profilePhotoFileName:
-//                         emp.profilePhotoFileName || "",
-
-//                     designation:
-//                         typeof emp.designation === "object"
-//                             ? emp.designation?._id
-//                             : emp.designation || "",
-
-//                     department:
-//                         typeof emp.department === "object"
-//                             ? emp.department?._id
-//                             : emp.department || "",
-
-//                     employmentType:
-//                         emp.employmentType || "Full-time",
-
-//                     reportingManager:
-//                         typeof emp.reportingManager === "object"
-//                             ? getEmployeeName(emp.reportingManager)
-//                             : REPORTING_MANAGER_OPTIONS.includes(emp.reportingManager)
-//                                 ? emp.reportingManager
-//                                 : emp.reportingManager
-//                                     ? "Other"
-//                                     : "",
-
-//                     reportingManagerOther:
-//                         typeof emp.reportingManager === "object"
-//                             ? ""
-//                             : REPORTING_MANAGER_OPTIONS.includes(emp.reportingManager)
-//                                 ? ""
-//                                 : emp.reportingManager || "",
-
-//                     employeeStatus:
-//                         emp.employeeStatus || "Active",
-
-//                     dateOfJoining:
-//                         emp.dateOfJoining
-//                             ? String(emp.dateOfJoining).split("T")[0]
-//                             : "",
-
-//                     salary: emp.salary ?? "",
-
-//                     nationalIdType:
-//                         emp.nationalIdType ||
-//                         emp.documents?.nationalIdType ||
-//                         "Aadhaar Card",
-
-//                     nationalIdOther:
-//                         emp.nationalIdOther ||
-//                         emp.documents?.nationalIdOther ||
-//                         "",
-
-//                     nationalId:
-//                         emp.nationalId ||
-//                         emp.idProofNumber ||
-//                         "",
-
-//                     nationalIdFrontFileName:
-//                         emp.documents?.nationalIdFrontFileName || "",
-
-//                     nationalIdFrontFileData:
-//                         emp.documents?.nationalIdFrontFileData || "",
-
-//                     nationalIdBackFileName:
-//                         emp.documents?.nationalIdBackFileName || "",
-
-//                     nationalIdBackFileData:
-//                         emp.documents?.nationalIdBackFileData || "",
-
-//                     passportPhotoFileName:
-//                         emp.documents?.passportPhotoFileName || "",
-
-//                     passportPhotoData:
-//                         emp.documents?.passportPhotoData ||
-//                         profilePhoto ||
-//                         "",
-
-//                     accountName:
-//                         emp.bankDetails?.accountName ||
-//                         fullName,
-
-//                     bankName:
-//                         emp.bankDetails?.bankName || "",
-
-//                     branchName:
-//                         emp.bankDetails?.branchName || "",
-
-//                     accountNumber:
-//                         emp.bankDetails?.accountNumber || "",
-
-//                     ifscCode:
-//                         emp.bankDetails?.ifscCode || "",
-
-//                     address:
-//                         emp.address || "",
-
-//                     city:
-//                         emp.city || "",
-
-//                     state:
-//                         emp.state || "",
-
-//                     pincode:
-//                         emp.pincode || "",
-//                 }));
-//             } catch (err) {
-//                 console.error(err);
-//                 setError("Failed to fetch employee record.");
-//             } finally {
-//                 setFetching(false);
-//             }
-//         }
-
-//         loadEmployee();
-//     }, [editId]);
-
-//     /* ------------------------------------------------------------------------ */
-//     /* OPTIONS                                                                  */
-//     /* ------------------------------------------------------------------------ */
-
-//     const designationOptions = useMemo(() => {
-//         const apiOptions = designationsList
-//             .map((item) => ({
-//                 value: getLookupId(item),
-//                 label: getLookupLabel(item),
-//             }))
-//             .filter((item) => item.value && item.label);
-
-//         const presetOptions = DESIGNATION_PRESETS.map((item) => ({
-//             value: item,
-//             label: item,
-//         }));
-
-//         const map = new Map();
-
-//         [...apiOptions, ...presetOptions].forEach((item) => {
-//             if (!map.has(item.value)) {
-//                 map.set(item.value, item);
-//             }
-//         });
-
-//         return [...map.values()];
-//     }, [designationsList]);
-
-//     const departmentOptions = useMemo(() => {
-//         const apiOptions = departmentsList
-//             .map((item) => ({
-//                 value: getLookupId(item),
-//                 label: getLookupLabel(item),
-//             }))
-//             .filter((item) => item.value && item.label);
-
-//         const presetOptions = DEPARTMENT_PRESETS.map((item) => ({
-//             value: item,
-//             label: item,
-//         }));
-
-//         const map = new Map();
-
-//         [...apiOptions, ...presetOptions].forEach((item) => {
-//             if (!map.has(item.value)) {
-//                 map.set(item.value, item);
-//             }
-//         });
-
-//         return [...map.values()];
-//     }, [departmentsList]);
-
-//     const selectedDesignation = useMemo(() => {
-//         const option = designationOptions.find(
-//             (item) => item.value === form.designation
-//         );
-
-//         return (
-//             option?.label ||
-//             form.designationOther ||
-//             form.designation ||
-//             "—"
-//         );
-//     }, [
-//         designationOptions,
-//         form.designation,
-//         form.designationOther,
-//     ]);
-
-//     const selectedDepartment = useMemo(() => {
-//         const option = departmentOptions.find(
-//             (item) => item.value === form.department
-//         );
-
-//         return (
-//             option?.label ||
-//             form.departmentOther ||
-//             form.department ||
-//             "—"
-//         );
-//     }, [
-//         departmentOptions,
-//         form.department,
-//         form.departmentOther,
-//     ]);
-
-//     /* ------------------------------------------------------------------------ */
-//     /* DUPLICATE CHECK                                                          */
-//     /* ------------------------------------------------------------------------ */
-
-//     const getDuplicateErrors = (candidate) => {
-//         const errors = {
-//             name: "",
-//             email: "",
-//             phone: "",
-//         };
-
-//         const candidateName = normalizeText(
-//             candidate.name ||
-//             `${candidate.firstName || ""} ${candidate.lastName || ""}`
-//         );
-
-//         const candidateEmail = normalizeEmail(candidate.email);
-
-//         const candidatePhone = normalizePhone(candidate.phone);
-
-//         if (!candidateName && !candidateEmail && !candidatePhone) {
-//             return errors;
-//         }
-
-//         const duplicate = employeesList.find((employee) => {
-//             const employeeId =
-//                 employee?._id ||
-//                 employee?.id ||
-//                 employee?.employeeId;
-
-//             // Don't compare the employee with itself while editing.
-//             if (editId && String(employeeId) === String(editId)) {
-//                 return false;
-//             }
-
-//             const employeeName = normalizeText(
-//                 getEmployeeName(employee)
-//             );
-
-//             const employeeEmail = normalizeEmail(
-//                 employee.email
-//             );
-
-//             const employeePhone = normalizePhone(
-//                 employee.phone
-//             );
-
-//             if (
-//                 candidateName &&
-//                 employeeName &&
-//                 candidateName === employeeName
-//             ) {
-//                 errors.name =
-//                     "This employee name is already added.";
-//             }
-
-//             if (
-//                 candidateEmail &&
-//                 employeeEmail &&
-//                 candidateEmail === employeeEmail
-//             ) {
-//                 errors.email =
-//                     "This email is already registered.";
-//             }
-
-//             if (
-//                 candidatePhone &&
-//                 employeePhone &&
-//                 candidatePhone === employeePhone
-//             ) {
-//                 errors.phone =
-//                     "This phone number is already registered.";
-//             }
-
-//             return Boolean(
-//                 errors.name ||
-//                 errors.email ||
-//                 errors.phone
-//             );
-//         });
-
-//         if (!duplicate) {
-//             return errors;
-//         }
-
-//         return errors;
-//     };
-
-//     /* Re-check whenever employee list arrives or form changes. */
-//     useEffect(() => {
-//         if (!employeesList.length) return;
-
-//         setDuplicateErrors(
-//             getDuplicateErrors(form)
-//         );
-//     }, [
-//         employeesList,
-//         form.firstName,
-//         form.lastName,
-//         form.email,
-//         form.phone,
-//         editId,
-//     ]);
-
-//     /* ------------------------------------------------------------------------ */
-//     /* INPUT CHANGE                                                             */
-//     /* ------------------------------------------------------------------------ */
-
-//     const handleChange = (e) => {
-//         const { name, value } = e.target;
-
-//         setError("");
-
-//         setForm((prev) => {
-//             const updated = {
-//                 ...prev,
-//                 [name]: value,
-//             };
-
-//             if (
-//                 name === "firstName" ||
-//                 name === "lastName"
-//             ) {
-//                 updated.name =
-//                     `${name === "firstName" ? value : prev.firstName} ${name === "lastName" ? value : prev.lastName
-//                         }`.trim();
-
-//                 updated.accountName = updated.name;
-//             }
-
-//             return updated;
-//         });
-//     };
-
-//     /* ------------------------------------------------------------------------ */
-//     /* FILE UPLOAD                                                              */
-//     /* ------------------------------------------------------------------------ */
-
-//     const readFile = (file, callback, imagesOnly = false) => {
-//         if (!file) return;
-
-//         if (file.size > MAX_FILE_SIZE) {
-//             toast.error("File size must be less than 10MB.");
-//             return;
-//         }
-
-//         const isImage = file.type.startsWith("image/");
-//         const allowed = imagesOnly
-//             ? isImage
-//             : isImage || file.type === "application/pdf";
-
-//         if (!allowed) {
-//             toast.error(
-//                 imagesOnly
-//                     ? "Only JPG, PNG or WEBP images are allowed."
-//                     : "Only JPG, PNG, WEBP or PDF files are allowed."
-//             );
-//             return;
-//         }
-
-//         const reader = new FileReader();
-
-//         reader.onloadend = () => {
-//             callback(reader.result, file.name);
-//         };
-
-//         reader.readAsDataURL(file);
-//     };
-
-//     const handleProfilePhoto = (e) => {
-//         const file = e.target.files?.[0];
-
-//         readFile(file, (data, name) => {
-//             setForm((prev) => ({
-//                 ...prev,
-//                 avatar: data,
-//                 profilePhotoData: data,
-//                 profilePhotoFileName: name,
-//                 passportPhotoData: data,
-//                 passportPhotoFileName: name,
-//             }));
-//         });
-//     };
-
-//     const handleDocumentUpload = (
-//         e,
-//         dataKey,
-//         nameKey,
-//         imagesOnly = false
-//     ) => {
-//         const file = e.target.files?.[0];
-
-//         readFile(file, (data, name) => {
-//             setForm((prev) => ({
-//                 ...prev,
-//                 [dataKey]: data,
-//                 [nameKey]: name,
-//             }));
-//         }, imagesOnly);
-//     };
-
-//     const removeFile = (dataKey, nameKey) => {
-//         setForm((prev) => ({
-//             ...prev,
-//             [dataKey]: "",
-//             [nameKey]: "",
-//         }));
-//     };
-
-//     /* ------------------------------------------------------------------------ */
-//     /* VALIDATION                                                               */
-//     /* ------------------------------------------------------------------------ */
-
-//     const validateStep = () => {
-//         setError("");
-
-//         const duplicates = getDuplicateErrors(form);
-
-//         setDuplicateErrors(duplicates);
-
-//         if (
-//             duplicates.name ||
-//             duplicates.email ||
-//             duplicates.phone
-//         ) {
-//             setError(
-//                 "Please fix the duplicate employee details before continuing."
-//             );
-
-//             if (
-//                 currentStep !== 1
-//             ) {
-//                 setCurrentStep(1);
-//             }
-
-//             return false;
-//         }
-
-//         if (currentStep === 1) {
-//             if (!form.firstName.trim()) {
-//                 setError("First Name is required.");
-//                 return false;
-//             }
-
-//             if (!form.lastName.trim()) {
-//                 setError("Last Name is required.");
-//                 return false;
-//             }
-
-//             if (!form.email.trim()) {
-//                 setError("Email address is required.");
-//                 return false;
-//             }
-
-//             if (!/^\S+@\S+\.\S+$/.test(form.email)) {
-//                 setError("Please enter a valid email address.");
-//                 return false;
-//             }
-
-//             if (
-//                 form.phone &&
-//                 normalizePhone(form.phone).length < 10
-//             ) {
-//                 setError("Please enter a valid phone number.");
-//                 return false;
-//             }
-//         }
-
-//         if (currentStep === 2) {
-//             if (!form.department) {
-//                 setError("Department is required.");
-//                 return false;
-//             }
-
-//             if (
-//                 form.department === "Other" &&
-//                 !form.departmentOther.trim()
-//             ) {
-//                 setError("Please enter the department name.");
-//                 return false;
-//             }
-
-//             if (!form.designation) {
-//                 setError("Designation is required.");
-//                 return false;
-//             }
-
-//             if (
-//                 form.designation === "Other" &&
-//                 !form.designationOther.trim()
-//             ) {
-//                 setError("Please enter the designation.");
-//                 return false;
-//             }
-//         }
-
-//         if (currentStep === 3) {
-//             // Documents are intentionally optional.
-//             // If you want mandatory documents, add required validation here.
-//         }
-
-//         if (currentStep === 4) {
-//             // Banking is optional.
-//         }
-
-//         return true;
-//     };
-
-//     /* ------------------------------------------------------------------------ */
-//     /* NEXT                                                                     */
-//     /* ------------------------------------------------------------------------ */
-
-//     const handleNext = () => {
-//         if (!validateStep()) return;
-
-//         if (currentStep < 4) {
-//             setCurrentStep((prev) => prev + 1);
-//             return;
-//         }
-
-//         handleSubmitForm();
-//     };
-
-//     /* ------------------------------------------------------------------------ */
-//     /* SUBMIT                                                                   */
-//     /* ------------------------------------------------------------------------ */
-
-//     const handleSubmitForm = async () => {
-//         setLoading(true);
-//         setError("");
-
-//         try {
-//             const duplicates = getDuplicateErrors(form);
-
-//             setDuplicateErrors(duplicates);
-
-//             if (
-//                 duplicates.name ||
-//                 duplicates.email ||
-//                 duplicates.phone
-//             ) {
-//                 setCurrentStep(1);
-//                 setError(
-//                     "Employee already exists with the same name, email or phone."
-//                 );
-//                 setLoading(false);
-//                 return;
-//             }
-
-//             const finalDesignation =
-//                 form.designation === "Other"
-//                     ? form.designationOther
-//                     : form.designation;
-
-//             const finalDepartment =
-//                 form.department === "Other"
-//                     ? form.departmentOther
-//                     : form.department;
-
-//             const payload = {
-//                 ...form,
-
-//                 name:
-//                     `${form.firstName} ${form.lastName}`.trim(),
-
-//                 designation: finalDesignation,
-//                 department: finalDepartment,
-
-//                 reportingManager:
-//                     form.reportingManager === "Other"
-//                         ? form.reportingManagerOther.trim()
-//                         : form.reportingManager,
-
-//                 nationalIdType: form.nationalIdType,
-//                 nationalIdOther: form.nationalIdOther,
-
-//                 salary: form.salary
-//                     ? Number(form.salary)
-//                     : 0,
-
-//                 idProofNumber:
-//                     form.nationalId ||
-//                     "",
-
-//                 bankDetails: {
-//                     accountName: form.accountName,
-//                     bankName: form.bankName,
-//                     branchName: form.branchName,
-//                     accountNumber: form.accountNumber,
-//                     ifscCode: form.ifscCode,
-//                 },
-
-//                 documents: {
-//                     nationalIdFrontFileName:
-//                         form.nationalIdFrontFileName,
-
-//                     nationalIdFrontFileData:
-//                         form.nationalIdFrontFileData,
-
-//                     nationalIdBackFileName:
-//                         form.nationalIdBackFileName,
-
-//                     nationalIdBackFileData:
-//                         form.nationalIdBackFileData,
-
-//                     passportPhotoFileName:
-//                         form.passportPhotoFileName,
-
-//                     passportPhotoData:
-//                         form.passportPhotoData,
-//                 },
-
-//                 // Keep profile image easy for employee profile/list API.
-//                 avatar:
-//                     form.profilePhotoData ||
-//                     form.avatar ||
-//                     "",
-//             };
-
-//             if (editId) {
-//                 await api.put(
-//                     `/employees/${editId}`,
-//                     payload
-//                 );
-
-//                 toast.success(
-//                     "Employee updated successfully!"
-//                 );
-//             } else {
-//                 await api.post(
-//                     "/employees",
-//                     payload
-//                 );
-
-//                 toast.success(
-//                     "Employee registered successfully!"
-//                 );
-//             }
-
-//             router.push("/employees");
-//         } catch (err) {
-//             console.error(err);
-
-//             const status = err?.response?.status;
-
-//             const msg =
-//                 err?.response?.data?.message ||
-//                 err?.response?.data?.error ||
-//                 "Failed to save employee record.";
-
-//             if (status === 409) {
-//                 setError(
-//                     "This employee already exists. Please check name, email or phone number."
-//                 );
-//                 setCurrentStep(1);
-//             } else {
-//                 setError(msg);
-//             }
-
-//             toast.error(msg);
-//         } finally {
-//             setLoading(false);
-//         }
-//     };
-
-//     /* ------------------------------------------------------------------------ */
-//     /* STEP STATUS                                                              */
-//     /* ------------------------------------------------------------------------ */
-
-//     const isStep1Done = Boolean(
-//         form.firstName &&
-//         form.lastName &&
-//         form.email &&
-//         !duplicateErrors.name &&
-//         !duplicateErrors.email
-//     );
-
-//     const isStep2Done = Boolean(
-//         form.department &&
-//         form.designation
-//     );
-
-//     const isStep3Done = Boolean(
-//         form.nationalIdType ||
-//         form.nationalId ||
-//         form.nationalIdFrontFileData ||
-//         form.nationalIdBackFileData ||
-//         form.passportPhotoData
-//     );
-
-//     const isStep4Done = Boolean(
-//         form.accountNumber &&
-//         form.bankName
-//     );
-
-//     /* ------------------------------------------------------------------------ */
-//     /* LOADING                                                                  */
-//     /* ------------------------------------------------------------------------ */
-
-//     if (fetching) {
-//         return (
-//             <div className="min-h-[500px] flex items-center justify-center">
-//                 <div className="flex flex-col items-center gap-3">
-//                     <Loader2
-//                         size={32}
-//                         className="animate-spin text-indigo-600"
-//                     />
-//                     <p className="text-xs text-slate-500 font-medium">
-//                         Loading employee profile...
-//                     </p>
-//                 </div>
-//             </div>
-//         );
-//     }
-
-//     /* ------------------------------------------------------------------------ */
-//     /* UI                                                                       */
-//     /* ------------------------------------------------------------------------ */
-
-//     return (
-//         <div className="min-h-screen bg-slate-50/70 px-4 py-6 sm:px-6 lg:px-8">
-//             <div className="max-w-7xl mx-auto">
-//                 <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
-
-//                     {/* ---------------------------------------------------------------- */}
-//                     {/* HEADER                                                           */}
-//                     {/* ---------------------------------------------------------------- */}
-
-//                     <div className="px-6 sm:px-8 py-5 border-b border-slate-100 flex items-center justify-between">
-//                         <div className="flex items-center gap-3">
-//                             <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg shadow-indigo-600/20">
-//                                 <User size={20} />
-//                             </div>
-
-//                             <div>
-//                                 <h1 className="text-lg sm:text-xl font-bold text-slate-900">
-//                                     {editId
-//                                         ? "Edit Employee"
-//                                         : "Add Employee"}
-//                                 </h1>
-
-//                                 <p className="text-xs text-slate-500 mt-0.5">
-//                                     Create a complete professional employee profile
-//                                 </p>
-//                             </div>
-//                         </div>
-
-//                         <button
-//                             type="button"
-//                             onClick={() => router.back()}
-//                             className="w-9 h-9 rounded-full border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-500 transition"
-//                         >
-//                             <X size={17} />
-//                         </button>
-//                     </div>
-
-//                     {/* ---------------------------------------------------------------- */}
-//                     {/* STEPS                                                            */}
-//                     {/* ---------------------------------------------------------------- */}
-
-//                     <div className="px-6 sm:px-8 py-4 border-b border-slate-100 bg-slate-50/60">
-//                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-//                             {[
-//                                 {
-//                                     step: 1,
-//                                     title: "Personal Info",
-//                                     icon: User,
-//                                 },
-//                                 {
-//                                     step: 2,
-//                                     title: "Job Details",
-//                                     icon: Briefcase,
-//                                 },
-//                                 {
-//                                     step: 3,
-//                                     title: "Documents",
-//                                     icon: FileText,
-//                                 },
-//                                 {
-//                                     step: 4,
-//                                     title: "Banking Info",
-//                                     icon: Landmark,
-//                                 },
-//                             ].map((item) => {
-//                                 const active =
-//                                     currentStep === item.step;
-
-//                                 const passed =
-//                                     currentStep > item.step;
-
-//                                 const Icon = item.icon;
-
-//                                 return (
-//                                     <button
-//                                         type="button"
-//                                         key={item.step}
-//                                         onClick={() =>
-//                                             setCurrentStep(item.step)
-//                                         }
-//                                         className={`text-left rounded-2xl border p-3 transition-all ${active
-//                                             ? "border-indigo-300 bg-indigo-50 shadow-sm"
-//                                             : passed
-//                                                 ? "border-emerald-200 bg-emerald-50/40"
-//                                                 : "border-slate-200 bg-white hover:border-indigo-200"
-//                                             }`}
-//                                     >
-//                                         <div className="flex items-center gap-3">
-//                                             <div
-//                                                 className={`w-8 h-8 rounded-xl flex items-center justify-center ${active
-//                                                     ? "bg-indigo-600 text-white"
-//                                                     : passed
-//                                                         ? "bg-emerald-600 text-white"
-//                                                         : "bg-slate-100 text-slate-500"
-//                                                     }`}
-//                                             >
-//                                                 {passed ? (
-//                                                     <CheckCircle2 size={15} />
-//                                                 ) : (
-//                                                     <Icon size={15} />
-//                                                 )}
-//                                             </div>
-
-//                                             <div>
-//                                                 <p className="text-[9px] uppercase tracking-widest font-bold text-slate-400">
-//                                                     Step {item.step}
-//                                                 </p>
-
-//                                                 <p className="text-xs font-bold text-slate-800">
-//                                                     {item.title}
-//                                                 </p>
-//                                             </div>
-//                                         </div>
-//                                     </button>
-//                                 );
-//                             })}
-//                         </div>
-//                     </div>
-
-//                     {/* ---------------------------------------------------------------- */}
-//                     {/* GLOBAL ERROR                                                     */}
-//                     {/* ---------------------------------------------------------------- */}
-
-//                     {error && (
-//                         <div className="mx-6 sm:mx-8 mt-5 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-//                             <AlertCircle
-//                                 size={17}
-//                                 className="shrink-0 mt-0.5"
-//                             />
-
-//                             <div>
-//                                 <p className="text-xs font-bold">
-//                                     Please check the form
-//                                 </p>
-
-//                                 <p className="text-[11px] mt-0.5">
-//                                     {error}
-//                                 </p>
-//                             </div>
-//                         </div>
-//                     )}
-
-//                     {/* ---------------------------------------------------------------- */}
-//                     {/* MAIN                                                             */}
-//                     {/* ---------------------------------------------------------------- */}
-
-//                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 sm:p-8">
-
-//                         {/* ============================================================ */}
-//                         {/* SIDEBAR                                                       */}
-//                         {/* ============================================================ */}
-
-//                         <aside className="lg:col-span-4 space-y-4">
-
-//                             <div className="flex items-center justify-between px-1">
-//                                 <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">
-//                                     Profile Summary
-//                                 </h3>
-
-//                                 <span className="text-[10px] font-semibold text-slate-400">
-//                                     {[
-//                                         isStep1Done,
-//                                         isStep2Done,
-//                                         isStep3Done,
-//                                         isStep4Done,
-//                                     ].filter(Boolean).length}
-//                                     /4 complete
-//                                 </span>
-//                             </div>
-
-//                             {/* PROFILE */}
-//                             <div className="rounded-2xl border border-slate-200 bg-white p-4">
-//                                 <div className="flex items-center gap-3">
-//                                     <div className="relative">
-//                                         {form.profilePhotoData ||
-//                                             form.avatar ? (
-//                                             <img
-//                                                 src={
-//                                                     form.profilePhotoData ||
-//                                                     form.avatar
-//                                                 }
-//                                                 alt="Employee profile"
-//                                                 className="w-16 h-16 rounded-2xl object-cover border border-slate-200 shadow-sm"
-//                                             />
-//                                         ) : (
-//                                             <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-//                                                 <User size={25} />
-//                                             </div>
-//                                         )}
-
-//                                         {isStep1Done && (
-//                                             <div className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center">
-//                                                 <CheckCircle2
-//                                                     size={12}
-//                                                     className="text-white"
-//                                                 />
-//                                             </div>
-//                                         )}
-//                                     </div>
-
-//                                     <div className="min-w-0">
-//                                         <p className="font-bold text-sm text-slate-900 truncate">
-//                                             {form.firstName ||
-//                                                 form.lastName
-//                                                 ? `${form.firstName} ${form.lastName}`
-//                                                 : "New Employee"}
-//                                         </p>
-
-//                                         <p className="text-[11px] text-slate-400 truncate">
-//                                             {form.email ||
-//                                                 "Employee profile"}
-//                                         </p>
-
-//                                         {form.employeeId && (
-//                                             <span className="inline-flex mt-1 text-[9px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full">
-//                                                 {form.employeeId}
-//                                             </span>
-//                                         )}
-//                                     </div>
-//                                 </div>
-//                             </div>
-
-//                             <SummaryCard
-//                                 icon={User}
-//                                 title="Personal Info"
-//                                 active={currentStep === 1}
-//                                 status={
-//                                     isStep1Done
-//                                         ? "Done"
-//                                         : "In progress"
-//                                 }
-//                             >
-//                                 <SummaryRow
-//                                     label="Name"
-//                                     value={
-//                                         form.firstName ||
-//                                             form.lastName
-//                                             ? `${form.firstName} ${form.lastName}`
-//                                             : ""
-//                                     }
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Email"
-//                                     value={form.email}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Phone"
-//                                     value={form.phone}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Gender"
-//                                     value={form.gender}
-//                                 />
-//                             </SummaryCard>
-
-//                             <SummaryCard
-//                                 icon={Briefcase}
-//                                 title="Job Details"
-//                                 active={currentStep === 2}
-//                                 status={
-//                                     isStep2Done
-//                                         ? "Done"
-//                                         : "Pending"
-//                                 }
-//                             >
-//                                 <SummaryRow
-//                                     label="Designation"
-//                                     value={selectedDesignation}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Department"
-//                                     value={selectedDepartment}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Employment"
-//                                     value={form.employmentType}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Status"
-//                                     value={form.employeeStatus}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Joining"
-//                                     value={form.dateOfJoining}
-//                                 />
-//                             </SummaryCard>
-
-//                             <SummaryCard
-//                                 icon={FileText}
-//                                 title="Documents"
-//                                 active={currentStep === 3}
-//                                 status={
-//                                     isStep3Done
-//                                         ? "Done"
-//                                         : "Pending"
-//                                 }
-//                             >
-//                                 <SummaryRow
-//                                     label="National ID Type"
-//                                     value={form.nationalIdType}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="National ID"
-//                                     value={form.nationalId}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="ID Front"
-//                                     value={
-//                                         form.nationalIdFrontFileName
-//                                             ? "Uploaded"
-//                                             : ""
-//                                     }
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="ID Back"
-//                                     value={
-//                                         form.nationalIdBackFileName
-//                                             ? "Uploaded"
-//                                             : ""
-//                                     }
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Photo"
-//                                     value={
-//                                         form.passportPhotoFileName
-//                                             ? "Uploaded"
-//                                             : ""
-//                                     }
-//                                 />
-//                             </SummaryCard>
-
-//                             <SummaryCard
-//                                 icon={Landmark}
-//                                 title="Banking Info"
-//                                 active={currentStep === 4}
-//                                 status={
-//                                     isStep4Done
-//                                         ? "Done"
-//                                         : "Pending"
-//                                 }
-//                             >
-//                                 <SummaryRow
-//                                     label="Account Name"
-//                                     value={form.accountName}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Bank"
-//                                     value={form.bankName}
-//                                 />
-
-//                                 <SummaryRow
-//                                     label="Account"
-//                                     value={
-//                                         form.accountNumber
-//                                             ? `•••• ${form.accountNumber.slice(-4)}`
-//                                             : ""
-//                                     }
-//                                 />
-//                             </SummaryCard>
-//                         </aside>
-
-//                         {/* ============================================================ */}
-//                         {/* FORM PANEL                                                    */}
-//                         {/* ============================================================ */}
-
-//                         <main className="lg:col-span-8">
-//                             <div className="rounded-3xl border border-slate-200 bg-slate-50/50 p-5 sm:p-7">
-
-//                                 {/* ======================================================== */}
-//                                 {/* STEP 1                                                     */}
-//                                 {/* ======================================================== */}
-
-//                                 {currentStep === 1 && (
-//                                     <div className="space-y-6">
-
-//                                         <SectionTitle
-//                                             title="Personal Information"
-//                                             description="Basic identity and profile information of the employee."
-//                                         />
-
-//                                         {/* PROFILE PHOTO */}
-//                                         <div className="rounded-2xl border border-slate-200 bg-white p-5">
-//                                             <div className="flex flex-col sm:flex-row sm:items-center gap-5">
-//                                                 <div className="relative shrink-0">
-//                                                     {form.profilePhotoData ||
-//                                                         form.avatar ? (
-//                                                         <img
-//                                                             src={
-//                                                                 form.profilePhotoData ||
-//                                                                 form.avatar
-//                                                             }
-//                                                             alt="Employee"
-//                                                             className="w-24 h-24 rounded-2xl object-cover border border-slate-200 shadow-sm"
-//                                                         />
-//                                                     ) : (
-//                                                         <div className="w-24 h-24 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
-//                                                             <Camera size={28} />
-//                                                         </div>
-//                                                     )}
-
-//                                                     {form.profilePhotoData && (
-//                                                         <div className="absolute -right-2 -bottom-2 w-7 h-7 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center">
-//                                                             <CheckCircle2
-//                                                                 size={14}
-//                                                                 className="text-white"
-//                                                             />
-//                                                         </div>
-//                                                     )}
-//                                                 </div>
-
-//                                                 <div className="flex-1">
-//                                                     <p className="text-sm font-bold text-slate-900">
-//                                                         Passport Size Profile Photo
-//                                                     </p>
-
-//                                                     <p className="text-xs text-slate-500 mt-1">
-//                                                         Upload a clear professional photo.
-//                                                         This photo will also appear in the employee profile.
-//                                                     </p>
-
-//                                                     <div className="flex flex-wrap items-center gap-2 mt-4">
-//                                                         <button
-//                                                             type="button"
-//                                                             onClick={() =>
-//                                                                 passportPhotoRef.current?.click()
-//                                                             }
-//                                                             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition"
-//                                                         >
-//                                                             <Camera size={15} />
-//                                                             {form.profilePhotoData
-//                                                                 ? "Change Photo"
-//                                                                 : "Upload Photo"}
-//                                                         </button>
-
-//                                                         {form.profilePhotoData && (
-//                                                             <button
-//                                                                 type="button"
-//                                                                 onClick={() =>
-//                                                                     removeFile(
-//                                                                         "profilePhotoData",
-//                                                                         "profilePhotoFileName"
-//                                                                     )
-//                                                                 }
-//                                                                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 text-red-600 bg-white hover:bg-red-50 text-xs font-bold"
-//                                                             >
-//                                                                 <Trash2 size={14} />
-//                                                                 Remove
-//                                                             </button>
-//                                                         )}
-//                                                     </div>
-
-//                                                     <p className="text-[10px] text-slate-400 mt-2">
-//                                                         JPG, PNG, WEBP · maximum 10MB
-//                                                     </p>
-
-//                                                     {form.profilePhotoFileName && (
-//                                                         <p className="text-[11px] text-emerald-600 font-semibold mt-2">
-//                                                             {form.profilePhotoFileName}
-//                                                         </p>
-//                                                     )}
-//                                                 </div>
-//                                             </div>
-
-//                                             <input
-//                                                 ref={passportPhotoRef}
-//                                                 type="file"
-//                                                 accept="image/jpeg,image/png,image/webp"
-//                                                 onChange={handleProfilePhoto}
-//                                                 className="hidden"
-//                                             />
-//                                         </div>
-
-//                                         {/* NAME */}
-//                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     First Name
-//                                                     <span className="text-red-500">*</span>
-//                                                 </label>
-
-//                                                 <input
-//                                                     name="firstName"
-//                                                     value={form.firstName}
-//                                                     onChange={handleChange}
-//                                                     placeholder="Enter first name"
-//                                                     className={
-//                                                         duplicateErrors.name
-//                                                             ? errorInputClass
-//                                                             : inputClass
-//                                                     }
-//                                                 />
-
-//                                                 {/* NAME DUPLICATE RED MESSAGE */}
-//                                                 {duplicateErrors.name && (
-//                                                     <FieldError>
-//                                                         {duplicateErrors.name}
-//                                                     </FieldError>
-//                                                 )}
-//                                             </div>
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     Last Name
-//                                                     <span className="text-red-500">*</span>
-//                                                 </label>
-
-//                                                 <input
-//                                                     name="lastName"
-//                                                     value={form.lastName}
-//                                                     onChange={handleChange}
-//                                                     placeholder="Enter last name"
-//                                                     className={
-//                                                         duplicateErrors.name
-//                                                             ? errorInputClass
-//                                                             : inputClass
-//                                                     }
-//                                                 />
-
-//                                                 {duplicateErrors.name && (
-//                                                     <FieldError>
-//                                                         {duplicateErrors.name}
-//                                                     </FieldError>
-//                                                 )}
-//                                             </div>
-//                                         </div>
-
-//                                         {/* EMAIL */}
-//                                         <div>
-//                                             <label className="field-label">
-//                                                 Email Address
-//                                                 <span className="text-red-500">*</span>
-//                                             </label>
-
-//                                             <div className="relative">
-//                                                 <Mail
-//                                                     size={16}
-//                                                     className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-//                                                 />
-
-//                                                 <input
-//                                                     type="email"
-//                                                     name="email"
-//                                                     value={form.email}
-//                                                     onChange={handleChange}
-//                                                     placeholder="employee@company.com"
-//                                                     className={`${duplicateErrors.email
-//                                                         ? errorInputClass
-//                                                         : inputClass
-//                                                         } pl-11`}
-//                                                 />
-//                                             </div>
-
-//                                             {duplicateErrors.email && (
-//                                                 <FieldError>
-//                                                     {duplicateErrors.email}
-//                                                 </FieldError>
-//                                             )}
-//                                         </div>
-
-//                                         {/* PHONE */}
-//                                         <div>
-//                                             <label className="field-label">
-//                                                 Phone Number
-//                                             </label>
-
-//                                             <div className="flex">
-//                                                 <div className="flex items-center px-3 bg-slate-100 border border-r-0 border-slate-200 rounded-l-xl text-xs font-bold text-slate-600">
-//                                                     IN +91
-//                                                 </div>
-
-//                                                 <div className="relative flex-1">
-//                                                     <Phone
-//                                                         size={15}
-//                                                         className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-//                                                     />
-
-//                                                     <input
-//                                                         type="tel"
-//                                                         name="phone"
-//                                                         value={form.phone}
-//                                                         onChange={handleChange}
-//                                                         placeholder="9876543210"
-//                                                         className={`${duplicateErrors.phone
-//                                                             ? errorInputClass
-//                                                             : inputClass
-//                                                             } pl-9 rounded-l-none`}
-//                                                     />
-//                                                 </div>
-//                                             </div>
-
-//                                             {duplicateErrors.phone && (
-//                                                 <FieldError>
-//                                                     {duplicateErrors.phone}
-//                                                 </FieldError>
-//                                             )}
-//                                         </div>
-
-//                                         {/* GENDER */}
-//                                         <div>
-//                                             <label className="field-label">
-//                                                 Gender
-//                                             </label>
-
-//                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-//                                                 {GENDER_OPTIONS.map((gender) => (
-//                                                     <label
-//                                                         key={gender.value}
-//                                                         className={`p-4 rounded-2xl border cursor-pointer transition-all ${form.gender === gender.value
-//                                                             ? "border-indigo-500 bg-indigo-50"
-//                                                             : "border-slate-200 bg-white hover:border-indigo-200"
-//                                                             }`}
-//                                                     >
-//                                                         <div className="flex items-center justify-between">
-//                                                             <span className="text-xs font-bold text-slate-800">
-//                                                                 {gender.label}
-//                                                             </span>
-
-//                                                             <input
-//                                                                 type="radio"
-//                                                                 name="gender"
-//                                                                 value={gender.value}
-//                                                                 checked={
-//                                                                     form.gender ===
-//                                                                     gender.value
-//                                                                 }
-//                                                                 onChange={handleChange}
-//                                                                 className="accent-indigo-600"
-//                                                             />
-//                                                         </div>
-
-//                                                         <p className="text-[10px] text-slate-400 mt-1">
-//                                                             {gender.sub}
-//                                                         </p>
-//                                                     </label>
-//                                                 ))}
-//                                             </div>
-//                                         </div>
-
-//                                         {/* LOCATION */}
-//                                         <div>
-//                                             <div className="flex items-center gap-2 mb-3">
-//                                                 <MapPin
-//                                                     size={15}
-//                                                     className="text-indigo-600"
-//                                                 />
-//                                                 <span className="text-xs font-bold text-slate-700">
-//                                                     Address
-//                                                 </span>
-//                                             </div>
-
-//                                             <textarea
-//                                                 name="address"
-//                                                 value={form.address}
-//                                                 onChange={handleChange}
-//                                                 rows={3}
-//                                                 placeholder="Employee address"
-//                                                 className={`${inputClass} resize-none`}
-//                                             />
-
-//                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-//                                                 <input
-//                                                     name="city"
-//                                                     value={form.city}
-//                                                     onChange={handleChange}
-//                                                     placeholder="City"
-//                                                     className={inputClass}
-//                                                 />
-
-//                                                 <input
-//                                                     name="state"
-//                                                     value={form.state}
-//                                                     onChange={handleChange}
-//                                                     placeholder="State"
-//                                                     className={inputClass}
-//                                                 />
-
-//                                                 <input
-//                                                     name="pincode"
-//                                                     value={form.pincode}
-//                                                     onChange={handleChange}
-//                                                     placeholder="Pincode"
-//                                                     className={inputClass}
-//                                                 />
-//                                             </div>
-//                                         </div>
-//                                     </div>
-//                                 )}
-
-//                                 {/* ======================================================== */}
-//                                 {/* STEP 2                                                     */}
-//                                 {/* ======================================================== */}
-
-//                                 {currentStep === 2 && (
-//                                     <div className="space-y-6">
-
-//                                         <SectionTitle
-//                                             title="Job Details"
-//                                             description="Role, department, employment status and compensation details."
-//                                         />
-
-//                                         {/* DESIGNATION + STATUS */}
-//                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     Designation
-//                                                     <span className="text-red-500">*</span>
-//                                                 </label>
-
-//                                                 <select
-//                                                     name="designation"
-//                                                     value={form.designation}
-//                                                     onChange={handleChange}
-//                                                     className={`${inputClass} cursor-pointer`}
-//                                                 >
-//                                                     <option value="">
-//                                                         Select Designation
-//                                                     </option>
-
-//                                                     {designationOptions.map(
-//                                                         (item) => (
-//                                                             <option
-//                                                                 key={item.value}
-//                                                                 value={item.value}
-//                                                             >
-//                                                                 {item.label}
-//                                                             </option>
-//                                                         )
-//                                                     )}
-
-//                                                     <option value="Other">
-//                                                         + Add Other Designation
-//                                                     </option>
-//                                                 </select>
-
-//                                                 {form.designation === "Other" && (
-//                                                     <input
-//                                                         name="designationOther"
-//                                                         value={form.designationOther}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Enter designation"
-//                                                         className={`${inputClass} mt-2`}
-//                                                     />
-//                                                 )}
-//                                             </div>
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     Employee Status
-//                                                 </label>
-
-//                                                 <select
-//                                                     name="employeeStatus"
-//                                                     value={form.employeeStatus}
-//                                                     onChange={handleChange}
-//                                                     className={`${inputClass} cursor-pointer`}
-//                                                 >
-//                                                     {EMPLOYEE_STATUS_OPTIONS.map(
-//                                                         (status) => (
-//                                                             <option
-//                                                                 key={status}
-//                                                                 value={status}
-//                                                             >
-//                                                                 {status}
-//                                                             </option>
-//                                                         )
-//                                                     )}
-//                                                 </select>
-//                                             </div>
-//                                         </div>
-
-//                                         {/* DEPARTMENT + EMPLOYMENT */}
-//                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     Department
-//                                                     <span className="text-red-500">*</span>
-//                                                 </label>
-
-//                                                 <select
-//                                                     name="department"
-//                                                     value={form.department}
-//                                                     onChange={handleChange}
-//                                                     className={`${inputClass} cursor-pointer`}
-//                                                 >
-//                                                     <option value="">
-//                                                         Select Department
-//                                                     </option>
-
-//                                                     {departmentOptions.map(
-//                                                         (item) => (
-//                                                             <option
-//                                                                 key={item.value}
-//                                                                 value={item.value}
-//                                                             >
-//                                                                 {item.label}
-//                                                             </option>
-//                                                         )
-//                                                     )}
-
-//                                                     <option value="Other">
-//                                                         + Add Other Department
-//                                                     </option>
-//                                                 </select>
-
-//                                                 {form.department === "Other" && (
-//                                                     <input
-//                                                         name="departmentOther"
-//                                                         value={form.departmentOther}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Enter department"
-//                                                         className={`${inputClass} mt-2`}
-//                                                     />
-//                                                 )}
-//                                             </div>
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     Employment Type
-//                                                 </label>
-
-//                                                 <select
-//                                                     name="employmentType"
-//                                                     value={form.employmentType}
-//                                                     onChange={handleChange}
-//                                                     className={`${inputClass} cursor-pointer`}
-//                                                 >
-//                                                     {EMPLOYMENT_TYPES.map(
-//                                                         (type) => (
-//                                                             <option
-//                                                                 key={type}
-//                                                                 value={type}
-//                                                             >
-//                                                                 {type}
-//                                                             </option>
-//                                                         )
-//                                                     )}
-//                                                 </select>
-//                                             </div>
-//                                         </div>
-
-//                                         {/* MANAGER + JOINING */}
-//                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     Reporting Manager
-//                                                 </label>
-
-//                                                 <select
-//                                                     name="reportingManager"
-//                                                     value={form.reportingManager}
-//                                                     onChange={handleChange}
-//                                                     className={`${inputClass} cursor-pointer`}
-//                                                 >
-//                                                     <option value="">
-//                                                         Select Reporting Manager
-//                                                     </option>
-
-//                                                     {REPORTING_MANAGER_OPTIONS.map((manager) => (
-//                                                         <option key={manager} value={manager}>
-//                                                             {manager}
-//                                                         </option>
-//                                                     ))}
-
-//                                                     <option value="Other">
-//                                                         + Add Reporting Manager
-//                                                     </option>
-//                                                 </select>
-
-//                                                 {form.reportingManager === "Other" && (
-//                                                     <input
-//                                                         name="reportingManagerOther"
-//                                                         value={form.reportingManagerOther}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Enter reporting manager name"
-//                                                         className={`${inputClass} mt-3`}
-//                                                     />
-//                                                 )}
-//                                             </div>
-
-//                                             <div>
-//                                                 <label className="field-label">
-//                                                     Joining Date
-//                                                 </label>
-
-//                                                 <div className="relative">
-//                                                     <CalendarDays
-//                                                         size={15}
-//                                                         className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-//                                                     />
-
-//                                                     <input
-//                                                         type="date"
-//                                                         name="dateOfJoining"
-//                                                         value={form.dateOfJoining}
-//                                                         onChange={handleChange}
-//                                                         className={`${inputClass} pl-10`}
-//                                                     />
-//                                                 </div>
-//                                             </div>
-//                                         </div>
-
-//                                         {/* SALARY */}
-//                                         <div>
-//                                             <label className="field-label">
-//                                                 Monthly Salary
-//                                             </label>
-
-//                                             <div className="relative">
-//                                                 <IndianRupee
-//                                                     size={15}
-//                                                     className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-//                                                 />
-
-//                                                 <input
-//                                                     type="number"
-//                                                     name="salary"
-//                                                     value={form.salary}
-//                                                     onChange={handleChange}
-//                                                     placeholder="50000"
-//                                                     className={`${inputClass} pl-10`}
-//                                                 />
-//                                             </div>
-//                                         </div>
-
-//                                         {/* JOB INFO BOX */}
-//                                         <div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4">
-//                                             <div className="flex gap-3">
-//                                                 <BadgeCheck
-//                                                     size={18}
-//                                                     className="text-indigo-600 shrink-0"
-//                                                 />
-
-//                                                 <div>
-//                                                     <p className="text-xs font-bold text-indigo-900">
-//                                                         Professional Job Profile
-//                                                     </p>
-
-//                                                     <p className="text-[11px] text-indigo-700/70 mt-1">
-//                                                         Designation, department, reporting manager,
-//                                                         employment type, status and salary are all
-//                                                         stored in the employee profile.
-//                                                     </p>
-//                                                 </div>
-//                                             </div>
-//                                         </div>
-//                                     </div>
-//                                 )}
-
-//                                 {/* ======================================================== */}
-//                                 {/* STEP 3                                                     */}
-//                                 {/* ======================================================== */}
-
-//                                 {currentStep === 3 && (
-//                                     <div className="space-y-6">
-
-//                                         <SectionTitle
-//                                             title="Documents"
-//                                             description="Identification numbers and scanned copies."
-//                                         />
-
-//                                         {/* NATIONAL ID */}
-//                                         <div className="rounded-2xl border border-slate-200 bg-white p-5">
-//                                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
-//                                                 <div className="flex items-center gap-3">
-//                                                     <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-//                                                         <CreditCard size={18} />
-//                                                     </div>
-//                                                     <div>
-//                                                         <p className="text-sm font-bold text-slate-900">
-//                                                             National ID Card
-//                                                         </p>
-//                                                         <p className="text-[11px] text-slate-400">
-//                                                             Select the document type and upload its front and back images.
-//                                                         </p>
-//                                                     </div>
-//                                                 </div>
-
-//                                                 <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full self-start sm:self-auto">
-//                                                     Image only · Max 10MB
-//                                                 </span>
-//                                             </div>
-
-//                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-//                                                 <div>
-//                                                     <label className="field-label">
-//                                                         ID Type
-//                                                     </label>
-//                                                     <select
-//                                                         name="nationalIdType"
-//                                                         value={form.nationalIdType}
-//                                                         onChange={handleChange}
-//                                                         className={`${inputClass} cursor-pointer`}
-//                                                     >
-//                                                         {NATIONAL_ID_OPTIONS.map((option) => (
-//                                                             <option key={option} value={option}>
-//                                                                 {option}
-//                                                             </option>
-//                                                         ))}
-//                                                     </select>
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <label className="field-label">
-//                                                         {form.nationalIdType} Number
-//                                                     </label>
-//                                                     <input
-//                                                         name="nationalId"
-//                                                         value={form.nationalId}
-//                                                         onChange={handleChange}
-//                                                         placeholder={`Enter ${form.nationalIdType} number`}
-//                                                         className={`${inputClass} font-mono uppercase`}
-//                                                     />
-//                                                 </div>
-//                                             </div>
-
-//                                             {form.nationalIdType === "Other Official ID" && (
-//                                                 <div className="mb-4">
-//                                                     <label className="field-label">
-//                                                         Other Official ID Name
-//                                                     </label>
-//                                                     <input
-//                                                         name="nationalIdOther"
-//                                                         value={form.nationalIdOther}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Enter official ID name"
-//                                                         className={inputClass}
-//                                                     />
-//                                                 </div>
-//                                             )}
-
-//                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-//                                                 <UploadCard
-//                                                     title={`${form.nationalIdType} - Front Side`}
-//                                                     subtitle="Click to upload front image"
-//                                                     fileName={form.nationalIdFrontFileName}
-//                                                     preview={
-//                                                         form.nationalIdFrontFileData?.startsWith("data:image")
-//                                                             ? form.nationalIdFrontFileData
-//                                                             : ""
-//                                                     }
-//                                                     onClick={() => frontIdRef.current?.click()}
-//                                                     onRemove={() =>
-//                                                         removeFile(
-//                                                             "nationalIdFrontFileData",
-//                                                             "nationalIdFrontFileName"
-//                                                         )
-//                                                     }
-//                                                 />
-
-//                                                 <UploadCard
-//                                                     title={`${form.nationalIdType} - Back Side`}
-//                                                     subtitle="Click to upload back image"
-//                                                     fileName={form.nationalIdBackFileName}
-//                                                     preview={
-//                                                         form.nationalIdBackFileData?.startsWith("data:image")
-//                                                             ? form.nationalIdBackFileData
-//                                                             : ""
-//                                                     }
-//                                                     onClick={() => backIdRef.current?.click()}
-//                                                     onRemove={() =>
-//                                                         removeFile(
-//                                                             "nationalIdBackFileData",
-//                                                             "nationalIdBackFileName"
-//                                                         )
-//                                                     }
-//                                                 />
-//                                             </div>
-
-//                                             <input
-//                                                 ref={frontIdRef}
-//                                                 type="file"
-//                                                 accept="image/jpeg,image/png,image/webp"
-//                                                 onChange={(e) =>
-//                                                     handleDocumentUpload(
-//                                                         e,
-//                                                         "nationalIdFrontFileData",
-//                                                         "nationalIdFrontFileName",
-//                                                         true
-//                                                     )
-//                                                 }
-//                                                 className="hidden"
-//                                             />
-
-//                                             <input
-//                                                 ref={backIdRef}
-//                                                 type="file"
-//                                                 accept="image/jpeg,image/png,image/webp"
-//                                                 onChange={(e) =>
-//                                                     handleDocumentUpload(
-//                                                         e,
-//                                                         "nationalIdBackFileData",
-//                                                         "nationalIdBackFileName",
-//                                                         true
-//                                                     )
-//                                                 }
-//                                                 className="hidden"
-//                                             />
-//                                         </div>
-
-//                                         {/* PASSPORT PHOTO */}
-//                                         <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-5">
-
-//                                             <div className="flex items-center gap-3 mb-4">
-//                                                 <div className="w-9 h-9 rounded-xl bg-white text-indigo-600 flex items-center justify-center border border-indigo-100">
-//                                                     <ImageIcon size={17} />
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <p className="text-sm font-bold text-slate-900">
-//                                                         Passport Size Photo
-//                                                     </p>
-
-//                                                     <p className="text-[11px] text-slate-500">
-//                                                         This image will be used as the employee profile photo.
-//                                                     </p>
-//                                                 </div>
-//                                             </div>
-
-//                                             <div className="grid grid-cols-1 md:grid-cols-[150px_1fr] gap-5 items-center">
-
-//                                                 <div className="w-[150px] h-[180px] rounded-2xl bg-white border border-slate-200 overflow-hidden flex items-center justify-center">
-//                                                     {form.passportPhotoData ? (
-//                                                         <img
-//                                                             src={
-//                                                                 form.passportPhotoData
-//                                                             }
-//                                                             alt="Passport size"
-//                                                             className="w-full h-full object-cover"
-//                                                         />
-//                                                     ) : (
-//                                                         <div className="text-center">
-//                                                             <Camera
-//                                                                 size={28}
-//                                                                 className="mx-auto text-slate-300"
-//                                                             />
-
-//                                                             <p className="text-[10px] text-slate-400 mt-2">
-//                                                                 No photo
-//                                                             </p>
-//                                                         </div>
-//                                                     )}
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <button
-//                                                         type="button"
-//                                                         onClick={() =>
-//                                                             passportPhotoRef.current?.click()
-//                                                         }
-//                                                         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
-//                                                     >
-//                                                         <Upload size={15} />
-//                                                         Upload Passport Photo
-//                                                     </button>
-
-//                                                     {form.passportPhotoData && (
-//                                                         <button
-//                                                             type="button"
-//                                                             onClick={() => {
-//                                                                 removeFile(
-//                                                                     "passportPhotoData",
-//                                                                     "passportPhotoFileName"
-//                                                                 );
-
-//                                                                 setForm((prev) => ({
-//                                                                     ...prev,
-//                                                                     avatar: "",
-//                                                                     profilePhotoData: "",
-//                                                                     profilePhotoFileName: "",
-//                                                                 }));
-//                                                             }}
-//                                                             className="ml-2 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-red-200 bg-white text-red-600 text-xs font-bold"
-//                                                         >
-//                                                             <Trash2 size={14} />
-//                                                             Remove
-//                                                         </button>
-//                                                     )}
-
-//                                                     <p className="text-[10px] text-slate-400 mt-3">
-//                                                         JPG, PNG or WEBP · maximum 10MB
-//                                                     </p>
-
-//                                                     {form.passportPhotoFileName && (
-//                                                         <p className="text-[11px] font-semibold text-emerald-600 mt-2">
-//                                                             {form.passportPhotoFileName}
-//                                                         </p>
-//                                                     )}
-//                                                 </div>
-//                                             </div>
-//                                         </div>
-//                                     </div>
-//                                 )}
-
-//                                 {/* ======================================================== */}
-//                                 {/* STEP 4                                                     */}
-//                                 {/* ======================================================== */}
-
-//                                 {currentStep === 4 && (
-//                                     <div className="space-y-6">
-
-//                                         <SectionTitle
-//                                             title="Banking Information"
-//                                             description="Bank account details for salary payments."
-//                                         />
-
-//                                         <div className="rounded-2xl border border-slate-200 bg-white p-5">
-//                                             <div className="flex items-center gap-3 mb-5">
-//                                                 <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-//                                                     <Landmark size={18} />
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <p className="text-sm font-bold text-slate-900">
-//                                                         Salary Account
-//                                                     </p>
-
-//                                                     <p className="text-[11px] text-slate-400">
-//                                                         Enter the employee's salary receiving account.
-//                                                     </p>
-//                                                 </div>
-//                                             </div>
-
-//                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-//                                                 <div>
-//                                                     <label className="field-label">
-//                                                         Account Name
-//                                                     </label>
-
-//                                                     <input
-//                                                         name="accountName"
-//                                                         value={form.accountName}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Account holder name"
-//                                                         className={inputClass}
-//                                                     />
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <label className="field-label">
-//                                                         Bank Name
-//                                                     </label>
-
-//                                                     <input
-//                                                         name="bankName"
-//                                                         value={form.bankName}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Bank name"
-//                                                         className={inputClass}
-//                                                     />
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <label className="field-label">
-//                                                         Branch Name
-//                                                     </label>
-
-//                                                     <input
-//                                                         name="branchName"
-//                                                         value={form.branchName}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Branch name"
-//                                                         className={inputClass}
-//                                                     />
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <label className="field-label">
-//                                                         Account Number
-//                                                     </label>
-
-//                                                     <input
-//                                                         name="accountNumber"
-//                                                         value={form.accountNumber}
-//                                                         onChange={handleChange}
-//                                                         placeholder="Account number"
-//                                                         className={`${inputClass} font-mono`}
-//                                                     />
-//                                                 </div>
-
-//                                                 <div>
-//                                                     <label className="field-label">
-//                                                         IFSC Code
-//                                                     </label>
-
-//                                                     <input
-//                                                         name="ifscCode"
-//                                                         value={form.ifscCode}
-//                                                         onChange={handleChange}
-//                                                         placeholder="SBIN0000000"
-//                                                         className={`${inputClass} font-mono uppercase`}
-//                                                     />
-//                                                 </div>
-
-//                                             </div>
-//                                         </div>
-
-//                                         {/* FINAL PROFILE PREVIEW */}
-//                                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5">
-//                                             <div className="flex items-center gap-3">
-//                                                 {form.profilePhotoData ? (
-//                                                     <img
-//                                                         src={form.profilePhotoData}
-//                                                         alt="Employee"
-//                                                         className="w-14 h-14 rounded-2xl object-cover border-2 border-white shadow-sm"
-//                                                     />
-//                                                 ) : (
-//                                                     <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center text-emerald-600">
-//                                                         <User size={23} />
-//                                                     </div>
-//                                                 )}
-
-//                                                 <div>
-//                                                     <p className="text-sm font-bold text-emerald-900">
-//                                                         Profile Ready
-//                                                     </p>
-
-//                                                     <p className="text-[11px] text-emerald-700/70 mt-0.5">
-//                                                         Review the information and click Save Employee.
-//                                                     </p>
-//                                                 </div>
-//                                             </div>
-//                                         </div>
-//                                     </div>
-//                                 )}
-
-//                                 {/* ======================================================== */}
-//                                 {/* FOOTER                                                     */}
-//                                 {/* ======================================================== */}
-
-//                                 <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-6 mt-8 border-t border-slate-200">
-
-//                                     <button
-//                                         type="button"
-//                                         onClick={() => router.back()}
-//                                         className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 text-xs font-bold"
-//                                     >
-//                                         Cancel
-//                                     </button>
-
-//                                     <div className="flex items-center gap-2">
-
-//                                         {currentStep > 1 && (
-//                                             <button
-//                                                 type="button"
-//                                                 onClick={() =>
-//                                                     setCurrentStep(
-//                                                         (prev) => prev - 1
-//                                                     )
-//                                                 }
-//                                                 className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold"
-//                                             >
-//                                                 Back
-//                                             </button>
-//                                         )}
-
-//                                         <button
-//                                             type="button"
-//                                             onClick={handleNext}
-//                                             disabled={loading}
-//                                             className="inline-flex items-center justify-center gap-2 min-w-[130px] px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-60"
-//                                         >
-//                                             {loading ? (
-//                                                 <>
-//                                                     <Loader2
-//                                                         size={15}
-//                                                         className="animate-spin"
-//                                                     />
-//                                                     Saving...
-//                                                 </>
-//                                             ) : currentStep === 4 ? (
-//                                                 <>
-//                                                     <Save size={15} />
-//                                                     Save Employee
-//                                                 </>
-//                                             ) : (
-//                                                 <>
-//                                                     Continue
-//                                                     <ChevronRight size={15} />
-//                                                 </>
-//                                             )}
-//                                         </button>
-//                                     </div>
-//                                 </div>
-//                             </div>
-//                         </main>
-//                     </div>
-//                 </div>
-//             </div>
-
-//             {/* Small reusable label styles */}
-//             <style jsx>{`
-//         .field-label {
-//           display: block;
-//           margin-bottom: 7px;
-//           font-size: 11px;
-//           line-height: 1;
-//           font-weight: 700;
-//           color: #64748b;
-//           letter-spacing: 0.04em;
-//           text-transform: uppercase;
-//         }
-//       `}</style>
-//         </div>
-//     );
-// }
-
-// /* -------------------------------------------------------------------------- */
-// /* PAGE                                                                       */
-// /* -------------------------------------------------------------------------- */
-
-// export default function AddEmployeePage() {
-//     return (
-//         <Suspense
-//             fallback={
-//                 <div className="min-h-[500px] flex items-center justify-center">
-//                     <Loader2
-//                         size={32}
-//                         className="animate-spin text-indigo-600"
-//                     />
-//                 </div>
-//             }
-//         >
-//             <EmployeeFormContent />
-//         </Suspense>
-//     );
-// }
->>>>>>> 46f4c98606bbc7b66beda798402a3cecddefa819

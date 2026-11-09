@@ -5,23 +5,16 @@
 const pathOverrides = {
     // ---------- Dashboard ----------
     "/dashboard": ["admin", "hr", "manager", "employee"],
-    // "/dashboard/analytics": ["admin", "hr", "employee"],
-    // "/dashboard/employee-stats": ["admin", "hr", "employee"],
-    // "/dashboard/attendance-summary": ["admin", "hr", "manager", "employee"],
-    // "/dashboard/leave-summary": ["admin", "hr", "manager"],
-    // "/dashboard/payroll-summary": ["admin", "hr"],
 
-    // --------------Tasks----------------
-    "/tasks": ["admin", "hr", "manager"],
+
+    "/tasks": ["admin", "hr", "manager", "employee"],
+    "/team": ["admin", "hr", "manager"],
 
 
 
     // ---------- Employee Management ----------
     "/employees": ["admin", "hr", "manager"],
     "/employees/add": ["admin", "hr"],
-    // "/employees/directory": ["admin", "hr", "manager"],
-    // "/employees/profile": ["admin", "hr", "manager"],
-    // "/employees/documents": ["admin", "hr"],
     "/employees/id-cards": ["admin", "hr"],
     "/employees/emergency-contacts": ["admin", "hr"],
     "/employees/history": ["admin"],
@@ -38,32 +31,28 @@ const pathOverrides = {
     "/organization/chart": ["admin", "hr", "manager"],
 
     // ---------- Recruitment (poora sirf admin/hr) ----------
-    "/recruitment/positions": ["admin", "hr"],
+    "/recruitment/positions": ["admin", "hr", "manager"],
     "/recruitment/posts": ["admin", "hr"],
     "/recruitment/applications": ["admin", "hr"],
-    "/recruitment/candidates": ["admin", "hr"],
-    "/recruitment/interviews": ["admin", "hr"],
-    "/recruitment/feedback": ["admin", "hr"],
+    "/recruitment/candidates": ["admin", "hr", "manager"],
+    "/recruitment/interviews": ["admin", "hr", "manager"],
+    // "/recruitment/feedback": ["admin", "hr"],
+    "/recruitment/feedback": ["admin", "hr", "manager"],
     "/recruitment/offers": ["admin", "hr"],
-    "/recruitment/pipeline": ["admin", "hr"],
+    "/recruitment/pipeline": ["admin", "hr", "manager"],
     "/recruitment/reports": ["admin", "hr"],
 
     // ---------- Attendance ----------
     "/attendance": ["admin", "hr", "manager", "employee"],
     "/attendance/daily": ["admin", "hr", "manager"],
     "/attendance/monthly": ["admin", "hr", "manager", "employee"],
-    // "/attendance/check-in-out": ["admin", "hr", "manager"],
-    // "/attendance/biometric": ["admin", "hr"],
-    // "/attendance/biometric": ["admin", "hr", "manager", "employee"],
-    // "/attendance/self": ["admin", "hr", "manager", "employee"],
-    // "/attendance/late-coming": ["admin", "hr", "manager"],
-    // "/attendance/early-leaving": ["admin", "hr", "manager"],
-    // "/attendance/overtime": ["admin", "hr", "manager"],
     "/attendance/regularization": ["admin", "hr", "manager"],
-    "/attendance/reports": ["admin", "hr", "manager"],
+    // "/attendance/reports": ["admin", "hr", "manager"],
+    "/attendance/summary": ["admin", "hr", "manager", "employee"],
+    "/attendance/off-days": ["admin", "hr", "manager", "employee"],
 
     // ---------- Leave Management ----------
-    "/leave": ["admin", "hr", "manager", "employee"],
+    "/leave": ["admin", "hr", "manager"],
     "/leave/types": ["admin", "hr"],
     "/leave/policies": ["admin", "hr"],
     "/leave/apply": ["admin", "hr", "manager", "employee"],
@@ -74,31 +63,30 @@ const pathOverrides = {
     "/leave/reports": ["admin", "hr"],
 
     // ---------- Payroll (poora sirf admin/hr) ----------
-    "/payroll": ["admin", "hr"],
+    "/payroll": ["admin", "hr", "manager"],
     "/payroll/structure": ["admin", "hr"],
     "/payroll/components": ["admin", "hr"],
     "/payroll/employee-salary": ["admin", "hr"],
     "/payroll/generate": ["admin", "hr"],
     "/payroll/processing": ["admin", "hr"],
-    "/payroll/payslips": ["admin", "hr", "manager", "employee"],
+    // "/payroll/payslips": ["admin", "hr", "manager"],
     "/payroll/bonuses": ["admin", "hr"],
     "/payroll/deductions": ["admin", "hr"],
     "/payroll/loans": ["admin", "hr"],
-    // "/payroll/reimbursements": ["admin", "hr"],
-    "/payroll/reimbursements": ["admin", "hr", "manager", "employee"],
+    "/payroll/reimbursements": ["admin", "hr"],
     "/payroll/tax": ["admin", "hr"],
     "/payroll/reports": ["admin", "hr"],
 
     // ---------- Performance ----------
-    "/performance": ["admin", "hr", "manager", "employee"],
-    "/performance/goals": ["admin", "hr", "manager", "employee"],
-    "/performance/appraisals": ["admin", "hr", "manager"],
-    "/performance/reviews": ["admin", "hr", "manager"],
+    "/performance": ["admin", "hr", "manager"],
+    "/performance/goals": ["admin", "hr", "manager"],
+    "/performance/appraisals": ["admin", "hr", "manager", "employee"],
+    "/performance/reviews": ["admin", "hr", "manager", "employee"],
     "/performance/self-assessment": ["admin", "hr", "manager", "employee"],
     "/performance/manager-assessment": ["admin", "hr", "manager"],
     "/performance/rating": ["admin", "hr", "manager"],
-    "/performance/promotion": ["admin", "hr"],
-    "/performance/increment": ["admin", "hr"],
+    "/performance/promotion": ["admin", "hr", "manager", "employee"],
+    "/performance/increment": ["admin", "hr", "manager", "employee"],
 
     // ---------- Training & Development ----------
     "/training": ["admin", "hr", "manager", "employee"],
@@ -125,14 +113,14 @@ const pathOverrides = {
     "/travel/expenses": ["admin", "hr", "manager"],
     "/travel/reports": ["admin", "hr"],
 
-    // ---------- Assets (poora sirf admin/hr) ----------
-    "/assets": ["admin", "hr"],
-    "/assets/categories": ["admin", "hr"],
-    "/assets/all": ["admin", "hr"],
-    "/assets/assign": ["admin", "hr"],
-    "/assets/return": ["admin", "hr"],
-    "/assets/history": ["admin", "hr"],
-    "/assets/maintenance": ["admin", "hr"],
+    // // ---------- Assets (poora sirf admin/hr) ----------
+    // "/assets": ["admin", "hr"],
+    // "/assets/categories": ["admin", "hr"],
+    // "/assets/all": ["admin", "hr"],
+    // "/assets/assign": ["admin", "hr"],
+    // "/assets/return": ["admin", "hr"],
+    // "/assets/history": ["admin", "hr"],
+    // "/assets/maintenance": ["admin", "hr"],
 
     // ---------- Documents ----------
     "/documents/company": ["admin", "hr", "manager", "employee"],
@@ -261,57 +249,3 @@ export const canAccessPath = (role, href) => {
 
     return allowedRoles.includes(role);
 };
-
-
-
-
-// // src/data/permissions.js
-
-// // Har module ka ek unique "key" hai jo uske route ke pehle segment se match karta hai
-// // (jaise "/employees/add" ka key "employees" hai)
-// // Value = kaunse roles is module ko access kar sakte hain
-
-// export const modulePermissions = {
-//     dashboard: ["admin", "hr", "manager", "employee"],
-//     employees: ["admin", "hr", "manager"], // manager sirf view karega, form-level restriction alag se
-//     organization: ["admin", "hr", "manager"],
-//     recruitment: ["admin", "hr"],
-//     attendance: ["admin", "hr", "manager", "employee"],
-//     leave: ["admin", "hr", "manager", "employee"],
-//     payroll: ["admin", "hr"],
-//     performance: ["admin", "hr", "manager", "employee"],
-//     training: ["admin", "hr", "manager", "employee"],
-//     expenses: ["admin", "hr", "manager", "employee"],
-//     travel: ["admin", "hr", "manager", "employee"],
-//     assets: ["admin", "hr", "employee"], // manager ko assets ki zaroorat nahi
-//     documents: ["admin", "hr", "employee"],
-//     communication: ["admin", "hr", "manager", "employee"],
-//     shifts: ["admin", "hr"],
-//     compliance: ["admin", "hr"],
-//     reports: ["admin", "hr"],
-//     settings: ["admin"],
-//     users: ["admin"],
-//     help: ["admin", "hr", "manager", "employee"],
-//     "self-service": ["admin", "hr", "manager", "employee"],
-//     profile: ["admin", "hr", "manager", "employee"], // sabko apni profile access honi chahiye
-// };
-
-// // URL ke pehle segment se module key nikaalta hai
-// // "/employees/add" -> "employees" | "/leave/apply" -> "leave" | "/dashboard" -> "dashboard"
-// export const getModuleKeyFromPath = (pathname) => {
-//     const segments = pathname.split("/").filter(Boolean);
-//     return segments[0] || "dashboard";
-// };
-
-// // Check karta hai kya diya gaya role, diye gaye path ko access kar sakta hai
-// export const canAccessPath = (role, pathname) => {
-//     if (!role) return false;
-//     const moduleKey = getModuleKeyFromPath(pathname);
-//     const allowedRoles = modulePermissions[moduleKey];
-
-//     // Agar module list mein hi nahi hai (jaise koi naya unlisted route), default allow kar do
-//     // taaki accidentally kisi valid page ko block na kar de
-//     if (!allowedRoles) return true;
-
-//     return allowedRoles.includes(role);
-// };

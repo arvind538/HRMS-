@@ -26,9 +26,11 @@ import {
     ChevronLeft,
     ChevronRight,
     Check,
+    Network,
 } from "lucide-react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import CompanyStructure from "@/components/organization/CompanyStructure";
 
 /* ------------------------------ icons ------------------------------ */
 
@@ -144,8 +146,6 @@ function validateStep(key, f) {
     return e;
 }
 
-const getPath = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
-
 /* ------------------------------ page ------------------------------ */
 
 export default function CompanyPage() {
@@ -160,12 +160,19 @@ export default function CompanyPage() {
     const [maxStep, setMaxStep] = useState(0);
     const [errors, setErrors] = useState({});
     const wizardRef = useRef(null);
+    const [overview, setOverview] = useState(null);
+    const [tab, setTab] = useState("overview");
 
-    /* Admin edits. HR sees everything. Manager and employee see only the basic profile. */
+    /* Roles:
+       admin      : edit + structure + statutory
+       hr         : structure + statutory (no edit)
+       manager    : structure only
+       employee   : only the Overview tab (no structure data is requested) */
     const { user } = useAuth();
     const role = String(user?.role || "").toLowerCase();
     const isAdmin = role === "admin";
     const canSeeStatutory = role === "admin" || role === "hr";
+    const canSeeStructure = ["admin", "hr", "manager"].includes(role);
 
     const fetchCompany = useCallback(async () => {
         setLoading(true);
@@ -185,6 +192,17 @@ export default function CompanyPage() {
     useEffect(() => {
         fetchCompany();
     }, [fetchCompany]);
+
+    /* Organization overview sirf allowed roles ke liye call hota hai. Employee ke browser se ye request jaati hi nahi. */
+    useEffect(() => {
+        if (!canSeeStructure) {
+            setOverview(null);
+            return;
+        }
+        api.get("/organization/overview")
+            .then((res) => setOverview(res.data?.data || null))
+            .catch(() => setOverview(null));
+    }, [canSeeStructure]);
 
     const handleChange = (path, value) => {
         setForm((prev) => {
@@ -327,6 +345,15 @@ export default function CompanyPage() {
 
     const view = company || {};
     const logoSrc = safeUrl(view.logo);
+    // Employee ke liye overview nahi aata, isliye headcount company profile se hi aata hai
+    const headcount = canSeeStructure ? (overview?.company?.totalEmployees ?? view.totalEmployees ?? 0) : (view.totalEmployees ?? 0);
+
+    const tabs = [
+        ["overview", "Overview", Building2],
+        ...(canSeeStructure ? [["structure", "Structure", Network]] : []),
+        ...(canSeeStatutory ? [["statutory", "Statutory & Tax", Hash]] : []),
+    ];
+    const activeTab = tabs.some(([k]) => k === tab) ? tab : "overview";
 
     return (
         <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 font-sans antialiased text-slate-900 pb-16">
@@ -383,7 +410,7 @@ export default function CompanyPage() {
                     <div className="px-4 sm:px-8 pt-5 sm:pt-7 pb-4 sm:pb-5 border-b border-slate-100 bg-slate-50/60">
                         <ol className="flex items-center">
                             {STEPS.map((s, i) => {
-                                const done = i < step || (i <= maxStep && i !== step && i < step);
+                                const done = i < step;
                                 const active = i === step;
                                 const reachable = i <= maxStep;
                                 const Icon = s.icon;
@@ -470,23 +497,19 @@ export default function CompanyPage() {
                             )}
 
                             {step === 1 && (
-                                <div className="grid grid-cols-1 sm:grid-cols-1 gap-4">
+                                <div className="grid grid-cols-1 gap-4">
                                     <Field icon={<Mail size={15} />} label="Work Email" value={form?.email} onChange={(v) => handleChange("email", v)} error={errors.email} placeholder="hr@company.com" type="email" autoFocus />
                                     <Field icon={<Phone size={15} />} label="Phone" value={form?.phone} onChange={(v) => handleChange("phone", v)} error={errors.phone} placeholder="+91 98765 43210" type="tel" />
-                                    <div className="sm:col-span-2">
-                                        <Field icon={<Globe size={15} />} label="Website" value={form?.website} onChange={(v) => handleChange("website", v)} error={errors.website} placeholder="www.company.com" />
-                                    </div>
+                                    <Field icon={<Globe size={15} />} label="Website" value={form?.website} onChange={(v) => handleChange("website", v)} error={errors.website} placeholder="www.company.com" />
                                 </div>
                             )}
 
                             {step === 2 && (
-                                <div className="grid grid-cols-1 sm:grid-cols-1 gap-4">
-                                    <div className="sm:col-span-2">
-                                        <Field icon={<FileText size={15} />} label="Registration / CIN" value={form?.registrationNumber} onChange={(v) => handleChange("registrationNumber", v.toUpperCase())} error={errors.registrationNumber} placeholder="U72900RJ2018PTC012345" mono autoFocus />
-                                    </div>
+                                <div className="grid grid-cols-1 gap-4">
+                                    <Field icon={<FileText size={15} />} label="Registration / CIN" value={form?.registrationNumber} onChange={(v) => handleChange("registrationNumber", v.toUpperCase())} error={errors.registrationNumber} placeholder="U72900RJ2018PTC012345" mono autoFocus />
                                     <Field icon={<FileText size={15} />} label="GSTIN" value={form?.gstNumber} onChange={(v) => handleChange("gstNumber", alnum(v).slice(0, 15))} error={errors.gstNumber} placeholder="08AAGCF5681H1ZC" mono hint={`${alnum(form?.gstNumber).length}/15 characters`} />
                                     <Field icon={<FileText size={15} />} label="PAN" value={form?.panNumber} onChange={(v) => handleChange("panNumber", alnum(v).slice(0, 10))} error={errors.panNumber} placeholder="AABCA1234F" mono hint={`${alnum(form?.panNumber).length}/10 characters`} />
-                                    <p className="sm:col-span-2 text-[11px] text-slate-500 bg-indigo-50/60 border border-indigo-100 rounded-xl px-3.5 py-2.5">These numbers are optional, but payslips, TDS and PF filing need them. Letters are saved in capitals.</p>
+                                    <p className="text-[11px] text-slate-500 bg-indigo-50/60 border border-indigo-100 rounded-xl px-3.5 py-2.5">These numbers are optional, but payslips, TDS and PF filing need them. Letters are saved in capitals.</p>
                                 </div>
                             )}
 
@@ -538,7 +561,6 @@ export default function CompanyPage() {
                     </form>
                 </div>
             ) : (
-                /* ============================== VIEW ============================== */
                 <>
                     {/* Hero */}
                     <div className="bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl p-5 sm:p-8 shadow-sm transition-all duration-300 hover:shadow-lg hover:border-indigo-200 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
@@ -559,62 +581,76 @@ export default function CompanyPage() {
                         </div>
 
                         <div className="flex items-center gap-3.5 sm:gap-4 px-4 sm:px-6 py-3.5 sm:py-4 rounded-xl sm:rounded-2xl bg-slate-50/80 border border-slate-200/80 w-full md:w-auto transition-all duration-300 hover:border-indigo-200 hover:bg-white shrink-0">
-                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0">
-                                <Users size={20} />
-                            </div>
+                            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0"><Users size={20} /></div>
                             <div>
-                                <div className="text-xl sm:text-2xl font-extrabold text-slate-900 font-mono tracking-tight leading-none">{view.totalEmployees ? Number(view.totalEmployees).toLocaleString("en-IN") : 0}</div>
+                                <div className="text-xl sm:text-2xl font-extrabold text-slate-900 font-mono tracking-tight leading-none">{Number(headcount).toLocaleString("en-IN")}</div>
                                 <div className="text-[10px] sm:text-[11px] font-extrabold text-slate-400 uppercase tracking-wider mt-1">Active Employees</div>
                             </div>
                         </div>
                     </div>
 
-                    <div className={`grid grid-cols-1 gap-4 sm:gap-6 ${canSeeStatutory ? "lg:grid-cols-2" : ""}`}>
-                        <Section icon={<Building size={16} />} tone="indigo" title="Contact & Business">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                                <ReadField icon={<Mail size={15} />} label="Work Email" value={view.email} href={view.email ? `mailto:${view.email}` : ""} />
-                                <ReadField icon={<Phone size={15} />} label="Phone" value={view.phone} href={view.phone ? `tel:${view.phone}` : ""} />
-                                <ReadField icon={<Globe size={15} />} label="Website" value={view.website} href={view.website ? (/^https?:\/\//i.test(view.website) ? view.website : `https://${view.website}`) : ""} external />
-                                <ReadField icon={<Building2 size={15} />} label="Sector" value={view.industry} />
-                                <ReadField icon={<Calendar size={15} />} label="Incorporated Year" value={view.foundedYear} />
-                            </div>
-                        </Section>
-
-                        <Section hidden={!canSeeStatutory} icon={<Hash size={16} />} tone="violet" title="Statutory & Tax">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                                <ReadField icon={<FileText size={15} />} label="Registration / CIN" value={view.registrationNumber} mono />
-                                <ReadField icon={<FileText size={15} />} label="GSTIN" value={view.gstNumber} mono />
-                                <ReadField icon={<FileText size={15} />} label="PAN" value={view.panNumber} mono />
-                            </div>
-                        </Section>
+                    {/* Tabs: employee ko sirf Overview dikhega */}
+                    <div role="tablist" className="flex gap-1 p-1.5 bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-x-auto">
+                        {tabs.map(([k, label, I]) => (
+                            <button key={k} type="button" role="tab" aria-selected={activeTab === k} onClick={() => setTab(k)} className={`shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${activeTab === k ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" : "text-slate-500 hover:text-indigo-700 hover:bg-indigo-50"}`}>
+                                <I size={15} /> {label}
+                            </button>
+                        ))}
                     </div>
 
-                    <Section icon={<MapPin size={16} />} tone="blue" title="Registered Headquarters">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                            <div className="sm:col-span-2">
-                                <ReadField label="Street Address" value={view.address?.line1} wrap />
-                            </div>
-                            <ReadField label="City" value={view.address?.city} />
-                            <ReadField label="State / Province" value={view.address?.state} />
-                            <ReadField label="Country" value={view.address?.country} />
-                            <ReadField label="PIN / Postal Code" value={view.address?.pincode} mono />
-                        </div>
-                    </Section>
+                    {activeTab === "overview" && (
+                        <div key="overview" className="space-y-4 sm:space-y-6 animate-in fade-in duration-300">
+                            <Section icon={<Building size={16} />} tone="indigo" title="Contact & Business">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                                    <ReadField icon={<Mail size={15} />} label="Work Email" value={view.email} href={view.email ? `mailto:${view.email}` : ""} />
+                                    <ReadField icon={<Phone size={15} />} label="Phone" value={view.phone} href={view.phone ? `tel:${view.phone}` : ""} />
+                                    <ReadField icon={<Globe size={15} />} label="Website" value={view.website} href={view.website ? (/^https?:\/\//i.test(view.website) ? view.website : `https://${view.website}`) : ""} external />
+                                    <ReadField icon={<Building2 size={15} />} label="Sector" value={view.industry} />
+                                    <ReadField icon={<Calendar size={15} />} label="Incorporated Year" value={view.foundedYear} />
+                                </div>
+                            </Section>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-                        <div className="lg:col-span-2">
-                            <Section icon={<Sparkles size={16} />} tone="emerald" title="About the Company">
-                                <p className="text-xs sm:text-sm font-medium text-slate-600 leading-relaxed whitespace-pre-wrap break-words">{view.description || "No company summary has been added yet."}</p>
+                            <Section icon={<MapPin size={16} />} tone="blue" title="Registered Headquarters">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                                    <div className="sm:col-span-2"><ReadField label="Street Address" value={view.address?.line1} wrap /></div>
+                                    <ReadField label="City" value={view.address?.city} />
+                                    <ReadField label="State / Province" value={view.address?.state} />
+                                    <ReadField label="Country" value={view.address?.country} />
+                                    <ReadField label="PIN / Postal Code" value={view.address?.pincode} mono />
+                                </div>
+                            </Section>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+                                <div className="lg:col-span-2">
+                                    <Section icon={<Sparkles size={16} />} tone="emerald" title="About the Company">
+                                        <p className="text-xs sm:text-sm font-medium text-slate-600 leading-relaxed whitespace-pre-wrap break-words">{view.description || "No company summary has been added yet."}</p>
+                                    </Section>
+                                </div>
+                                <Section icon={<Share2 size={16} />} tone="sky" title="Public Networks">
+                                    <div className="space-y-3.5">
+                                        <ReadField icon={<LinkedinIcon size={15} />} label="LinkedIn" value={view.socialLinks?.linkedin} href={safeUrl(view.socialLinks?.linkedin)} external />
+                                        <ReadField icon={<TwitterIcon size={15} />} label="Twitter / X" value={view.socialLinks?.twitter} href={safeUrl(view.socialLinks?.twitter)} external />
+                                        <ReadField icon={<InstagramIcon size={15} />} label="Instagram" value={view.socialLinks?.instagram} href={safeUrl(view.socialLinks?.instagram)} external />
+                                    </div>
+                                </Section>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Structure: sirf admin, HR, manager. Employee ke liye ye render hi nahi hoga */}
+                    {activeTab === "structure" && canSeeStructure && <CompanyStructure key="structure" data={overview} />}
+
+                    {activeTab === "statutory" && canSeeStatutory && (
+                        <div key="statutory" className="animate-in fade-in duration-300">
+                            <Section icon={<Hash size={16} />} tone="violet" title="Statutory & Tax">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                                    <ReadField icon={<FileText size={15} />} label="Registration / CIN" value={view.registrationNumber} mono />
+                                    <ReadField icon={<FileText size={15} />} label="GSTIN" value={view.gstNumber} mono />
+                                    <ReadField icon={<FileText size={15} />} label="PAN" value={view.panNumber} mono />
+                                </div>
                             </Section>
                         </div>
-                        <Section icon={<Share2 size={16} />} tone="sky" title="Public Networks">
-                            <div className="space-y-3.5">
-                                <ReadField icon={<LinkedinIcon size={15} />} label="LinkedIn" value={view.socialLinks?.linkedin} href={safeUrl(view.socialLinks?.linkedin)} external />
-                                <ReadField icon={<TwitterIcon size={15} />} label="Twitter / X" value={view.socialLinks?.twitter} href={safeUrl(view.socialLinks?.twitter)} external />
-                                <ReadField icon={<InstagramIcon size={15} />} label="Instagram" value={view.socialLinks?.instagram} href={safeUrl(view.socialLinks?.instagram)} external />
-                            </div>
-                        </Section>
-                    </div>
+                    )}
                 </>
             )}
         </div>
@@ -631,8 +667,7 @@ const TONES = {
     sky: "bg-sky-50 text-sky-600 border-sky-100/80",
 };
 
-function Section({ icon, tone = "indigo", title, children, hidden = false }) {
-    if (hidden) return null;
+function Section({ icon, tone = "indigo", title, children }) {
     return (
         <div className="h-full bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl p-5 sm:p-7 shadow-sm transition-all duration-300 hover:shadow-lg hover:border-indigo-200 space-y-4 sm:space-y-5">
             <div className="flex items-center gap-3 pb-3 sm:pb-4 border-b border-slate-100">
@@ -687,8 +722,7 @@ function Field({ icon, label, value, onChange, error, placeholder = "", required
                 onChange={(e) => onChange(e.target.value)}
                 placeholder={placeholder}
                 aria-invalid={Boolean(error)}
-                className={`mt-1.5 w-full px-3.5 py-3 text-base sm:text-sm font-semibold text-slate-900 bg-slate-50/70 border rounded-xl outline-none transition-all placeholder:text-slate-300 placeholder:font-normal hover:border-slate-300 focus:bg-white focus:ring-4 ${mono ? "font-mono tracking-wide" : ""} ${error ? "border-rose-300 focus:border-rose-500 focus:ring-rose-500/10" : "border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/10"
-                    }`}
+                className={`mt-1.5 w-full px-3.5 py-3 text-base sm:text-sm font-semibold text-slate-900 bg-slate-50/70 border rounded-xl outline-none transition-all placeholder:text-slate-300 placeholder:font-normal hover:border-slate-300 focus:bg-white focus:ring-4 ${mono ? "font-mono tracking-wide" : ""} ${error ? "border-rose-300 focus:border-rose-500 focus:ring-rose-500/10" : "border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/10"}`}
                 {...rest}
             />
             {error ? (

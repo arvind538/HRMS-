@@ -1,7 +1,9 @@
 const mongoose = require("mongoose");
+
 const locationSchema = new mongoose.Schema(
     {
         name: { type: String, required: true, trim: true },
+        code: { type: String, trim: true, uppercase: true, default: "" },
         address: { type: String, trim: true },
         city: { type: String, trim: true },
         state: { type: String, trim: true },
@@ -11,4 +13,5 @@ const locationSchema = new mongoose.Schema(
     },
     { timestamps: true }
 );
+
 module.exports = mongoose.model("Location", locationSchema);

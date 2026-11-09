@@ -1,244 +1,160 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { Loader2, TrendingUp, CalendarClock, ArrowUpRight, Banknote, RefreshCw } from "lucide-react";
-import api from "@/lib/api";
+
+import { useState } from "react";
+import { ArrowUpRight, Banknote, CheckCircle2, Clock, Eye, Send, ThumbsUp, XCircle } from "lucide-react";
 import { toast } from "react-toastify";
-import Table from "@/components/ui/Table";
+import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { ConfirmDialog, ErrorBanner, FieldError, Label, dateText, fieldBorder, inputClass } from "@/components/payroll/ui";
+import { PageHeader, primaryBtn } from "@/components/payroll/common";
+import { Box, Chip, FormFooter, ReasonModal, errMsg } from "@/components/recruitment/rui";
+import AppraisalDetail from "@/components/performance/AppraisalDetail";
+import { DEC_ST, DEC_TABS, DataPanel, Person, Stats, StChip, Toolbar, day, roleOf, tabsOf, useApi } from "@/components/performance/pui";
+
+const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 export default function IncrementPage() {
-  const [appraisals, setAppraisals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const role = roleOf(user);
+  const staff = ["admin", "hr"].includes(role);
+  const admin = role === "admin";
+  const { data, loading, refreshing, error, load } = useApi("/performance/increments");
+  const rows = data || [];
 
-  const fetchIncrements = useCallback(async () => {
-    setLoading(true);
+  const [tab, setTab] = useState("all");
+  const [search, setSearch] = useState("");
+  const [viewing, setViewing] = useState(null);
+  const [approve, setApprove] = useState(null);
+  const [reject, setReject] = useState(null);
+  const [ask, setAsk] = useState(null);
+  const [f, setF] = useState({ pct: "", date: "", note: "" });
+  const [errs, setErrs] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const visible = rows.filter((a) => (tab === "all" || a.incrementStatus === tab) && (!search.trim() || `${a.employee?.name || ""} ${a.reviewPeriod}`.toLowerCase().includes(search.trim().toLowerCase())));
+  const count = (s) => rows.filter((a) => a.incrementStatus === s).length;
+
+  const canDecide = (a) => staff && !a.isMine && ["pending", "rejected"].includes(a.incrementStatus);
+  const canReject = (a) => staff && !a.isMine && ["pending", "approved"].includes(a.incrementStatus);
+  const canApply = (a) => admin && a.incrementStatus === "approved";
+
+  const decide = async (a, body, okText) => {
     try {
-      const { data } = await api.get("/performance/appraisals");
-
-      const list = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.data)
-          ? data.data
-          : Array.isArray(data?.appraisals)
-            ? data.appraisals
-            : [];
-
-      // Filter records with increments > 0 and sort highest to lowest
-      const incrementList = list
-        .filter((a) => Number(a.incrementPercent) > 0)
-        .sort((a, b) => (Number(b.incrementPercent) || 0) - (Number(a.incrementPercent) || 0));
-
-      setAppraisals(incrementList);
-    } catch (err) {
-      console.error("Error fetching increments:", err);
-      toast.error("Failed to load increment recommendations. Please try again.");
-    } finally {
-      setLoading(false);
+      await api.put(`/performance/appraisals/${a._id}/increment`, body);
+      toast.success(okText);
+      setViewing(null);
+      load({ silent: true });
+    } catch (e) {
+      toast.error(await errMsg(e, "Unable to save the decision."));
+      throw e;
     }
-  }, []);
-
-  useEffect(() => {
-    fetchIncrements();
-  }, [fetchIncrements]);
-
-  const getEmpName = (r) => {
-    if (r.employee && typeof r.employee === "object") {
-      return r.employee.name || r.employee.fullName || "Unknown Employee";
-    }
-    return r.employeeName || "Unknown Employee";
   };
 
-  const getEmpDesignation = (r) => {
-    if (r.employee && typeof r.employee === "object") {
-      return r.employee.designation || r.employee.department || "Team Member";
-    }
-    return r.designation || "Team Member";
+  const openApprove = (a) => {
+    setF({ pct: String(a.incrementPercent || ""), date: day(a.incrementEffectiveDate) || day(new Date().toISOString()), note: "" });
+    setErrs({});
+    setApprove(a);
+  };
+  const submitApprove = async (e) => {
+    e.preventDefault();
+    if (saving) return;
+    const n = Number(f.pct);
+    const next = {};
+    if (!Number.isFinite(n) || n <= 0 || n > 100) next.pct = "Enter a percent above 0, up to 100.";
+    if (!f.date) next.date = "Select the date the increment starts.";
+    setErrs(next);
+    if (Object.keys(next).length) return;
+    setSaving(true);
+    try {
+      await decide(approve, { decision: "approved", incrementPercent: n, effectiveDate: f.date, note: f.note.trim() }, "Increment approved.");
+      setApprove(null);
+    } catch { /* the toast is already shown */ } finally { setSaving(false); }
   };
 
-  const columns = [
-    {
-      key: "employee",
-      label: "Employee",
-      render: (r) => {
-        const empName = getEmpName(r);
-        return (
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-600 shadow-2xs shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-              {empName.charAt(0).toUpperCase()}
-            </div>
-            <span className="font-bold text-slate-900 text-sm">{empName}</span>
-          </div>
-        );
+  const applyIt = (a) => setAsk({
+    title: "Apply this increment to the salary?", label: "Apply to salary", danger: true,
+    text: `${a.employee?.name}: salary will go up by ${a.incrementPercent}%. This changes the salary used in payroll and cannot be undone. Refresh draft payslips afterwards.`,
+    run: async () => {
+      try {
+        await api.post(`/performance/appraisals/${a._id}/increment/apply`);
+        toast.success("Salary updated.");
+        setViewing(null);
+        await load({ silent: true });
+      } catch (e) {
+        toast.error(await errMsg(e, "Unable to apply the increment."));
       }
     },
-    {
-      key: "designation",
-      label: "Role / Designation",
-      render: (r) => (
-        <span className="text-slate-600 font-medium text-xs">
-          {getEmpDesignation(r)}
-        </span>
-      )
-    },
-    {
-      key: "reviewPeriod",
-      label: "Review Period",
-      render: (r) => (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 text-slate-600 text-xs font-medium border border-slate-200/80 font-mono">
-          <CalendarClock size={14} className="text-slate-400 shrink-0" />
-          {r.reviewPeriod || r.period || "—"}
-        </span>
-      )
-    },
-    {
-      key: "incrementPercent",
-      label: "Recommended Increment",
-      render: (r) => (
-        <span className="inline-flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-emerald-50 to-green-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold shadow-2xs font-mono">
-          <ArrowUpRight size={14} className="text-emerald-500" />
-          +{r.incrementPercent}%
-        </span>
-      )
-    },
-  ];
+  });
 
-  if (loading) {
-    return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-3">
-        <Loader2 className="animate-spin text-emerald-600" size={32} />
-        <p className="text-xs text-slate-500 font-medium animate-pulse">Loading increment data...</p>
-      </div>
-    );
-  }
+  const menu = (a) => [
+    { label: "View details", icon: Eye, run: () => setViewing(a) },
+    { label: "Approve", icon: ThumbsUp, run: () => openApprove(a), hidden: !canDecide(a) },
+    { label: "Reject", icon: XCircle, run: () => setReject(a), hidden: !canReject(a), danger: true },
+    { label: "Apply to salary", icon: Send, run: () => applyIt(a), hidden: !canApply(a) },
+  ];
+  const pct = (a) => <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold font-mono"><ArrowUpRight size={13} />+{a.incrementPercent}%</span>;
+  const salary = (a) => (a.incrementStatus === "applied" && a.incrementNewSalary ? <span className="text-xs font-semibold text-slate-700">{inr(a.incrementPrevSalary)} → <b>{inr(a.incrementNewSalary)}</b></span> : <span className="text-slate-300">—</span>);
+  const cls = `${inputClass} border-slate-200 focus:border-indigo-500`;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 font-sans antialiased text-slate-900">
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={Banknote} title="Increment" subtitle={staff ? "Managers recommend, HR approves, Admin applies to salary." : "Increments decided for you."} onRefresh={() => load({ silent: true })} busy={loading || refreshing} />
 
-      {/* Header Section */}
-      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 transition-all hover:shadow-md">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-              <Banknote className="text-emerald-600" size={24} />
-              Increment Recommendations
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
-              {appraisals.length} Qualified
-            </span>
+      {!loading && !error && <Stats items={[["To decide", count("pending"), Clock, "indigo"], ["Approved, not applied", count("approved"), CheckCircle2, "violet"], ["Applied", count("applied"), Banknote, "emerald"]]} />}
+
+      <Toolbar search={search} onSearch={setSearch} placeholder="Search employee or period" tabs={tabsOf(rows, DEC_TABS, "incrementStatus")} tab={tab} onTab={setTab} />
+      <ErrorBanner message={error} onRetry={() => load()} />
+
+      <DataPanel
+        loading={loading} rows={visible} icon={Banknote}
+        empty={["No increments", staff ? "Recommendations appear after managers complete appraisals." : "Approved increments appear here."]}
+        onOpen={setViewing} menu={menu}
+        cols={[
+          { h: "Employee", cell: (a) => <Person p={a.employee} /> },
+          { h: "Period", cell: (a) => <span className="font-mono font-semibold text-slate-700">{a.reviewPeriod}</span> },
+          { h: "Increment", cell: pct },
+          { h: "Starts on", cell: (a) => (a.incrementEffectiveDate ? dateText(a.incrementEffectiveDate) : "—") },
+          ...(staff ? [{ h: "Salary", cell: salary }] : []),
+          { h: "Status", cell: (a) => <StChip map={DEC_ST} v={a.incrementStatus} /> },
+        ]}
+        card={(a) => (
+          <div className="space-y-2.5">
+            <Person p={a.employee} sub={`${a.reviewPeriod}${a.incrementEffectiveDate ? ` • from ${dateText(a.incrementEffectiveDate)}` : ""}`} />
+            <div className="flex flex-wrap items-center gap-2"><StChip map={DEC_ST} v={a.incrementStatus} />{pct(a)}</div>
+            {staff && a.incrementStatus === "applied" && salary(a)}
           </div>
-          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Recommended salary increments based on recent performance appraisals and manager reviews.
-          </p>
-        </div>
-
-        <button
-          onClick={fetchIncrements}
-          className="p-3 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition cursor-pointer shadow-2xs self-start sm:self-auto"
-          title="Refresh Data"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin text-emerald-600" : ""} />
-        </button>
-      </div>
-
-      {/* Content Section */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden transition-all hover:shadow-md">
-        {appraisals.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 px-4 text-center max-w-sm mx-auto p-6">
-            <div className="h-14 w-14 bg-slate-50 rounded-2xl flex items-center justify-center mb-3 border border-slate-100 shadow-2xs">
-              <TrendingUp className="text-slate-300" size={28} />
-            </div>
-            <p className="text-sm text-slate-800 font-bold">No increment recommendations yet</p>
-            <p className="text-xs text-slate-500 mt-1">
-              Salary increment data will appear here once managers submit their final assessments with an increment percentage.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Desktop Table View */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                    <th className="py-4 px-6">Employee</th>
-                    <th className="py-4 px-6">Role / Designation</th>
-                    <th className="py-4 px-6">Review Period</th>
-                    <th className="py-4 px-6 text-right">Recommended Increment</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
-                  {appraisals.map((r) => {
-                    const id = r._id || r.id;
-                    const empName = getEmpName(r);
-
-                    return (
-                      <tr key={id} className="hover:bg-emerald-50/30 transition-colors duration-150 group">
-                        <td className="py-4 px-6">
-                          <div className="flex items-center gap-3">
-                            <div className="h-8 w-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-600 shadow-2xs shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                              {empName.charAt(0).toUpperCase()}
-                            </div>
-                            <span className="font-bold text-slate-900 text-sm group-hover:text-emerald-700 transition-colors">{empName}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 px-6 text-slate-600 text-xs font-medium">
-                          {getEmpDesignation(r)}
-                        </td>
-                        <td className="py-4 px-6">
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-50 text-slate-600 text-xs font-medium border border-slate-200/80 font-mono">
-                            <CalendarClock size={14} className="text-slate-400 shrink-0" />
-                            {r.reviewPeriod || r.period || "—"}
-                          </span>
-                        </td>
-                        <td className="py-4 px-6 text-right">
-                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-emerald-50 to-green-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold shadow-2xs font-mono">
-                            <ArrowUpRight size={14} className="text-emerald-500" />
-                            +{r.incrementPercent}%
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile Card View */}
-            <div className="md:hidden divide-y divide-slate-100">
-              {appraisals.map((r) => {
-                const id = r._id || r.id;
-                const empName = getEmpName(r);
-
-                return (
-                  <div key={id} className="p-4 space-y-3 bg-white hover:bg-slate-50 transition-colors">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-600 shrink-0">
-                          {empName.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-slate-900 text-sm">{empName}</h4>
-                          <span className="text-[11px] text-slate-400 font-medium">{getEmpDesignation(r)}</span>
-                        </div>
-                      </div>
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold font-mono">
-                        <ArrowUpRight size={13} className="text-emerald-500" />
-                        +{r.incrementPercent}%
-                      </span>
-                    </div>
-
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center text-xs">
-                      <span className="font-medium text-slate-600">Review Period:</span>
-                      <span className="font-semibold text-slate-800 font-mono flex items-center gap-1">
-                        <CalendarClock size={13} className="text-slate-400" />
-                        {r.reviewPeriod || r.period || "—"}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
         )}
-      </div>
+      />
+
+      {viewing && (
+        <AppraisalDetail a={viewing} onClose={() => setViewing(null)}>
+          {canDecide(viewing) && <button type="button" onClick={() => { const a = viewing; setViewing(null); openApprove(a); }} className={primaryBtn}><ThumbsUp size={14} /> Approve</button>}
+          {canApply(viewing) && <button type="button" onClick={() => applyIt(viewing)} className={primaryBtn}><Send size={14} /> Apply to salary</button>}
+          {canReject(viewing) && <button type="button" onClick={() => { setReject(viewing); setViewing(null); }} className="inline-flex items-center justify-center gap-2 px-5 py-3 sm:py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold transition cursor-pointer"><XCircle size={14} /> Reject</button>}
+        </AppraisalDetail>
+      )}
+
+      {approve && (
+        <Box title="Approve increment" subtitle={approve.employee?.name} onClose={() => setApprove(null)} onSubmit={submitApprove} locked={saving} size="max-w-md" footer={<FormFooter onCancel={() => setApprove(null)} busy={saving} label="Approve" />}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Increment (%)</Label>
+              <input type="number" min="0" max="100" step="0.5" value={f.pct} autoFocus onChange={(e) => { setF({ ...f, pct: e.target.value }); setErrs({ ...errs, pct: undefined }); }} className={`${inputClass} ${fieldBorder(errs.pct)}`} />
+              <FieldError>{errs.pct}</FieldError>
+            </div>
+            <div>
+              <Label>Starts on</Label>
+              <input type="date" value={f.date} onChange={(e) => { setF({ ...f, date: e.target.value }); setErrs({ ...errs, date: undefined }); }} className={`${inputClass} cursor-pointer ${fieldBorder(errs.date)}`} />
+              <FieldError>{errs.date}</FieldError>
+            </div>
+          </div>
+          <div><Label>Note (optional)</Label><textarea rows={3} value={f.note} maxLength={300} onChange={(e) => setF({ ...f, note: e.target.value })} className={`${cls} resize-none`} /></div>
+          <p className="text-[11px] text-slate-400">Approving does not change the salary. Admin applies it from this page on or after the start date.</p>
+        </Box>
+      )}
+
+      {reject && <ReasonModal title="Reject increment" subtitle={reject.employee?.name} confirm="Reject" onClose={() => setReject(null)} onSubmit={(n) => decide(reject, { decision: "rejected", note: n }, "Increment rejected.")} />}
+      {ask && <ConfirmDialog title={ask.title} text={ask.text} label={ask.label} danger={ask.danger} onConfirm={ask.run} onClose={() => setAsk(null)} />}
     </div>
   );
 }

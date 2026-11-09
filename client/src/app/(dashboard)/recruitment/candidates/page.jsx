@@ -1,609 +1,349 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
-import {
-  Plus,
-  Users,
-  Search,
-  RefreshCw,
-  Mail,
-  Phone,
-  Briefcase,
-  Calendar,
-  ChevronRight,
-  X,
-  Sparkles,
-  UserCheck,
-  UserX,
-  Clock,
-  Building2,
-  ExternalLink,
-  CheckCircle2,
-  AlertCircle
-} from "lucide-react";
-import api from "@/lib/api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Download, Eye, FileText, Mail, Pencil, Phone, Plus, Trash2, UploadCloud, Users, X } from "lucide-react";
 import { toast } from "react-toastify";
-import Button from "@/components/ui/Button";
+import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { ConfirmDialog, ErrorBanner, FieldError, Label, StatCard, fieldBorder, inputClass } from "@/components/payroll/ui";
+import { EmptyBox, FilterTabs, ListSkeleton, PageHeader, SearchBox, primaryBtn } from "@/components/payroll/common";
+import { Box, Chip, FormFooter, ReasonModal, RowMenu, SOURCES, STAGE, StatusPicker, errMsg, idOf, openResume } from "@/components/recruitment/rui";
+import CandidateDetail from "@/components/recruitment/CandidateDetail";
 
-const STATUS_CONFIG = {
-  applied: { label: "Applied", bg: "bg-slate-100 text-slate-700 border-slate-200" },
-  shortlisted: { label: "Shortlisted", bg: "bg-sky-50 text-sky-700 border-sky-200" },
-  "interview-scheduled": { label: "Interview Scheduled", bg: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  interviewed: { label: "Interviewed", bg: "bg-amber-50 text-amber-700 border-amber-200" },
-  offered: { label: "Offered", bg: "bg-purple-50 text-purple-700 border-purple-200" },
-  hired: { label: "Hired", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  rejected: { label: "Rejected", bg: "bg-rose-50 text-rose-700 border-rose-200" },
-};
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const HINT = { "interview-scheduled": "Set from Interview Schedule", offered: "Set from Offers", hired: "Set from Offers" };
+const stageOptions = Object.entries(STAGE).map(([value, s]) => ({ value, ...s, disabled: Boolean(HINT[value]), hint: HINT[value] }));
+
+const blank = () => ({ name: "", email: "", phone: "", jobPosition: "", experience: "", currentCompany: "", expectedCtc: "", noticePeriod: "", source: "job-portal", notes: "", file: null });
+const toForm = (c) => ({ name: c.name || "", email: c.email || "", phone: c.phone || "", jobPosition: idOf(c.jobPosition), experience: c.experience || "", currentCompany: c.currentCompany || "", expectedCtc: c.expectedCtc || "", noticePeriod: c.noticePeriod || "", source: c.source || "other", notes: c.notes || "", file: null });
+const size = (b) => (b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(1)} MB`);
 
 export default function CandidatesPage() {
-  const [candidates, setCandidates] = useState([]);
+  const { user } = useAuth();
+  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
+
+  const [rows, setRows] = useState([]);
   const [positions, setPositions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [posFilter, setPosFilter] = useState("ALL");
+  const [tab, setTab] = useState("all");
 
-  // Modals & Drawers State
-  const [modalOpen, setModalOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(blank());
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [viewing, setViewing] = useState(null);
+  const [rejecting, setRejecting] = useState(null);
+  const [ask, setAsk] = useState(null);
+  const fileRef = useRef(null);
 
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    jobPosition: "",
-    source: "job-portal",
-    notes: "",
-  });
-
-  const fetchData = useCallback(async (isManual = false) => {
-    if (isManual) setRefreshing(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
     else setLoading(true);
-
+    setError("");
     try {
-      const [candRes, posRes] = await Promise.all([
-        api.get("/recruitment/candidates", {
-          params: statusFilter ? { status: statusFilter } : {},
-        }),
-        api.get("/recruitment/positions"),
-      ]);
-
-      const rawCand = Array.isArray(candRes?.data)
-        ? candRes.data
-        : Array.isArray(candRes?.data?.data)
-          ? candRes.data.data
-          : [];
-
-      const rawPos = Array.isArray(posRes?.data)
-        ? posRes.data
-        : Array.isArray(posRes?.data?.data)
-          ? posRes.data.data
-          : [];
-
-      setCandidates(rawCand);
-      setPositions(rawPos);
+      const [c, p] = await Promise.all([api.get("/recruitment/candidates"), api.get("/recruitment/positions")]);
+      setRows(Array.isArray(c.data) ? c.data : []);
+      setPositions(Array.isArray(p.data) ? p.data : []);
     } catch (err) {
-      toast.error("Candidates data load nahi ho paya.");
-      console.error(err);
+      setError(await errMsg(err, "Unable to load the candidates."));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [statusFilter]);
+  }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { load(); }, [load]);
 
-  // Create Candidate
-  const handleCreate = async (e) => {
+  const counts = useMemo(() => {
+    const c = { all: rows.length };
+    Object.keys(STAGE).forEach((k) => (c[k] = rows.filter((x) => x.status === k).length));
+    return c;
+  }, [rows]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((c) => (tab === "all" || c.status === tab) && (posFilter === "ALL" || idOf(c.jobPosition) === posFilter) && (!q || `${c.name} ${c.email} ${c.phone || ""} ${c.jobPosition?.title || ""}`.toLowerCase().includes(q)));
+  }, [rows, tab, posFilter, search]);
+
+  /* ---- form ---- */
+  const openModal = (row = null) => {
+    setForm(row ? toForm(row) : blank());
+    setErrors({});
+    setModal({ row });
+  };
+  const set = (k, v) => {
+    setForm((p) => ({ ...p, [k]: v }));
+    setErrors((p) => (p[k] ? { ...p, [k]: undefined } : p));
+  };
+
+  const pickFile = (file) => {
+    if (!file) return;
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (!["pdf", "doc", "docx"].includes(ext)) return setErrors((p) => ({ ...p, file: "The resume must be a PDF, DOC or DOCX file." }));
+    if (file.size > 5 * 1048576) return setErrors((p) => ({ ...p, file: "The file must be under 5 MB." }));
+    set("file", file);
+  };
+
+  const save = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
+    if (saving) return;
+    const next = {};
+    if (form.name.trim().length < 2) next.name = "Please enter the full name.";
+    if (!EMAIL.test(form.email.trim())) next.email = "Please enter a valid email address.";
+    if (form.phone.trim() && !/^[+\d][\d\s-]{6,18}$/.test(form.phone.trim())) next.phone = "Please enter a valid phone number.";
+    if (!form.jobPosition) next.jobPosition = "Please select the position.";
+    setErrors(next);
+    if (Object.keys(next).length) return;
+
+    const body = new FormData();
+    ["name", "email", "phone", "jobPosition", "experience", "currentCompany", "expectedCtc", "noticePeriod", "source", "notes"].forEach((k) => body.append(k, String(form[k] ?? "").trim()));
+    if (form.file) body.append("file", form.file);
+
+    setSaving(true);
     try {
-      await api.post("/recruitment/candidates", form);
-      toast.success("Candidate successfully add ho gaya!");
-      setModalOpen(false);
-      setForm({
-        name: "",
-        email: "",
-        phone: "",
-        jobPosition: "",
-        source: "job-portal",
-        notes: "",
-      });
-      fetchData();
+      const opts = { headers: { "Content-Type": "multipart/form-data" } };
+      if (modal.row) await api.put(`/recruitment/candidates/${modal.row._id}`, body, opts);
+      else await api.post("/recruitment/candidates", body, opts);
+      toast.success(modal.row ? "Candidate updated." : "Candidate added.");
+      setModal(null);
+      load({ silent: true });
     } catch (err) {
-      toast.error(err.response?.data?.message || "Candidate add nahi hua.");
+      toast.error(await errMsg(err, "Unable to save the candidate."));
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  // Status Change Inline
-  const handleStatusChange = async (e, id, newStatus) => {
-    e.stopPropagation();
+  /* ---- stage ---- */
+  const setStage = async (c, status, note = "") => {
     try {
-      await api.put(`/recruitment/candidates/${id}/status`, { status: newStatus });
-      toast.success(`Status updated to ${newStatus}`);
-      setCandidates((prev) =>
-        prev.map((c) => ((c._id || c.id) === id ? { ...c, status: newStatus } : c))
-      );
-      if (selectedCandidate && (selectedCandidate._id || selectedCandidate.id) === id) {
-        setSelectedCandidate((prev) => ({ ...prev, status: newStatus }));
-      }
+      const { data } = await api.put(`/recruitment/candidates/${c._id}/status`, { status, note });
+      setRows((prev) => prev.map((x) => (x._id === c._id ? data : x)));
+      setViewing((v) => (v && v._id === c._id ? data : v));
+      toast.success(`Moved to ${STAGE[status].label.toLowerCase()}.`);
     } catch (err) {
-      toast.error(err.response?.data?.message || "Status update fail ho gaya.");
+      toast.error(await errMsg(err, "Unable to change the stage."));
+      throw err;
     }
   };
+  const onStage = (c, status) => (status === "rejected" ? setRejecting(c) : setStage(c, status).catch(() => { }));
 
-  // Live Filtered Candidates
-  const filteredCandidates = useMemo(() => {
-    return candidates.filter((c) => {
-      const name = (c.name || "").toLowerCase();
-      const email = (c.email || "").toLowerCase();
-      const phone = (c.phone || "").toLowerCase();
-      const posTitle = (c.jobPosition?.title || c.position || "").toLowerCase();
-      const q = searchQuery.toLowerCase();
-
-      return (
-        name.includes(q) ||
-        email.includes(q) ||
-        phone.includes(q) ||
-        posTitle.includes(q)
-      );
+  const remove = (c) =>
+    setAsk({
+      title: "Delete this candidate?",
+      text: `${c.name}. Their interviews, offers and resume are deleted too. This cannot be undone.`,
+      run: async () => {
+        try {
+          await api.delete(`/recruitment/candidates/${c._id}`);
+          toast.success("Candidate deleted.");
+          await load({ silent: true });
+        } catch (err) {
+          toast.error(await errMsg(err, "Unable to delete the candidate."));
+        }
+      },
     });
-  }, [candidates, searchQuery]);
+
+  const menuFor = (c) => [
+    { label: "View profile", icon: Eye, run: () => setViewing(c) },
+    { label: "Edit", icon: Pencil, run: () => openModal(c) },
+    { label: "View resume", icon: FileText, run: () => openResume(c), hidden: !c.hasResume && !c.resumeUrl },
+    { label: "Download resume", icon: Download, run: () => openResume(c, true), hidden: !c.hasResume },
+    { label: "Delete", icon: Trash2, run: () => remove(c), hidden: !isAdmin || c.status === "hired", danger: true },
+  ];
+
+  const picker = (c) => <StatusPicker value={c.status} options={stageOptions} disabled={["offered", "hired"].includes(c.status)} onChange={(v) => onStage(c, v)} />;
+  const mark = (c) => <div className="w-10 h-10 shrink-0 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center font-extrabold text-sm">{c.name?.charAt(0)?.toUpperCase() || "C"}</div>;
+  const selectCls = "px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-base sm:text-xs font-semibold text-slate-700 outline-none focus:bg-white focus:border-indigo-500 cursor-pointer max-w-full";
+  const cls = `${inputClass} border-slate-200 focus:border-indigo-500`;
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6 pb-12 animate-in fade-in duration-300">
-      {/* Header Container */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
-              <Users size={22} />
-            </span>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Candidate Directory
-            </h1>
-          </div>
-          <p className="text-xs text-slate-500 mt-1 pl-11">
-            Track, filter, and manage applicant progression throughout the recruitment funnel
-          </p>
-        </div>
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={Users} title="Candidates" subtitle="Everyone who applied, with their stage and resume." onRefresh={() => load({ silent: true })} busy={loading || refreshing}>
+        <button type="button" onClick={() => openModal()} className={primaryBtn}><Plus size={16} /> Add Candidate</button>
+      </PageHeader>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => fetchData(true)}
-            disabled={refreshing || loading}
-            title="Refresh list"
-            className="p-2.5 border border-slate-200 rounded-2xl text-slate-600 hover:bg-slate-50 active:scale-95 transition-all disabled:opacity-50"
-          >
-            <RefreshCw
-              size={16}
-              className={refreshing ? "animate-spin text-indigo-600" : ""}
-            />
-          </button>
-          <Button
-            onClick={() => setModalOpen(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl px-4 py-2.5 font-medium shadow-md shadow-indigo-100 transition-all active:scale-95 flex items-center gap-2"
-          >
-            <Plus size={16} /> Add Candidate
-          </Button>
+      {!loading && !error && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          <StatCard icon={Users} tone="indigo" label="All candidates" value={counts.all} />
+          <StatCard icon={Eye} tone="emerald" label="In interview stages" value={counts["interview-scheduled"] + counts.interviewed} />
+          <div className="col-span-2 lg:col-span-1"><StatCard icon={FileText} tone="violet" label="Hired" value={counts.hired} /></div>
         </div>
+      )}
+
+      <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/70 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <SearchBox value={search} onChange={setSearch} placeholder="Search name, email, phone or role" />
+          {positions.length > 1 && (
+            <select value={posFilter} onChange={(e) => setPosFilter(e.target.value)} className={selectCls}>
+              <option value="ALL">All positions</option>
+              {positions.map((p) => <option key={p._id} value={p._id}>{p.title}</option>)}
+            </select>
+          )}
+        </div>
+        <FilterTabs tabs={[["all", "All", counts.all], ...Object.entries(STAGE).map(([k, s]) => [k, s.label, counts[k]])]} value={tab} onChange={setTab} />
       </div>
 
-      {/* Stage Filters Bar */}
-      <div className="bg-white p-3 rounded-3xl border border-slate-200/80 shadow-xs flex items-center gap-1.5 overflow-x-auto">
-        {[
-          { key: "", label: "All Applicants" },
-          { key: "applied", label: "Applied" },
-          { key: "shortlisted", label: "Shortlisted" },
-          { key: "interview-scheduled", label: "Interview Scheduled" },
-          { key: "interviewed", label: "Interviewed" },
-          { key: "offered", label: "Offered" },
-          { key: "hired", label: "Hired" },
-          { key: "rejected", label: "Rejected" },
-        ].map((item) => {
-          const isActive = statusFilter === item.key;
-          return (
-            <button
-              key={item.key}
-              onClick={() => setStatusFilter(item.key)}
-              className={`px-3.5 py-1.5 rounded-2xl text-xs font-semibold whitespace-nowrap transition-all active:scale-95 ${isActive
-                ? "bg-indigo-600 text-white shadow-xs shadow-indigo-200"
-                : "bg-slate-50/80 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                }`}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
+      <ErrorBanner message={error} onRetry={() => load()} />
 
-      {/* Search Bar */}
-      <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-        <div className="relative w-full sm:w-80">
-          <Search
-            size={15}
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search candidate by name, role, email..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-50/80 border border-slate-200 rounded-2xl text-xs font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-          />
-        </div>
-        <p className="text-xs font-semibold text-slate-400 hidden sm:block">
-          Showing <span className="text-slate-800">{filteredCandidates.length}</span> candidates
-        </p>
-      </div>
+      <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden">
+        {loading ? <ListSkeleton /> : visible.length === 0 ? (
+          <EmptyBox icon={Users} title={rows.length ? "Nothing matches your search" : "No candidates yet"} text={rows.length ? "Try another stage or keyword." : 'Click "Add Candidate" to add the first one.'} />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 sm:p-4 lg:hidden">
+              {visible.map((c) => (
+                <div key={c._id} onClick={() => setViewing(c)} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 space-y-3 hover:border-indigo-200 hover:shadow-sm transition cursor-pointer">
+                  <div className="flex items-start gap-3">
+                    {mark(c)}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-slate-900 break-words">{c.name}</p>
+                      <p className="text-[11px] text-slate-400 break-all">{c.email}</p>
+                    </div>
+                    <div onClick={(e) => e.stopPropagation()}><RowMenu items={menuFor(c)} /></div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    {picker(c)}
+                    {c.jobPosition?.title && <Chip tone="indigo">{c.jobPosition.title}</Chip>}
+                    {c.phone && <span className="text-[11px] text-slate-400 font-medium">{c.phone}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
 
-      {/* Main Interactive Table */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[750px]">
-            <thead>
-              <tr className="bg-slate-50/75 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <th className="py-4 px-6">Candidate</th>
-                <th className="py-4 px-6">Applied Role</th>
-                <th className="py-4 px-6">Contact Details</th>
-                <th className="py-4 px-6">Source</th>
-                <th className="py-4 px-6">Recruitment Stage</th>
-                <th className="py-4 px-6 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="animate-pulse">
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 bg-slate-100 rounded-2xl" />
-                        <div className="space-y-1.5">
-                          <div className="h-3.5 bg-slate-100 rounded w-28" />
-                          <div className="h-2.5 bg-slate-50 rounded w-20" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6"><div className="h-3.5 bg-slate-100 rounded w-24" /></td>
-                    <td className="py-4 px-6"><div className="h-3.5 bg-slate-100 rounded w-32" /></td>
-                    <td className="py-4 px-6"><div className="h-5 bg-slate-100 rounded-full w-16" /></td>
-                    <td className="py-4 px-6"><div className="h-6 bg-slate-100 rounded-full w-24" /></td>
-                    <td className="py-4 px-6 text-right"><div className="h-4 bg-slate-100 rounded w-4 ml-auto" /></td>
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-600 border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                  <tr>
+                    <th className="px-5 py-3.5">Candidate</th>
+                    <th className="px-4 py-3.5">Applied for</th>
+                    <th className="px-4 py-3.5">Contact</th>
+                    <th className="px-4 py-3.5">Experience</th>
+                    <th className="px-4 py-3.5">Source</th>
+                    <th className="px-4 py-3.5">Stage</th>
+                    <th className="px-4 py-3.5 text-center w-20">Action</th>
                   </tr>
-                ))
-              ) : filteredCandidates.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-20">
-                    <Users size={32} className="mx-auto text-slate-300 mb-2 stroke-[1.5]" />
-                    <p className="font-bold text-slate-800 text-sm">Koi candidate nahi mila</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Naya candidate add karein ya status filter change karein.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                filteredCandidates.map((c) => {
-                  const candId = c._id || c.id;
-                  const currentStatus = String(c.status || "applied").toLowerCase();
-                  const badgeInfo = STATUS_CONFIG[currentStatus] || STATUS_CONFIG.applied;
-
-                  return (
-                    <tr
-                      key={candId}
-                      onClick={() => setSelectedCandidate(c)}
-                      className="hover:bg-indigo-50/40 cursor-pointer transition-colors group"
-                    >
-                      {/* Name & Initials */}
-                      <td className="py-4 px-6">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-2xl bg-indigo-50/80 text-indigo-600 flex items-center justify-center font-bold text-xs group-hover:scale-105 transition-transform">
-                            {c.name ? c.name.charAt(0).toUpperCase() : "C"}
-                          </div>
-                          <div>
-                            <span className="font-bold text-slate-900 block group-hover:text-indigo-600 transition-colors">
-                              {c.name || "Unnamed"}
-                            </span>
-                            <span className="text-[11px] text-slate-400">
-                              ID: {candId ? candId.slice(-6).toUpperCase() : "—"}
-                            </span>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {visible.map((c) => (
+                    <tr key={c._id} onClick={() => setViewing(c)} className="hover:bg-indigo-50/40 transition-colors cursor-pointer">
+                      <td className="px-5 py-3 align-middle">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {mark(c)}
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 text-sm truncate max-w-[180px]">{c.name}</p>
+                            <p className="text-[11px] text-slate-400">ID {String(c._id).slice(-6).toUpperCase()}</p>
                           </div>
                         </div>
                       </td>
-
-                      {/* Position */}
-                      <td className="py-4 px-6">
-                        <div className="flex items-center gap-1.5 font-semibold text-slate-800">
-                          <Briefcase size={13} className="text-slate-400" />
-                          <span>{c.jobPosition?.title || c.position || "General Applicant"}</span>
-                        </div>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap font-semibold text-slate-700">{c.jobPosition?.title || "—"}</td>
+                      <td className="px-4 py-3 align-middle">
+                        <p className="inline-flex items-center gap-1 text-[11px] truncate max-w-[200px]"><Mail size={11} className="text-slate-400 shrink-0" /> {c.email}</p>
+                        {c.phone && <p className="inline-flex items-center gap-1 text-[11px] text-slate-400 block"><Phone size={11} /> {c.phone}</p>}
                       </td>
-
-                      {/* Contact */}
-                      <td className="py-4 px-6">
-                        <div className="space-y-0.5">
-                          <p className="flex items-center gap-1 text-slate-600 font-mono text-[11px]">
-                            <Mail size={11} className="text-slate-400" /> {c.email || "—"}
-                          </p>
-                          {c.phone && (
-                            <p className="flex items-center gap-1 text-slate-500 font-mono text-[11px]">
-                              <Phone size={11} className="text-slate-400" /> {c.phone}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Source */}
-                      <td className="py-4 px-6">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 capitalize">
-                          {c.source || "Portal"}
-                        </span>
-                      </td>
-
-                      {/* Status Dropdown */}
-                      <td className="py-4 px-6" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={currentStatus}
-                          onChange={(e) => handleStatusChange(e, candId, e.target.value)}
-                          className={`pl-2.5 pr-6 py-1 border rounded-full text-[11px] font-bold capitalize appearance-none focus:outline-none cursor-pointer transition-all ${badgeInfo.bg}`}
-                        >
-                          {Object.keys(STATUS_CONFIG).map((st) => (
-                            <option key={st} value={st}>
-                              {STATUS_CONFIG[st].label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-
-                      {/* Arrow Action */}
-                      <td className="py-4 px-6 text-right">
-                        <span className="inline-flex p-1.5 rounded-xl text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition-all">
-                          <ChevronRight size={16} />
-                        </span>
-                      </td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap">{c.experience || "—"}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap capitalize">{(c.source || "other").replace("-", " ")}</td>
+                      <td className="px-4 py-3 align-middle whitespace-nowrap" onClick={(e) => e.stopPropagation()}>{picker(c)}</td>
+                      <td className="px-4 py-3 align-middle text-center" onClick={(e) => e.stopPropagation()}><RowMenu items={menuFor(c)} /></td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Candidate Dossier Side-Drawer on Row Click */}
-      {selectedCandidate && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex justify-end animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md h-full p-6 shadow-2xl overflow-y-auto flex flex-col justify-between animate-in slide-in-from-right duration-300 border-l border-slate-100">
-            <div className="space-y-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider">
-                    Candidate Profile
-                  </span>
-                  <h2 className="text-xl font-bold text-slate-900 mt-0.5">
-                    {selectedCandidate.name}
-                  </h2>
-                </div>
-                <button
-                  onClick={() => setSelectedCandidate(null)}
-                  className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-2xl transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* Status Badge & Position */}
-              <div className="flex items-center justify-between p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100">
-                <div className="flex items-center gap-2">
-                  <Briefcase size={16} className="text-indigo-600" />
-                  <span className="font-bold text-xs text-indigo-950">
-                    {selectedCandidate.jobPosition?.title || selectedCandidate.position || "General Applicant"}
-                  </span>
-                </div>
-                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border capitalize ${STATUS_CONFIG[selectedCandidate.status]?.bg || "bg-slate-100 text-slate-700"}`}>
-                  {selectedCandidate.status || "Applied"}
-                </span>
-              </div>
-
-              {/* Contact Information Cards */}
-              <div className="bg-slate-50/80 rounded-3xl p-5 space-y-3.5 border border-slate-100 text-xs">
-                <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
-                  <span className="text-slate-400 font-medium flex items-center gap-1.5">
-                    <Mail size={13} /> Email
-                  </span>
-                  <span className="font-bold text-slate-800 font-mono">
-                    {selectedCandidate.email || "—"}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
-                  <span className="text-slate-400 font-medium flex items-center gap-1.5">
-                    <Phone size={13} /> Contact Phone
-                  </span>
-                  <span className="font-bold text-slate-800 font-mono">
-                    {selectedCandidate.phone || "—"}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 border-b border-slate-200/60">
-                  <span className="text-slate-400 font-medium flex items-center gap-1.5">
-                    <Sparkles size={13} /> Acquisition Channel
-                  </span>
-                  <span className="font-bold text-slate-800 capitalize">
-                    {selectedCandidate.source || "Portal"}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-400 font-medium flex items-center gap-1.5">
-                    <Calendar size={13} /> Creation Timestamp
-                  </span>
-                  <span className="font-bold text-slate-800">
-                    {selectedCandidate.createdAt
-                      ? new Date(selectedCandidate.createdAt).toLocaleString()
-                      : "—"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Notes or Bio */}
-              <div>
-                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
-                  Interviewer & Sourcing Notes
-                </h4>
-                <p className="text-xs text-slate-600 bg-slate-50/50 p-4 rounded-2xl border border-slate-100 leading-relaxed">
-                  {selectedCandidate.notes ||
-                    "Koi notes ya feedback abhi add nahi kiya gaya hai. Interview ke baad remarks update karein."}
-                </p>
-              </div>
+      {/* add / edit */}
+      {modal && (
+        <Box title={modal.row ? "Edit candidate" : "Add candidate"} subtitle="Fill the details and attach the resume" onClose={() => setModal(null)} onSubmit={save} locked={saving} size="max-w-2xl" footer={<FormFooter onCancel={() => setModal(null)} busy={saving} label={modal.row ? "Save changes" : "Add candidate"} />}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
+              <Label>Full name</Label>
+              <input value={form.name ?? ""} maxLength={80} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Rahul Sharma" className={`${inputClass} ${fieldBorder(errors.name)}`} />
+              <FieldError>{errors.name}</FieldError>
             </div>
-
-            <div className="pt-6 border-t border-slate-100">
-              <Button
-                onClick={() => setSelectedCandidate(null)}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-2xl py-3 font-semibold text-xs"
-              >
-                Close Profile
-              </Button>
+            <div>
+              <Label>Email</Label>
+              <input type="email" value={form.email ?? ""} maxLength={120} onChange={(e) => set("email", e.target.value)} placeholder="candidate@email.com" className={`${inputClass} ${fieldBorder(errors.email)}`} />
+              <FieldError>{errors.email}</FieldError>
+            </div>
+            <div>
+              <Label>Phone</Label>
+              <input value={form.phone ?? ""} maxLength={20} onChange={(e) => set("phone", e.target.value)} placeholder="+91 98765 43210" className={`${inputClass} ${fieldBorder(errors.phone)}`} />
+              <FieldError>{errors.phone}</FieldError>
+            </div>
+            <div>
+              <Label>Applying for</Label>
+              <select value={form.jobPosition ?? ""} onChange={(e) => set("jobPosition", e.target.value)} className={`${inputClass} cursor-pointer ${fieldBorder(errors.jobPosition)}`}>
+                <option value="">Select position</option>
+                {positions.map((p) => <option key={p._id} value={p._id}>{p.title}{p.status !== "open" ? ` (${p.status})` : ""}</option>)}
+              </select>
+              <FieldError>{errors.jobPosition}</FieldError>
+            </div>
+            <div>
+              <Label>Source</Label>
+              <select value={form.source ?? ""} onChange={(e) => set("source", e.target.value)} className={`${cls} cursor-pointer`}>
+                {SOURCES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Experience</Label>
+              <input value={form.experience ?? ""} maxLength={60} onChange={(e) => set("experience", e.target.value)} placeholder="e.g. 3 years" className={cls} />
+            </div>
+            <div>
+              <Label>Current company</Label>
+              <input value={form.currentCompany ?? ""} maxLength={80} onChange={(e) => set("currentCompany", e.target.value)} className={cls} />
+            </div>
+            <div>
+              <Label>Expected CTC</Label>
+              <input value={form.expectedCtc ?? ""} maxLength={40} onChange={(e) => set("expectedCtc", e.target.value)} placeholder="e.g. 6 LPA" className={cls} />
+            </div>
+            <div>
+              <Label>Notice period</Label>
+              <input value={form.noticePeriod ?? ""} maxLength={40} onChange={(e) => set("noticePeriod", e.target.value)} placeholder="e.g. 30 days" className={cls} />
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Redesigned Add Candidate Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-100 space-y-6 animate-in zoom-in-95 duration-200">
-            {/* Modal Header */}
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                  <Users size={22} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">
-                    Add New Candidate
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Enter candidate details to track in the recruitment funnel
-                  </p>
-                </div>
+          <div>
+            <Label>Resume (PDF, DOC or DOCX, up to 5 MB)</Label>
+            <input ref={fileRef} type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ""; }} />
+            {form.file ? (
+              <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-3.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0"><FileText size={18} /></div>
+                <div className="min-w-0 flex-1"><p className="text-sm font-bold text-slate-800 truncate">{form.file.name}</p><p className="text-[11px] text-slate-500">{size(form.file.size)} • ready to upload</p></div>
+                <button type="button" onClick={() => set("file", null)} className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer" aria-label="Remove file"><X size={16} /></button>
               </div>
-              <button
-                type="button"
-                onClick={() => setModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-2xl transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-slate-700">Full Name *</label>
-                <input
-                  required
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Rahul Sharma"
-                  className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                />
+            ) : (
+              <div role="button" tabIndex={0} onClick={() => fileRef.current?.click()} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); pickFile(e.dataTransfer.files?.[0]); }}
+                className={`flex flex-col items-center gap-1.5 text-center px-4 py-7 rounded-2xl border-2 border-dashed cursor-pointer transition ${errors.file ? "border-rose-300 bg-rose-50/40" : "border-slate-300 bg-slate-50/60 hover:border-indigo-400 hover:bg-indigo-50/40"}`}>
+                <UploadCloud size={24} className="text-indigo-600" />
+                <p className="text-sm font-bold text-slate-800"><span className="hidden sm:inline">Drag and drop, or </span><span className="text-indigo-600">tap to browse</span></p>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700">Email Address *</label>
-                  <input
-                    type="email"
-                    required
-                    value={form.email}
-                    onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    placeholder="candidate@email.com"
-                    className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700">Phone Number</label>
-                  <input
-                    value={form.phone}
-                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                    placeholder="+91 98765 43210"
-                    className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-700">Applying For *</label>
-                  <select
-                    required
-                    value={form.jobPosition}
-                    onChange={(e) => setForm({ ...form, jobPosition: e.target.value })}
-                    className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
-                  >
-                    <option value="">-- Select Position --</option>
-                    {positions.map((p) => (
-                      <option key={p._id || p.id} value={p._id || p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-700">Source</label>
-                  <select
-                    value={form.source}
-                    onChange={(e) => setForm({ ...form, source: e.target.value })}
-                    className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all cursor-pointer"
-                  >
-                    <option value="job-portal">Job Portal</option>
-                    <option value="linkedin">LinkedIn</option>
-                    <option value="referral">Referral</option>
-                    <option value="walk-in">Walk-in</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-700">Initial Remarks / Notes</label>
-                <textarea
-                  rows={2}
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  placeholder="e.g. 3 years relevant React experience..."
-                  className="mt-1.5 w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center gap-3">
-                <Button
-                  type="submit"
-                  loading={submitting}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl py-3 font-semibold text-xs shadow-md shadow-indigo-100 transition-all active:scale-95"
-                >
-                  Save Candidate
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-2xl transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+            )}
+            {modal.row?.hasResume && !form.file && <p className="text-[11px] text-emerald-700 font-semibold mt-2">Current resume: {modal.row.resumeName}. It stays unless you choose a new one.</p>}
+            <FieldError>{errors.file}</FieldError>
           </div>
-        </div>
+
+          <div>
+            <Label>Notes</Label>
+            <textarea rows={3} value={form.notes ?? ""} maxLength={1000} onChange={(e) => set("notes", e.target.value)} placeholder="e.g. Strong in React, available immediately" className={`${cls} resize-none`} />
+          </div>
+        </Box>
       )}
+
+      {viewing && (
+        <CandidateDetail c={viewing} onClose={() => setViewing(null)}>
+          <button type="button" onClick={() => { const c = viewing; setViewing(null); openModal(c); }} className={primaryBtn}><Pencil size={14} /> Edit</button>
+        </CandidateDetail>
+      )}
+
+      {rejecting && <ReasonModal title="Reject candidate" subtitle={rejecting.name} confirm="Reject" onClose={() => setRejecting(null)} onSubmit={(note) => setStage(rejecting, "rejected", note)} />}
+      {ask && <ConfirmDialog title={ask.title} text={ask.text} label="Delete" danger onConfirm={ask.run} onClose={() => setAsk(null)} />}
     </div>
   );
 }
+

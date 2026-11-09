@@ -1,63 +1,82 @@
+
 "use client";
-import { useEffect, useState } from "react";
-import { Loader2, Users, UserCheck } from "lucide-react";
+
+import { useCallback, useEffect, useState } from "react";
+import { BarChart3, Briefcase, CalendarClock, FileCheck2, Users } from "lucide-react";
 import api from "@/lib/api";
-import { toast } from "react-toastify";
+import { ErrorBanner, StatCard } from "@/components/payroll/ui";
+import { ListSkeleton, PageHeader } from "@/components/payroll/common";
+import { DOT, STAGE, errMsg } from "@/components/recruitment/rui";
 
 export default function RecruitmentReportsPage() {
-  const [report, setReport] = useState(null);
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    api.get("/reports/recruitment")
-      .then(({ data }) => setReport(data))
-      .catch((err) => toast.error(err.response?.data?.message || "Failed to load recruitment report."))
-      .finally(() => setLoading(false));
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+    setError("");
+    try {
+      const res = await api.get("/recruitment/summary");
+      setData(res.data);
+    } catch (err) {
+      setError(await errMsg(err, "Unable to load the recruitment report."));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  if (loading) return <div className="py-16 text-center"><Loader2 className="animate-spin mx-auto text-indigo-600" /></div>;
+  useEffect(() => { load(); }, [load]);
+
+  const c = data?.candidates || {};
+  const total = c.total || 0;
+  const pct = (n) => (total ? Math.round(((n || 0) / total) * 100) : 0);
 
   return (
-    <div className="space-y-6 max-w-[1400px] mx-auto pb-12">
-      <div>
-        <h1 className="text-xl font-bold text-slate-900">Recruitment Reports</h1>
-        <p className="text-xs text-slate-500 mt-0.5">Summary of the active hiring funnel</p>
-      </div>
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={BarChart3} title="Recruitment Reports" subtitle="A summary of the hiring funnel." onRefresh={() => load({ silent: true })} busy={loading || refreshing} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center gap-4 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 hover:border-indigo-300 cursor-pointer">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><Users size={20} /></div>
-          <div>
-            <p className="text-xs text-slate-400 uppercase font-semibold">Total Candidates</p>
-            <h3 className="text-2xl font-bold text-slate-900">{report?.totalCandidates || 0}</h3>
-          </div>
-        </div>
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center gap-4 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 hover:border-emerald-300 cursor-pointer">
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><UserCheck size={20} /></div>
-          <div>
-            <p className="text-xs text-slate-400 uppercase font-semibold">Hired</p>
-            <h3 className="text-2xl font-bold text-slate-900">{report?.hired || 0}</h3>
-          </div>
-        </div>
-      </div>
+      <ErrorBanner message={error} onRetry={() => load()} />
 
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs">
-        <h3 className="font-semibold text-slate-800 mb-4 text-sm">Status Breakdown</h3>
-        <div className="space-y-2.5">
-          {Object.entries(report?.byStatus || {}).map(([status, count]) => (
-            <div
-              key={status}
-              className="flex items-center justify-between text-sm p-3 rounded-xl bg-slate-50/60 border border-slate-100 hover:bg-indigo-50/40 hover:border-indigo-200 transition-all duration-200"
-            >
-              <span className="capitalize font-medium text-slate-600">{status}</span>
-              <span className="font-bold text-slate-800">{count}</span>
+      {loading ? (
+        <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm overflow-hidden"><ListSkeleton /></div>
+      ) : data && (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <StatCard icon={Briefcase} tone="indigo" label="Open positions" value={data.openPositions} />
+            <StatCard icon={Users} tone="emerald" label="Total candidates" value={total} />
+            <StatCard icon={CalendarClock} tone="violet" label="Interviews this week" value={data.upcomingInterviews} />
+            <StatCard icon={FileCheck2} tone="indigo" label="Offers awaiting reply" value={data.pendingOffers} />
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200/70 shadow-sm p-4 sm:p-6">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-sm font-bold text-slate-900">Candidates by stage</h2>
+              <span className="text-xs font-semibold text-slate-400">Hired: {pct(c.hired)}% • Rejected: {pct(c.rejected)}%</span>
             </div>
-          ))}
-          {(!report?.byStatus || Object.keys(report.byStatus).length === 0) && (
-            <p className="text-xs text-slate-400 italic py-2 text-center">No status metrics available.</p>
-          )}
-        </div>
-      </div>
+            {total === 0 ? (
+              <p className="py-8 text-center text-xs font-semibold text-slate-400">No candidates yet.</p>
+            ) : (
+              <ul className="space-y-3">
+                {Object.entries(STAGE).map(([k, s]) => (
+                  <li key={k} className="group">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="inline-flex items-center gap-2 font-bold text-slate-700"><span className={`w-2 h-2 rounded-full ${DOT[s.tone]}`} />{s.label}</span>
+                      <span className="font-bold text-slate-800">{c[k] || 0} <span className="text-slate-400 font-semibold">({pct(c[k])}%)</span></span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                      <div className={`h-full rounded-full ${DOT[s.tone]} transition-all duration-700 group-hover:opacity-80`} style={{ width: `${pct(c[k])}%` }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

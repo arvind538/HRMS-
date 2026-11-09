@@ -1,169 +1,102 @@
-// src/app/(dashboard)/performance/reviews/page.jsx
 "use client";
-import { useEffect, useState, useCallback } from "react";
-import { Loader2, Star, TrendingUp, Target, Sparkles, CalendarClock, FileX, RefreshCw } from "lucide-react";
-import api from "@/lib/api";
+
+import { useMemo, useState } from "react";
+import { Eye, FileText, RotateCcw, Star } from "lucide-react";
 import { toast } from "react-toastify";
+import api from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { ConfirmDialog, ErrorBanner, dateText } from "@/components/payroll/ui";
+import { PageHeader, primaryBtn } from "@/components/payroll/common";
+import { Chip, errMsg } from "@/components/recruitment/rui";
+import AppraisalDetail from "@/components/performance/AppraisalDetail";
+import { APPR_ST, DEC_ST, DataPanel, Person, Stars, Stats, StChip, Toolbar, roleOf, selectCls, tabsOf, useApi } from "@/components/performance/pui";
+import { CheckCircle2, ClipboardCheck } from "lucide-react";
 
 export default function PerformanceReviewsPage() {
-  const [appraisals, setAppraisals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const staff = ["admin", "hr"].includes(roleOf(user));
+  const { data, loading, refreshing, error, load } = useApi("/performance/appraisals");
+  const rows = data || [];
 
-  const fetchReviews = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await api.get("/performance/appraisals");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState("completed");
+  const [period, setPeriod] = useState("ALL");
+  const [viewing, setViewing] = useState(null);
+  const [ask, setAsk] = useState(null);
 
-      let list = Array.isArray(response.data)
-        ? response.data
-        : Array.isArray(response.data?.data)
-          ? response.data.data
-          : Array.isArray(response.data?.appraisals)
-            ? response.data.appraisals
-            : [];
+  const periods = useMemo(() => [...new Set(rows.map((a) => a.reviewPeriod))].sort().reverse(), [rows]);
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((a) => (tab === "all" || a.status === tab) && (period === "ALL" || a.reviewPeriod === period) && (!q || `${a.employee?.name || ""} ${a.employee?.employeeId || ""}`.toLowerCase().includes(q)));
+  }, [rows, tab, period, search]);
 
-      setAppraisals(list);
-    } catch (error) {
-      console.error("Error loading reviews:", error);
-      toast.error("Failed to load performance reviews. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const rated = rows.filter((a) => a.rating);
+  const avg = rated.length ? (rated.reduce((s, a) => s + a.rating, 0) / rated.length).toFixed(1) : "—";
 
-  useEffect(() => {
-    fetchReviews();
-  }, [fetchReviews]);
+  const reopen = (a) => setAsk({
+    title: "Reopen this appraisal?", text: `${a.employee?.name} • ${a.reviewPeriod}. It goes back to the manager for changes.`, label: "Reopen",
+    run: async () => {
+      try {
+        await api.put(`/performance/appraisals/${a._id}/reopen`);
+        toast.success("Appraisal reopened.");
+        setViewing(null);
+        await load({ silent: true });
+      } catch (err) {
+        toast.error(await errMsg(err, "Unable to reopen."));
+      }
+    },
+  });
 
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3 font-sans">
-        <Loader2 className="animate-spin text-indigo-600" size={32} />
-        <p className="text-sm text-slate-500 font-medium animate-pulse">Loading performance reviews...</p>
-      </div>
-    );
-  }
+  const menu = (a) => [
+    { label: "View review", icon: Eye, run: () => setViewing(a) },
+    { label: "Reopen", icon: RotateCcw, run: () => reopen(a), hidden: !staff || a.status !== "completed" },
+  ];
+  const marks = (a) => (
+    <div className="flex flex-wrap gap-1.5">
+      {a.promotionStatus && a.promotionStatus !== "none" && <Chip tone={DEC_ST[a.promotionStatus].tone}>Promotion: {DEC_ST[a.promotionStatus].label}</Chip>}
+      {a.incrementStatus && a.incrementStatus !== "none" && <Chip tone={DEC_ST[a.incrementStatus].tone}>Increment: {DEC_ST[a.incrementStatus].label}</Chip>}
+    </div>
+  );
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 sm:p-3 lg:p-4 font-sans">
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all hover:shadow-md">
-        <div>
-          <h1 className="text-2xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-            Performance Reviews
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Summary of all performance appraisals and detailed feedback.
-          </p>
-        </div>
-        <button
-          onClick={fetchReviews}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 text-sm font-semibold rounded-xl border border-slate-200 hover:border-indigo-200 transition-all shadow-sm cursor-pointer active:scale-95 w-full sm:w-auto"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin text-indigo-600" : ""} />
-          <span>Refresh List</span>
-        </button>
-      </div>
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 space-y-4 antialiased pb-16">
+      <PageHeader icon={FileText} title="Performance Reviews" subtitle="All appraisals with their feedback." onRefresh={() => load({ silent: true })} busy={loading || refreshing} />
 
-      {/* Empty State */}
-      {appraisals.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 px-4 text-center bg-white rounded-3xl border border-dashed border-slate-300 shadow-sm hover:border-indigo-300 hover:bg-indigo-50/30 transition-colors duration-300">
-          <div className="h-16 w-16 bg-slate-50 rounded-2xl flex items-center justify-center mb-4 border border-slate-100 shadow-sm">
-            <FileX className="text-slate-400" size={32} />
+      {!loading && !error && <Stats items={[["Reviews", rows.length, FileText, "indigo"], ["Completed", rows.filter((a) => a.status === "completed").length, CheckCircle2, "emerald"], ["Average rating", avg, Star, "violet"]]} />}
+
+      <Toolbar search={search} onSearch={setSearch} placeholder="Search employee" tabs={tabsOf(rows, APPR_ST, "status")} tab={tab} onTab={setTab}>
+        {periods.length > 1 && (
+          <select value={period} onChange={(e) => setPeriod(e.target.value)} className={selectCls}>
+            <option value="ALL">All periods</option>
+            {periods.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
+      </Toolbar>
+      <ErrorBanner message={error} onRetry={() => load()} />
+
+      <DataPanel
+        loading={loading} rows={visible} icon={ClipboardCheck}
+        empty={["No reviews here", "Reviews appear once appraisal cycles start."]}
+        onOpen={setViewing} menu={menu}
+        cols={[
+          { h: "Employee", cell: (a) => <Person p={a.employee} /> },
+          { h: "Period", cell: (a) => <span className="font-mono font-semibold text-slate-700">{a.reviewPeriod}</span> },
+          { h: "Rating", cell: (a) => (a.rating ? <span className="inline-flex items-center gap-2"><Stars value={a.rating} /><span className="text-[11px] font-semibold text-slate-500">{a.ratingLabel}</span></span> : <span className="text-slate-300">—</span>) },
+          { h: "Recommendations", cell: (a) => marks(a) },
+          { h: "Completed", cell: (a) => (a.completedAt ? dateText(a.completedAt) : "—") },
+          { h: "Status", cell: (a) => <StChip map={APPR_ST} v={a.status} /> },
+        ]}
+        card={(a) => (
+          <div className="space-y-2.5">
+            <Person p={a.employee} sub={a.reviewPeriod} />
+            <div className="flex flex-wrap items-center gap-2"><StChip map={APPR_ST} v={a.status} />{a.rating ? <Stars value={a.rating} /> : null}</div>
+            {marks(a)}
           </div>
-          <p className="text-lg text-slate-700 font-semibold">No reviews found</p>
-          <p className="text-sm text-slate-500 mt-1.5 max-w-sm">Once appraisal cycles are created, details will appear here.</p>
-        </div>
-      ) : (
-        /* Reviews List with Hover Effects */
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {appraisals.map((a) => (
-            <div
-              key={a._id || a.id}
-              className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-xl hover:border-indigo-300 hover:-translate-y-1.5 transition-all duration-300 flex flex-col h-full group relative overflow-hidden"
-            >
-              {/* Subtle hover gradient background */}
-              <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+        )}
+      />
 
-              {/* Card Header */}
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6 relative z-10">
-                <div className="flex items-center gap-4">
-                  {/* Avatar with hover animation */}
-                  <div className="h-12 w-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-lg font-bold text-indigo-600 shadow-sm group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 flex-shrink-0">
-                    {a.employee?.name?.charAt(0) || a.name?.charAt(0) || "U"}
-                  </div>
-                  <div>
-                    <p className="font-bold text-slate-900 text-lg group-hover:text-indigo-600 transition-colors duration-300">
-                      {a.employee?.name || a.name || "Unknown Employee"}
-                    </p>
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 mt-1">
-                      <CalendarClock size={14} className="text-slate-400 group-hover:text-indigo-400 transition-colors" />
-                      Review Period: {a.reviewPeriod || a.period || "N/A"}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Star Rating & Status Badge */}
-                <div className="flex flex-col items-end gap-2">
-                  <div className="flex items-center bg-slate-50 px-3 py-1.5 rounded-2xl border border-slate-200/80 shadow-sm group-hover:border-amber-200 group-hover:bg-amber-50/30 transition-colors">
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <Star
-                          key={s}
-                          size={14}
-                          className={`${s <= (a.rating || a.score || 0)
-                            ? "fill-amber-400 text-amber-400"
-                            : "fill-slate-200 text-slate-200"
-                            } transition-colors`}
-                        />
-                      ))}
-                    </div>
-                    <span className="ml-2 text-xs font-bold text-slate-800">
-                      {Number(a.rating || a.score || 0).toFixed(1)}/5
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                    {a.status || "pending"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Feedback Sections */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm flex-grow relative z-10">
-                {/* Strengths */}
-                <div className="bg-emerald-50/50 border border-emerald-100/80 p-4 rounded-2xl flex flex-col transition-all duration-300 hover:bg-emerald-50 hover:shadow-sm hover:border-emerald-200">
-                  <p className="flex items-center gap-1.5 font-bold text-emerald-700 mb-2 text-xs uppercase tracking-wider">
-                    <TrendingUp size={14} /> Strengths
-                  </p>
-                  <p className="text-slate-700 leading-relaxed text-sm">
-                    {a.strengths || "No strengths documented yet."}
-                  </p>
-                </div>
-
-                {/* Areas of Improvement */}
-                <div className="bg-amber-50/50 border border-amber-100/80 p-4 rounded-2xl flex flex-col transition-all duration-300 hover:bg-amber-50 hover:shadow-sm hover:border-amber-200">
-                  <p className="flex items-center gap-1.5 font-bold text-amber-700 mb-2 text-xs uppercase tracking-wider">
-                    <Target size={14} /> Improvements
-                  </p>
-                  <p className="text-slate-700 leading-relaxed text-sm">
-                    {a.areasOfImprovement || a.improvements || "No improvements documented yet."}
-                  </p>
-                </div>
-              </div>
-
-              {/* Promotion Recommended Badge */}
-              {a.promotionRecommended && (
-                <div className="mt-5 pt-4 border-t border-slate-100 relative z-10">
-                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-700 border border-indigo-100 rounded-xl text-sm font-semibold shadow-sm hover:shadow-md transition-shadow">
-                    <Sparkles size={16} className="text-indigo-500 animate-pulse" />
-                    Highly Recommended for Promotion
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {viewing && <AppraisalDetail a={viewing} onClose={() => setViewing(null)} />}
+      {ask && <ConfirmDialog title={ask.title} text={ask.text} label={ask.label} onConfirm={ask.run} onClose={() => setAsk(null)} />}
     </div>
   );
 }

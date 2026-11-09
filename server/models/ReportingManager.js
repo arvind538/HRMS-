@@ -3,6 +3,7 @@ const reportingManagerSchema = new mongoose.Schema(
     {
         name: { type: String, required: true, trim: true },
         email: { type: String, trim: true },
+        employee: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
         designation: { type: String, trim: true },
         department: { type: String, trim: true },
         teamsManaged: { type: Number, default: 0 },

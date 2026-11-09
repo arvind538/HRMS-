@@ -6,7 +6,7 @@ const ctrl = require("../controllers/trainingController");
 
 // Training Routes
 router.get("/", protect, ctrl.getTrainings);
-router.get("/stats", protect, ctrl.getTrainingStats); // 👈 NEW — dashboard ke liye
+router.get("/stats", protect, ctrl.getTrainingStats); //  NEW — dashboard ke liye
 router.post("/", protect, authorize("admin", "hr"), ctrl.createTraining);
 router.put("/:id", protect, authorize("admin", "hr"), ctrl.updateTraining);
 router.put("/:id/enroll", protect, ctrl.enrollEmployee);

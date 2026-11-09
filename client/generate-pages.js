@@ -55,7 +55,7 @@ export default function ${componentName}() {
 
   fs.writeFileSync(pageFilePath, fileContent, "utf-8");
   created++;
-  console.log(`✅ Created: ${href}`);
+  console.log(`Created: ${href}`);
 }
 
 console.log("\n--- Summary ---");

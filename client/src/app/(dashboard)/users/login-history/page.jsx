@@ -1,15 +1,32 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { Loader2, LogIn, Search, ShieldCheck, Globe, Clock, UserCheck } from "lucide-react";
+import { useEffect, useState, useMemo, useRef } from "react";
+import {
+  Loader2,
+  LogIn,
+  Search,
+  ShieldCheck,
+  Globe,
+  Clock,
+  MoreVertical,
+  Trash2,
+} from "lucide-react";
 import api from "@/lib/api";
 import { toast } from "react-toastify";
 import Table from "@/components/ui/Table";
+
+const MENU_WIDTH = 176; // w-44
+const MENU_HEIGHT = 52; // approx height of one item + padding
 
 export default function LoginHistoryPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Three-dot menu state
+  const [menu, setMenu] = useState(null); // { id, top, left }
+  const [deletingId, setDeletingId] = useState(null);
+  const menuRef = useRef(null);
 
   useEffect(() => {
     api.get("/users/login-history")
@@ -17,6 +34,58 @@ export default function LoginHistoryPage() {
       .catch((err) => toast.error(err.response?.data?.message || "Failed to retrieve login activity history."))
       .finally(() => setLoading(false));
   }, []);
+
+  /* Close the three-dot menu on outside click, Escape, scroll or resize */
+  useEffect(() => {
+    if (!menu) return;
+    const onMouseDown = (e) => {
+      if (menuRef.current?.contains(e.target)) return;
+      if (e.target.closest?.("[data-menu-btn]")) return; // toggle handled by the button
+      setMenu(null);
+    };
+    const onKey = (e) => e.key === "Escape" && setMenu(null);
+    const close = () => setMenu(null);
+
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+
+  const openMenu = (e, id) => {
+    e.stopPropagation();
+    if (menu?.id === id) return setMenu(null);
+
+    const r = e.currentTarget.getBoundingClientRect();
+    const openUp = r.bottom + MENU_HEIGHT + 8 > window.innerHeight;
+    setMenu({
+      id,
+      top: openUp ? r.top - MENU_HEIGHT - 6 : r.bottom + 6,
+      left: Math.max(8, r.right - MENU_WIDTH),
+    });
+  };
+
+  const handleDelete = async (id) => {
+    setMenu(null);
+    if (!window.confirm("Delete this login record? This action cannot be undone.")) return;
+
+    setDeletingId(id);
+    try {
+      await api.delete(`/users/login-history/${id}`);
+      setHistory((prev) => prev.filter((h) => h._id !== id));
+      toast.success("Login record deleted.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to delete login record.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // Filter login logs based on search query (User name, email, or IP address)
   const filteredHistory = useMemo(() => {
@@ -93,10 +162,40 @@ export default function LoginHistoryPage() {
         </span>
       ),
     },
+    {
+      key: "actions",
+      label: "Actions",
+      render: (r) => {
+        const isOpen = menu?.id === r._id;
+        const busy = deletingId === r._id;
+        return (
+          <div className="flex justify-end pr-2">
+            <button
+              type="button"
+              data-menu-btn
+              disabled={busy}
+              onClick={(e) => openMenu(e, r._id)}
+              aria-haspopup="menu"
+              aria-expanded={isOpen}
+              aria-label="More actions"
+              title="More actions"
+              className={`p-2 rounded-lg transition-all duration-150 active:scale-95 disabled:cursor-not-allowed ${isOpen
+                ? "bg-slate-100 text-slate-800"
+                : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                }`}
+            >
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <MoreVertical size={16} />}
+            </button>
+          </div>
+        );
+      },
+    },
   ];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-3 lg:px-3 py-3">
+      <style>{`@keyframes menuIn { from { opacity: 0; transform: translateY(-4px) scale(.97); } to { opacity: 1; transform: none; } }`}</style>
+
       {/* Header Banner & Summary Stats */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="space-y-1">
@@ -168,6 +267,31 @@ export default function LoginHistoryPage() {
           <Table columns={columns} data={filteredHistory} />
         )}
       </div>
+
+      {/* Three-dot menu (fixed, so the table never clips it) */}
+      {menu && (
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{
+            top: menu.top,
+            left: menu.left,
+            width: MENU_WIDTH,
+            animation: "menuIn 150ms ease-out",
+          }}
+          className="fixed z-[120] origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => handleDelete(menu.id)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 active:bg-rose-100 transition-colors duration-150"
+          >
+            <Trash2 size={15} />
+            Delete record
+          </button>
+        </div>
+      )}
     </div>
   );
 }
